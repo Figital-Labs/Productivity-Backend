@@ -14,9 +14,9 @@ tags: [meta, state, coordination]
 
 ## Active Sprint
 
-**Sprint 1 — Alignment docs** — `Status: complete`
+**Sprint 2 — Repo setup & dev tooling** — `Status: in-progress`, started 2026-05-22 by claude-session. Collaborative; syncing with user task-by-task.
 
-Next: **Sprint 2 — Repo setup & dev tooling** (`Status: not started`, waits on user kickoff). This sprint is done **together with the user** — collaborative, not autonomous.
+Previous: Sprint 1 — Alignment docs (complete).
 
 See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 
@@ -27,7 +27,7 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 | Sprint | Status | Owner | Started | Completed | File |
 |---|---|---|---|---|---|
 | 01 — Alignment docs | ✅ complete | Claude session | 2026-05-21 | 2026-05-22 | [sprints/01-alignment-docs.md](./sprints/01-alignment-docs.md) |
-| 02 — Repo setup & dev tooling | ⏸ not started | (unassigned) | — | — | [sprints/02-repo-setup.md](./sprints/02-repo-setup.md) |
+| 02 — Repo setup & dev tooling | 🚧 in-progress | claude-session | 2026-05-22 | — | [sprints/02-repo-setup.md](./sprints/02-repo-setup.md) |
 | 03 — Foundation infra | ⏸ not started | — | — | — | *(file to be created when sprint approaches)* |
 | 04 — Schema + Pure CRUD | ⏸ not started | — | — | — | *(TBD)* |
 | 05 — Voice intent + /voice/process | ⏸ not started | — | — | — | *(TBD)* |
@@ -46,7 +46,7 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 | Resource | Owner | Started | Note |
 |---|---|---|---|
-| *(none)* | — | — | — |
+| Sprint 2 (repo setup) | claude-session | 2026-05-22 | Working through tasks sequentially with user sync at each. |
 
 **How to claim a lock:** add a row with `Resource: <file or sprint name>`, `Owner: <session/agent identifier>`, `Started: <ISO timestamp>`, `Note: <one-line context>`. Remove the row when you're done.
 
