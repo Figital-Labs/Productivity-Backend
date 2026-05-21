@@ -60,7 +60,9 @@ Refer to [ARCHITECTURE.md](./ARCHITECTURE.md) for the folder layout. Key princip
 
 ## Commit Conventions
 
-We follow **Conventional Commits**:
+**Important: the agent never runs `git commit`.** Commits are the user's responsibility. The agent writes code; the user reviews, stages, and commits. If you (agent) finish a chunk of work, leave the working tree dirty and the user will commit. Do not stage, do not commit, do not push under any circumstance.
+
+When you propose a commit message (in chat, not via `git commit`), still follow **Conventional Commits**:
 
 ```
 <type>(<scope>): <short description>
