@@ -10,6 +10,7 @@ export default tseslint.config(
       "src/generated/",
       "node_modules/",
       "scripts/",
+      "prisma/seed.ts",
       "prisma.config.ts",
       "eslint.config.js",
     ],

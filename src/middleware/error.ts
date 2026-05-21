@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import { ZodError, treeifyError } from "zod";
 
 import { AppError } from "../lib/errors.js";
 
@@ -21,6 +22,17 @@ export function errorMiddleware(
         code: err.code,
         message: err.message,
         ...(err.details !== undefined ? { details: err.details } : {}),
+      },
+    });
+    return;
+  }
+
+  if (err instanceof ZodError) {
+    res.status(400).json({
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "Request validation failed",
+        details: treeifyError(err) as Record<string, unknown>,
       },
     });
     return;

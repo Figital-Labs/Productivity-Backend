@@ -4,6 +4,7 @@ import type { Express } from "express";
 import { stubAuth } from "./middleware/auth.js";
 import { errorMiddleware } from "./middleware/error.js";
 import { healthRouter } from "./routes/health.routes.js";
+import { v1Router } from "./routes/v1.js";
 
 /**
  * Composes the Express app: middleware, routes, error handler.
@@ -23,7 +24,8 @@ export function createApp(): Express {
   // Health endpoints (unversioned).
   app.use(healthRouter);
 
-  // Future: app.use("/api/v1", apiRouter);
+  // Versioned API.
+  app.use("/api/v1", v1Router);
 
   // Error handler last.
   app.use(errorMiddleware);
