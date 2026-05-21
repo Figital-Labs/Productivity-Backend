@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express, { type Request, type Response } from "express";
-import  prisma  from "./lib/prisma.js";
+
+import prisma from "./lib/prisma.js";
 
 const app = express();
 app.use(express.json());
@@ -16,11 +17,11 @@ async function main(): Promise<void> {
   await prisma.$connect();
 
   app.listen(port, () => {
-    console.log(`Server listening on http://localhost:${port}`);
+    console.log(`Server listening on http://localhost:${port.toString()}`);
   });
 }
 
-main().catch(async (error) => {
+main().catch(async (error: unknown) => {
   console.error("Failed to start server:", error);
   await prisma.$disconnect();
   process.exit(1);

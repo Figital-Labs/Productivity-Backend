@@ -14,7 +14,9 @@ tags: [meta, state, coordination]
 
 ## Active Sprint
 
-**Sprint 2 — Repo setup & dev tooling** — `Status: in-progress`, started 2026-05-22 by claude-session. Collaborative; syncing with user task-by-task.
+**Sprint 2 — Repo setup & dev tooling** — `Status: complete (awaiting user commit)`. All tasks done. Husky + lint-staged added on user request as bonus.
+
+Next: **Sprint 3 — Foundation infra** (`Status: not started`). Sprint 3 detail file will be created when we approach it.
 
 Previous: Sprint 1 — Alignment docs (complete).
 
@@ -27,7 +29,7 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 | Sprint | Status | Owner | Started | Completed | File |
 |---|---|---|---|---|---|
 | 01 — Alignment docs | ✅ complete | Claude session | 2026-05-21 | 2026-05-22 | [sprints/01-alignment-docs.md](./sprints/01-alignment-docs.md) |
-| 02 — Repo setup & dev tooling | 🚧 in-progress | claude-session | 2026-05-22 | — | [sprints/02-repo-setup.md](./sprints/02-repo-setup.md) |
+| 02 — Repo setup & dev tooling | ✅ complete | claude-session | 2026-05-22 | 2026-05-22 | [sprints/02-repo-setup.md](./sprints/02-repo-setup.md) |
 | 03 — Foundation infra | ⏸ not started | — | — | — | *(file to be created when sprint approaches)* |
 | 04 — Schema + Pure CRUD | ⏸ not started | — | — | — | *(TBD)* |
 | 05 — Voice intent + /voice/process | ⏸ not started | — | — | — | *(TBD)* |
@@ -46,7 +48,7 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 | Resource | Owner | Started | Note |
 |---|---|---|---|
-| Sprint 2 (repo setup) | claude-session | 2026-05-22 | Working through tasks sequentially with user sync at each. |
+| *(none)* | — | — | — |
 
 **How to claim a lock:** add a row with `Resource: <file or sprint name>`, `Owner: <session/agent identifier>`, `Started: <ISO timestamp>`, `Note: <one-line context>`. Remove the row when you're done.
 
@@ -82,6 +84,9 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 - Task 2.2 done: SA credentials moved from a `secrets/` JSON file → inline `GOOGLE_SERVICE_ACCOUNT_JSON` env var (env-only approach per user preference; better for PaaS portability).
 - Task 2.3 done: `scripts/vertex-hello.ts` confirms Vertex AI reachable; service account works; `gemini-2.5-flash` responds. SDK chosen: `@google/genai` v2.5.0 (the older `@google-cloud/vertexai` is deprecated as of June 2025, removal June 2026).
 - Working-style rule added: **agent never runs `git commit`** (user owns commits). Reflected in CONVENTIONS.md.
+- Task 2.4 done: ESLint 9 flat config with typescript-eslint (strict-type-checked + stylistic-type-checked) + eslint-plugin-import-x; Prettier with project conventions; npm scripts `lint`, `lint:fix`, `format`, `format:check`, `typecheck`. 5 pre-existing lint errors found and fixed (`port.toString()`, `error: unknown` in promise catch, `??=` in prisma singleton).
+- Bonus: husky + lint-staged added per user request. `.husky/pre-commit` runs `npx lint-staged`, which runs `eslint --fix` + `prettier --write` only on staged files. Verified working via simulated diff.
+- Sprint 2 complete. Awaiting user commit of: Task 2.4 changes (ESLint/Prettier configs, lint fixes) + husky/lint-staged setup.
 
 ---
 
