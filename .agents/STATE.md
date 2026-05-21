@@ -14,11 +14,11 @@ tags: [meta, state, coordination]
 
 ## Active Sprint
 
-**Sprint 2 — Repo setup & dev tooling** — `Status: complete (awaiting user commit)`. All tasks done. Husky + lint-staged added on user request as bonus.
+**Sprint 3 — Foundation infra** — `Status: complete (awaiting user commit)`. All 8 tasks done. Smoke tests passed.
 
-Next: **Sprint 3 — Foundation infra** (`Status: not started`). Sprint 3 detail file will be created when we approach it.
+Next: **Sprint 4 — Schema + Pure CRUD** (`Status: not started`). Sprint 4 detail file will be created when we approach it.
 
-Previous: Sprint 1 — Alignment docs (complete).
+Previous: Sprint 2 — Repo setup & dev tooling (complete).
 
 See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 
@@ -30,7 +30,7 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 |---|---|---|---|---|---|
 | 01 — Alignment docs | ✅ complete | Claude session | 2026-05-21 | 2026-05-22 | [sprints/01-alignment-docs.md](./sprints/01-alignment-docs.md) |
 | 02 — Repo setup & dev tooling | ✅ complete | claude-session | 2026-05-22 | 2026-05-22 | [sprints/02-repo-setup.md](./sprints/02-repo-setup.md) |
-| 03 — Foundation infra | ⏸ not started | — | — | — | *(file to be created when sprint approaches)* |
+| 03 — Foundation infra | ✅ complete | claude-session | 2026-05-22 | 2026-05-22 | [sprints/03-foundation.md](./sprints/03-foundation.md) |
 | 04 — Schema + Pure CRUD | ⏸ not started | — | — | — | *(TBD)* |
 | 05 — Voice intent + /voice/process | ⏸ not started | — | — | — | *(TBD)* |
 | 06 — Image processing + media | ⏸ not started | — | — | — | *(TBD)* |
@@ -87,6 +87,7 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 - Task 2.4 done: ESLint 9 flat config with typescript-eslint (strict-type-checked + stylistic-type-checked) + eslint-plugin-import-x; Prettier with project conventions; npm scripts `lint`, `lint:fix`, `format`, `format:check`, `typecheck`. 5 pre-existing lint errors found and fixed (`port.toString()`, `error: unknown` in promise catch, `??=` in prisma singleton).
 - Bonus: husky + lint-staged added per user request. `.husky/pre-commit` runs `npx lint-staged`, which runs `eslint --fix` + `prettier --write` only on staged files. Verified working via simulated diff.
 - Sprint 2 complete. Awaiting user commit of: Task 2.4 changes (ESLint/Prettier configs, lint fixes) + husky/lint-staged setup.
+- Sprint 3 done. Added: `src/config/env.ts` (zod-validated env with parsed Vertex credentials), `src/lib/errors.ts` (AppError hierarchy), `src/middleware/auth.ts` (stub reading X-User-Id, falls back to env.demoUserId), `src/middleware/error.ts` (central error handler), `src/routes/health.routes.ts` (/livez + /readyz). Refactored: `src/app.ts` (createApp factory), `src/index.ts` (signal handlers + graceful shutdown), `src/lib/prisma.ts` (uses env from config). Smoke tests passed: /livez=200 always, /readyz=200 with DB up, /readyz=503 with DB down, /readyz=200 again on DB recovery.
 
 ---
 
