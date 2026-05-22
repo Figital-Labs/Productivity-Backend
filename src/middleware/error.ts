@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import multer from "multer";
 import { ZodError, treeifyError } from "zod";
 
 import { AppError } from "../lib/errors.js";
@@ -33,6 +34,18 @@ export function errorMiddleware(
         code: "VALIDATION_ERROR",
         message: "Request validation failed",
         details: treeifyError(err) as Record<string, unknown>,
+      },
+    });
+    return;
+  }
+
+  if (err instanceof multer.MulterError) {
+    const status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+    res.status(status).json({
+      error: {
+        code: err.code,
+        message: err.message,
+        ...(err.field !== undefined ? { details: { field: err.field } } : {}),
       },
     });
     return;

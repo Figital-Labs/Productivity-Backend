@@ -58,3 +58,13 @@ export class ConflictError extends AppError {
     super(code, 409, message, details);
   }
 }
+
+/**
+ * Use when a downstream service (Vertex AI, GCS, etc.) returned something we
+ * can't make sense of — empty body, invalid JSON, schema violation. Maps to 502.
+ */
+export class UpstreamError extends AppError {
+  constructor(code: string, message: string, details?: Record<string, unknown>) {
+    super(code, 502, message, details);
+  }
+}

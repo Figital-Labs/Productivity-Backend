@@ -14,9 +14,9 @@ tags: [meta, state, coordination]
 
 ## Active Sprint
 
-**Sprint 4 — Schema + Pure CRUD (no AI yet)** — `Status: in_progress`. Detail file: [sprints/04-schema-crud.md](./sprints/04-schema-crud.md). Kicked off 2026-05-22.
+**Sprint 5 — Voice intent service + `/voice/process`** — `Status: implementation complete; smoke tests passing; awaiting user review + commit`. First AI sprint. Detail file: [sprints/05-voice-intent.md](./sprints/05-voice-intent.md). Audio storage deferred to Sprint 6 (per user decision 2026-05-22).
 
-Previous: Sprint 3 — Foundation infra (complete, commit `55cf1b9`).
+Previous: Sprint 4 — Schema + Pure CRUD (complete, commit `79704d8`). `/simplify` was skipped at user direction.
 
 See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 
@@ -29,8 +29,8 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 | 01 — Alignment docs | ✅ complete | Claude session | 2026-05-21 | 2026-05-22 | [sprints/01-alignment-docs.md](./sprints/01-alignment-docs.md) |
 | 02 — Repo setup & dev tooling | ✅ complete | claude-session | 2026-05-22 | 2026-05-22 | [sprints/02-repo-setup.md](./sprints/02-repo-setup.md) |
 | 03 — Foundation infra | ✅ complete | claude-session | 2026-05-22 | 2026-05-22 | [sprints/03-foundation.md](./sprints/03-foundation.md) |
-| 04 — Schema + Pure CRUD | 🟡 in_progress | claude-session | 2026-05-22 | — | [sprints/04-schema-crud.md](./sprints/04-schema-crud.md) |
-| 05 — Voice intent + /voice/process | ⏸ not started | — | — | — | *(TBD)* |
+| 04 — Schema + Pure CRUD | ✅ complete | claude-session | 2026-05-22 | 2026-05-22 | [sprints/04-schema-crud.md](./sprints/04-schema-crud.md) |
+| 05 — Voice intent + /voice/process | 🟢 ready for review | claude-session | 2026-05-22 | — | [sprints/05-voice-intent.md](./sprints/05-voice-intent.md) |
 | 06 — Image processing + media | ⏸ not started | — | — | — | *(TBD)* |
 | 07 — Day Plan + Day Closure | ⏸ not started | — | — | — | *(TBD)* |
 | 08 — Alerts + History | ⏸ not started | — | — | — | *(TBD)* |
@@ -46,7 +46,7 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 | Resource | Owner | Started | Note |
 |---|---|---|---|
-| Sprint 4 — Schema + Pure CRUD | claude-session | 2026-05-22 | Schema, repos, services, controllers, routes for Tasks/Notes/Holidays |
+| Sprint 5 — Voice intent + `/voice/process` | claude-session | 2026-05-22 | Planning phase — awaiting audio storage decision |
 
 **How to claim a lock:** add a row with `Resource: <file or sprint name>`, `Owner: <session/agent identifier>`, `Started: <ISO timestamp>`, `Note: <one-line context>`. Remove the row when you're done.
 
@@ -89,6 +89,11 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 - Sprint 3 committed (`55cf1b9 feat: Sprint 3 — foundation infra ...`) at user's explicit request.
 - Sprint 4 kicked off. Full Prisma schema landed (10 models, FK relations everywhere); first migration `20260521210701_init`; seed script (idempotent, upserts `demo-user-1` in `demo-org`); zod schemas for Tasks/Notes/Holidays; `canAccess` + date utils; `omitUndefined` helper with `StripUndefined<T>` mapped type to bridge zod output (`x?: T | undefined`) → Prisma input (`x?: T`) under `exactOptionalPropertyTypes`. Repository → service → controller → route layers wired for Tasks, Notes, Holidays under `/api/v1`. Central error middleware now also turns `ZodError` into 400 with `VALIDATION_ERROR`.
 - Sprint 4 smoke matrix: 23/23 passing — every endpoint, both happy paths and error cases (404 on ghost id, 409 on double-delete/double-archive/double-restore, 400 on invalid body/query). Dev server log clean throughout. Awaiting `/simplify` pass + user commit.
+- Sprint 4 committed (`79704d8 Done sprint 4`). `/simplify` was skipped at user direction; we'll resume the convention at Sprint 5 checkpoint.
+- Sprint 5 kicked off. Audio storage deferred to Sprint 6 per user decision (`audioUrl String?` migration `20260521220954_voice_audiourl_nullable`). Multer 2.0.2 chosen for multipart (web-researched: Express 5 + ESM compatible, memory storage native, busboy-based, mature). `src/middleware/upload.ts` factory + `voiceUpload` preset (memory, 25 MB cap, audio MIME whitelist). Central error middleware extended to handle ZodError (400) and MulterError (413/400). Added `UpstreamError(502)` for Gemini drift (`AI_EMPTY_RESPONSE` / `AI_INVALID_JSON` / `AI_SCHEMA_MISMATCH`).
+- Sprint 5 AI stack: `src/lib/vertex.ts` (singleton `GoogleGenAI` client + `generateStructured<S extends z.ZodType>` helper using zod 4's built-in `z.toJSONSchema()` → SDK's `responseJsonSchema` since v1.9.0; no schema duplication). `src/lib/prompts/voice-intent.ts` refined into sections (ROLE/INPUT/OUTPUT-LANGUAGE/INTENT-TYPES/RULES) with explicit Hinglish-only output rule (no Devanagari) + bilingual priority cues + 8 priority-ordered rules. Confidence labels deliberately skipped per "model will fabricate it" reasoning.
+- Sprint 5 layered code: `src/schemas/voice-intent.schema.ts` (discriminated union for actions, `created` carries optional `notes`/`priority`, reasoning mandatory everywhere). `src/repositories/voice.repository.ts`. `src/services/voice-intent.service.ts` (`processVoice` orchestrator: load pending context → create empty `VoiceInteraction` → call Vertex with audio + prompt → dispatch each action via `taskRepo.create`/`taskRepo.update` (with `taskService.getTask` for ownership check on existing-task variants) → final update of `VoiceInteraction.actions`). `src/controllers/voice.controller.ts` + `src/routes/voice.routes.ts` mounted at `/api/v1/voice/process`.
+- Sprint 5 smoke (SAPI TTS WAV → "Add buy milk, urgent. Mark finish report as done."): HTTP 201 in ~8s, transcript captured (TTS-quirk and all), both actions executed correctly — new "Buy milk" task with `priority: "high"` + `sourceType: "voice"` + `sourceId` → VoiceInteraction; existing "Finish report" flipped to `completed: true`. DB verified end-to-end. Error paths: 400 on missing audio field, 400 on unsupported MIME, both with `VALIDATION_ERROR` shape. Real Hinglish clip from user pending (optional further validation).
 
 ---
 
