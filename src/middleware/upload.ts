@@ -38,9 +38,23 @@ const AUDIO_MIME_TYPES = [
   "audio/x-m4a",
 ] as const;
 
+const IMAGE_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+] as const;
+
 const TWENTY_FIVE_MB = 25 * 1024 * 1024;
+const FIFTEEN_MB = 15 * 1024 * 1024;
 
 export const voiceUpload = createUpload({
   allowedMimeTypes: AUDIO_MIME_TYPES,
   maxFileSizeBytes: TWENTY_FIVE_MB,
+});
+
+export const imageUpload = createUpload({
+  allowedMimeTypes: IMAGE_MIME_TYPES,
+  maxFileSizeBytes: FIFTEEN_MB,
 });

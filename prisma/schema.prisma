@@ -146,7 +146,8 @@ model VoiceInteraction {
 model ImageExtraction {
   id              String   @id @default(cuid())
   userId          String
-  imageUrl        String
+  imageUrl        String?
+  extractedText   String?
   actions         Json
   recommendations Json
   createdAt       DateTime @default(now())

@@ -14,9 +14,9 @@ tags: [meta, state, coordination]
 
 ## Active Sprint
 
-**Sprint 5 — Voice intent service + `/voice/process`** — `Status: implementation complete; smoke tests passing; awaiting user review + commit`. First AI sprint. Detail file: [sprints/05-voice-intent.md](./sprints/05-voice-intent.md). Audio storage deferred to Sprint 6 (per user decision 2026-05-22).
+**Sprint 6 — Image processing (`/images/process`)** — `Status: implementation complete; smoke tests passing; awaiting user review + commit`. Image-only scope. Storage + media attach/detach + audioUrl backfill all deferred to Sprint 7 (per user decision 2026-05-22, option C). Detail file: [sprints/06-image-processing.md](./sprints/06-image-processing.md).
 
-Previous: Sprint 4 — Schema + Pure CRUD (complete, commit `79704d8`). `/simplify` was skipped at user direction.
+Previous: Sprint 5 — Voice intent (implementation complete, smoke tests green; user has been committing per sprint).
 
 See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 
@@ -31,7 +31,7 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 | 03 — Foundation infra | ✅ complete | claude-session | 2026-05-22 | 2026-05-22 | [sprints/03-foundation.md](./sprints/03-foundation.md) |
 | 04 — Schema + Pure CRUD | ✅ complete | claude-session | 2026-05-22 | 2026-05-22 | [sprints/04-schema-crud.md](./sprints/04-schema-crud.md) |
 | 05 — Voice intent + /voice/process | 🟢 ready for review | claude-session | 2026-05-22 | — | [sprints/05-voice-intent.md](./sprints/05-voice-intent.md) |
-| 06 — Image processing + media | ⏸ not started | — | — | — | *(TBD)* |
+| 06 — Image processing (image-only) | 🟢 ready for review | claude-session | 2026-05-22 | — | [sprints/06-image-processing.md](./sprints/06-image-processing.md) |
 | 07 — Day Plan + Day Closure | ⏸ not started | — | — | — | *(TBD)* |
 | 08 — Alerts + History | ⏸ not started | — | — | — | *(TBD)* |
 | 09 — Polish | ⏸ not started | — | — | — | *(TBD)* |
@@ -46,7 +46,7 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 | Resource | Owner | Started | Note |
 |---|---|---|---|
-| Sprint 5 — Voice intent + `/voice/process` | claude-session | 2026-05-22 | Planning phase — awaiting audio storage decision |
+| Sprint 6 — Image processing | claude-session | 2026-05-22 | Planning phase — awaiting plan approval |
 
 **How to claim a lock:** add a row with `Resource: <file or sprint name>`, `Owner: <session/agent identifier>`, `Started: <ISO timestamp>`, `Note: <one-line context>`. Remove the row when you're done.
 
@@ -58,7 +58,7 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 | Blocker | Tagged | Resolution waits on |
 |---|---|---|
-| GCS bucket name + `roles/storage.objectAdmin` on the SA | 2026-05-22 | User to create bucket and grant IAM role. Not blocking until Sprint 6 (image processing + media attachments). |
+| GCS bucket name + `roles/storage.objectAdmin` on the SA | 2026-05-22 | User to create bucket and grant IAM role. Now blocking Sprint 7 (audio backfill + image storage + task media + day-closure media). Deferred from Sprint 6 — Sprint 6 ships image processing without persisting source media. |
 | ~~Database URL for Prisma~~ | ~~2026-05-22~~ | **Resolved** — Postgres 18 in Docker (`task-list-postgres`), `DATABASE_URL` set, Sprint 4 unblocked. |
 | Confirm Vertex AI API is enabled on GCP project `nth-rookery-341212` and billing is active | 2026-05-22 | User to verify in GCP console. Blocking Sprint 5. We'll verify in Sprint 2 via a hello-world script. |
 
@@ -94,6 +94,10 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 - Sprint 5 AI stack: `src/lib/vertex.ts` (singleton `GoogleGenAI` client + `generateStructured<S extends z.ZodType>` helper using zod 4's built-in `z.toJSONSchema()` → SDK's `responseJsonSchema` since v1.9.0; no schema duplication). `src/lib/prompts/voice-intent.ts` refined into sections (ROLE/INPUT/OUTPUT-LANGUAGE/INTENT-TYPES/RULES) with explicit Hinglish-only output rule (no Devanagari) + bilingual priority cues + 8 priority-ordered rules. Confidence labels deliberately skipped per "model will fabricate it" reasoning.
 - Sprint 5 layered code: `src/schemas/voice-intent.schema.ts` (discriminated union for actions, `created` carries optional `notes`/`priority`, reasoning mandatory everywhere). `src/repositories/voice.repository.ts`. `src/services/voice-intent.service.ts` (`processVoice` orchestrator: load pending context → create empty `VoiceInteraction` → call Vertex with audio + prompt → dispatch each action via `taskRepo.create`/`taskRepo.update` (with `taskService.getTask` for ownership check on existing-task variants) → final update of `VoiceInteraction.actions`). `src/controllers/voice.controller.ts` + `src/routes/voice.routes.ts` mounted at `/api/v1/voice/process`.
 - Sprint 5 smoke (SAPI TTS WAV → "Add buy milk, urgent. Mark finish report as done."): HTTP 201 in ~8s, transcript captured (TTS-quirk and all), both actions executed correctly — new "Buy milk" task with `priority: "high"` + `sourceType: "voice"` + `sourceId` → VoiceInteraction; existing "Finish report" flipped to `completed: true`. DB verified end-to-end. Error paths: 400 on missing audio field, 400 on unsupported MIME, both with `VALIDATION_ERROR` shape. Real Hinglish clip from user pending (optional further validation).
+- Sprint 6 kicked off + completed same day. GCS deferred (option C): image-processing-only sprint, no storage layer, no media attach/detach, no audioUrl backfill — all punted to Sprint 7. `ImageExtraction.imageUrl` made nullable + added `extractedText String?` column (migration `20260522082426_image_extraction_extracted_text`). Image schema (`src/schemas/image-extraction.schema.ts`) re-exports voice's action + recommendation shapes (they're modality-neutral) and defines image-specific response with `extractedText`. Image prompt (`src/lib/prompts/image-extraction.ts`) adapts voice-intent with OCR-flavored rules: visual priority cues (URGENT in caps, !!!, underlines, red ink), completed cues (checkmarks, strikethroughs, "DONE"), spatial ordering (top→bottom, columns L→R), ignore-non-task-markings rule. Hinglish-only output preserved.
+- Sprint 6 refactor: extracted `dispatchAiAction` + `PersistedAiAction` from voice-intent.service.ts into shared `src/services/action-dispatch.service.ts` (used by both voice + image; will also serve day-closure in Sprint 7). Voice service updated to use it; typecheck + lint still green. The `VoiceAction` schema type is reused for the dispatcher parameter — modality-neutral despite its Sprint-5 name (rename deferred until 3+ callers agree).
+- Sprint 6 stack: `src/middleware/upload.ts` extended with `imageUpload` preset (15 MB, JPEG/PNG/WebP/HEIC/HEIF). `src/repositories/image.repository.ts`. `src/services/image-extraction.service.ts` (mirror of voice service, uses shared dispatcher). `src/controllers/image.controller.ts` + `src/routes/images.routes.ts` mounted at `/api/v1/images/process`.
+- Sprint 6 smoke (synthetic 800x600 PNG with 4 task items via GDI/PowerShell): HTTP 201 in ~9s; `extractedText` captured all 4 items with newlines preserved; 4 `created` actions emitted; "URGENT: Pay electricity bill" correctly resolved to `priority: "high"` while the other 3 had no priority; all 4 created tasks landed in DB with `sourceType: "image"` + same `sourceId` → ImageExtraction row; reasoning sensible on each. Error paths: 400 on wrong MIME, 400 on missing image field, both with `VALIDATION_ERROR` shape. Voice flow not re-smoked but contract-verified via typecheck/lint after refactor.
 
 ---
 
