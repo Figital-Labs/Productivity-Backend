@@ -1,5 +1,8 @@
 import { Router } from "express";
 
+import { jwtAuth } from "../middleware/auth.js";
+
+import { authRouter } from "./auth.routes.js";
 import { dayClosureRouter } from "./day-closure.routes.js";
 import { dayPlanRouter } from "./day-plan.routes.js";
 import { holidaysRouter } from "./holidays.routes.js";
@@ -12,6 +15,8 @@ import { voiceRouter } from "./voice.routes.js";
 
 export const v1Router = Router();
 
+v1Router.use("/auth", authRouter);
+v1Router.use(jwtAuth);
 v1Router.use("/tasks", tasksRouter);
 v1Router.use("/notes", notesRouter);
 v1Router.use("/holidays", holidaysRouter);

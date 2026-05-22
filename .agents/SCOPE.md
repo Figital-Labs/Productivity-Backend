@@ -64,7 +64,7 @@ Each item has a reason and the conditions under which we'd add it.
 
 | Item | Status | When to revisit |
 |---|---|---|
-| Real login / signup | Deferred — stub middleware reads `X-User-Id`. See [ADR-0008](./decisions/0008-stub-auth.md). | Client demo needs a login screen, OR multi-user testing begins. Likely choice: Google OAuth. |
+| Real login / signup | Basic email/password + JWT is now built. See [ADR-0022](./decisions/0022-basic-jwt-auth.md). | Revisit for OAuth/SSO, password reset, token revocation, or production hardening. |
 | Multi-tenant / org isolation | Deferred — schema is ready. | More than one user/org exists. |
 | Hospital hierarchy (manager ↔ staff) | Deferred — `User.role` column exists. | Post-POC, with client's org-chart requirements. |
 
@@ -122,9 +122,9 @@ Each item has a reason and the conditions under which we'd add it.
 
 ## "Why Not Just Add It All?" — The Counter-Argument
 
-Common temptation: *"the schema/code is so small, why not add real auth / logging / tests / Docker now?"*
+Common temptation: *"the schema/code is so small, why not add OAuth / logging / tests / Docker now?"*
 
-The answer: **every line of code is a future maintenance liability.** A POC's purpose is to *prove the product idea*, not to be production-ready. Tests written now would mostly be deleted as the API surface changes. Auth now means a login screen the client doesn't need to see. Logging now means setting up log aggregation we won't ship.
+The answer: **every line of code is a future maintenance liability.** A POC's purpose is to *prove the product idea*, not to be production-ready. Tests written now would mostly be deleted as the API surface changes. OAuth and password-reset flows mean external-provider setup the client doesn't need for this stage. Logging now means setting up log aggregation we won't ship.
 
 The discipline: do the *cheap, hard-to-undo* things now (schema design, layered architecture, `userId` everywhere). Defer the *expensive, easy-to-add* things until they're needed (tests, auth, observability).
 

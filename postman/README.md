@@ -50,13 +50,14 @@ That folder does this:
    - medium priority lab report follow-up
    - low priority discharge summary
 4. Lists the tasks.
-5. Submits the morning day-plan snapshot.
-6. Fetches the day-plan snapshot.
-7. Marks one task complete.
-8. Marks one task partial.
-9. Soft-deletes and restores one task.
-10. Creates, updates, and lists a note.
-11. Adds and lists a holiday.
+5. Logs in as the seeded demo user and captures `authToken`.
+6. Submits the morning day-plan snapshot.
+7. Fetches the day-plan snapshot.
+8. Marks one task complete.
+9. Marks one task partial.
+10. Soft-deletes and restores one task.
+11. Creates, updates, and lists a note.
+12. Adds and lists a holiday.
 
 The first request generates a fresh future `date` and `runId` each time. This avoids day-plan duplicate errors when you rerun the demo.
 
@@ -66,6 +67,7 @@ The collection tests save these after successful requests:
 
 - `taskId`
 - `noteId`
+- `authToken`
 - `morningRoundsTaskId`
 - `labReportsTaskId`
 - `dischargeSummaryTaskId`
@@ -104,7 +106,8 @@ This backend is a daily task-tracking POC for hospital staff.
 Important conventions:
 
 - Base URL: `{{baseUrl}}`, default `http://localhost:3000`
-- Stub auth header: `X-User-Id: {{userId}}`, default `demo-user-1`
+- Auth header: `Authorization: Bearer {{authToken}}`
+- Seeded demo login: `demo@kims.local` / `demopass123`
 - API prefix: `/api/v1`
 - Health endpoints are unversioned: `/livez`, `/readyz`
 - JSON endpoints use `application/json`

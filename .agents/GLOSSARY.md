@@ -54,7 +54,9 @@ If you encounter a term in code or docs that isn't in this glossary, either it's
 
 **Controller** — Orchestrates services in response to an HTTP request. Knows about req/res but not about Prisma.
 
-**Stub Auth** — The middleware that reads `X-User-Id` from the request header and returns a hardcoded user. Used in place of real auth for POC. See [ADR-0008](./decisions/0008-stub-auth.md).
+**JWT Auth** — The bearer-token auth layer. `POST /auth/signup` and `POST /auth/login` return a JWT; all other `/api/v1` routes require `Authorization: Bearer <token>`. See [ADR-0022](./decisions/0022-basic-jwt-auth.md).
+
+**Stub Auth** — Superseded middleware that read `X-User-Id` from the request header. Replaced by JWT auth when multi-user/frontend testing became necessary. See [ADR-0008](./decisions/0008-stub-auth.md) and [ADR-0022](./decisions/0022-basic-jwt-auth.md).
 
 **`canAccess(user, resource)`** — The authorization helper. Returns `true` for POC. When multi-tenant arrives, the only place authorization logic needs to live. See [ADR-0007](./decisions/0007-layered-architecture.md).
 

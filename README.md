@@ -118,7 +118,7 @@ The repository files re-export as plain `Task` / `Note` / etc. for ergonomic use
 You'll see this everywhere:
 
 ```typescript
-import { stubAuth } from "./middleware/auth.js"; // ← .js, NOT .ts
+import { jwtAuth } from "./middleware/auth.js"; // ← .js, NOT .ts
 ```
 
 This is **correct** for our `module: "nodenext"` + `verbatimModuleSyntax: true` setup. The path refers to the runtime filename (`.js` after compilation), not the source filename (`.ts`). TypeScript's resolver handles the lookup. See `.agents/CONVENTIONS.md` for the full explanation.

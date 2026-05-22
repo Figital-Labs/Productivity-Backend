@@ -43,7 +43,7 @@ The server program that lives behind the frontend. Our POC scope:
 3. **Handle images.** Same flow for handwritten task sheet OCR and proof-of-work photos.
 4. **Handle day closure.** Compare planned tasks vs actual work via AI, generate structured feedback.
 5. **Keep AI credentials safe.** All Vertex calls move to the server. The browser never sees the key.
-6. **Pretend there's one user.** No login screen, no auth. The frontend sends `X-User-Id: demo-user-1` in a header and we trust it.
+6. **Support basic login.** The backend now supports email/password signup and JWT login so frontend teammates can test multiple accounts without sharing a trusted user-id header.
 
 For the full in/out breakdown see [SCOPE.md](./SCOPE.md).
 
@@ -114,11 +114,11 @@ The product is likely going to graduate into a **hospital staff productivity too
 - **Hierarchy**: managers (e.g., head nurses, department heads) maintain their staff, assign tasks, and review their staff's day closures.
 - **Manager review flow**: managers see what their staff planned vs delivered each day.
 - **Compliance**: hospital data is sensitive (PHI) and will need real protections.
-- **Auth**: real authentication, probably Google OAuth (hospital staff likely have Google accounts).
+- **Auth**: production authentication, probably Google OAuth or hospital SSO.
 
 **None of this is being built for the POC.** But every architectural choice — schema columns, code structure, layering — is designed so that adding these later is *additive*, not a rewrite.
 
-Most importantly: every owned entity has a `userId` foreign key from day 1. Single-user POC means every row has the same value (`demo-user-1`). Multi-user later means more values. Zero schema migration. The auth middleware that today returns a hardcoded user just gets replaced by one that decodes a JWT.
+Most importantly: every owned entity has a `userId` foreign key from day 1. Basic JWT auth now turns login into a concrete `req.user`; future production auth can replace the credential provider while keeping the downstream scoping contract.
 
 ---
 

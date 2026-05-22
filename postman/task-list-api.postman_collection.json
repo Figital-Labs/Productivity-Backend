@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "8e61be30-cda1-4b7f-bc6d-2f9e540b0e21",
     "name": "Task List Backend API",
-    "description": "Frontend-ready Postman collection for the Task List backend. Run the first folder in order to create demo tasks, notes, a holiday, and a day-plan snapshot. Requests use {{baseUrl}} and stub auth header X-User-Id: {{userId}}.",
+    "description": "Frontend-ready Postman collection for the Task List backend. Run the first folder in order: it logs in as the seeded demo user, captures authToken, then creates demo tasks, notes, a holiday, and a day-plan snapshot. Protected requests use Authorization: Bearer {{authToken}}.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -31,6 +31,8 @@
                   "const values = {",
                   "  baseUrl: pm.variables.get('baseUrl') || 'http://localhost:3000',",
                   "  userId: pm.variables.get('userId') || 'demo-user-1',",
+                  "  demoEmail: pm.variables.get('demoEmail') || 'demo@kims.local',",
+                  "  demoPassword: pm.variables.get('demoPassword') || 'demopass123',",
                   "  runId,",
                   "  date: ymd(demoDate),",
                   "  holidayDate: ymd(holidayDate),",
@@ -43,7 +45,7 @@
                   "  pm.collectionVariables.set(key, value);",
                   "  pm.environment.set(key, value);",
                   "});",
-                  "['morningRoundsTaskId', 'labReportsTaskId', 'dischargeSummaryTaskId', 'dayPlanId', 'dayClosureId', 'activeNoteId'].forEach((key) => {",
+                  "['authToken', 'morningRoundsTaskId', 'labReportsTaskId', 'dischargeSummaryTaskId', 'dayPlanId', 'dayClosureId', 'activeNoteId'].forEach((key) => {",
                   "  pm.collectionVariables.unset(key);",
                   "  pm.environment.unset(key);",
                   "});",
@@ -99,7 +101,83 @@
           }
         },
         {
-          "name": "03 Create Demo Task - Patient Rounds",
+          "name": "03 Login Demo User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('authToken', body.token);",
+                  "pm.environment.set('authToken', body.token);",
+                  "pm.collectionVariables.set('userId', body.user.id);",
+                  "pm.environment.set('userId', body.user.id);",
+                  "pm.test('Token and user returned', function () {",
+                  "  pm.expect(body.token).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.user.email).to.eql(pm.collectionVariables.get('demoEmail'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Logs in as the seeded demo user and stores authToken for all later protected requests.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{demoEmail}}\",\n  \"password\": \"{{demoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          }
+        },
+        {
+          "name": "04 Get Current User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Current user returned', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Current user matches token user', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.user.id).to.eql(pm.collectionVariables.get('userId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "Verifies the cached JWT and returns the current user profile.",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/me"
+          }
+        },
+        {
+          "name": "05 Create Demo Task - Patient Rounds",
           "event": [
             {
               "listen": "test",
@@ -132,8 +210,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -149,7 +227,7 @@
           }
         },
         {
-          "name": "04 Create Demo Task - Lab Reports",
+          "name": "06 Create Demo Task - Lab Reports",
           "event": [
             {
               "listen": "test",
@@ -178,8 +256,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -195,7 +273,7 @@
           }
         },
         {
-          "name": "05 Create Demo Task - Discharge Summary",
+          "name": "07 Create Demo Task - Discharge Summary",
           "event": [
             {
               "listen": "test",
@@ -224,8 +302,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -241,7 +319,7 @@
           }
         },
         {
-          "name": "06 List Demo Tasks",
+          "name": "08 List Demo Tasks",
           "event": [
             {
               "listen": "test",
@@ -267,15 +345,15 @@
             "description": "Lists tasks for {{date}}. Frontend task-list screens usually start with this request.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/tasks?date={{date}}"
           }
         },
         {
-          "name": "07 Submit Day Plan Snapshot",
+          "name": "09 Submit Day Plan Snapshot",
           "event": [
             {
               "listen": "test",
@@ -305,8 +383,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -322,7 +400,7 @@
           }
         },
         {
-          "name": "08 Get Day Plan Snapshot",
+          "name": "10 Get Day Plan Snapshot",
           "event": [
             {
               "listen": "test",
@@ -345,15 +423,15 @@
             "description": "Fetches the immutable morning plan snapshot for {{date}}.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/day-plan?date={{date}}"
           }
         },
         {
-          "name": "09 Complete Patient Rounds",
+          "name": "11 Complete Patient Rounds",
           "event": [
             {
               "listen": "test",
@@ -380,8 +458,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -397,7 +475,7 @@
           }
         },
         {
-          "name": "10 Mark Lab Reports Partial",
+          "name": "12 Mark Lab Reports Partial",
           "event": [
             {
               "listen": "test",
@@ -424,8 +502,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -441,7 +519,7 @@
           }
         },
         {
-          "name": "11 Delete Low Priority Task",
+          "name": "13 Delete Low Priority Task",
           "event": [
             {
               "listen": "test",
@@ -464,15 +542,15 @@
             "description": "Demonstrates soft delete. The task is hidden from list results until restored.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/tasks/{{dischargeSummaryTaskId}}"
           }
         },
         {
-          "name": "12 Restore Low Priority Task",
+          "name": "14 Restore Low Priority Task",
           "event": [
             {
               "listen": "test",
@@ -495,15 +573,15 @@
             "description": "Restores the soft-deleted task.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/tasks/{{dischargeSummaryTaskId}}/restore"
           }
         },
         {
-          "name": "13 List Updated Demo Tasks",
+          "name": "15 List Updated Demo Tasks",
           "event": [
             {
               "listen": "test",
@@ -529,15 +607,15 @@
             "description": "Shows the frontend what the task-list UI receives after updates.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/tasks?date={{date}}"
           }
         },
         {
-          "name": "14 Create Demo Note",
+          "name": "16 Create Demo Note",
           "event": [
             {
               "listen": "test",
@@ -565,8 +643,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -582,7 +660,7 @@
           }
         },
         {
-          "name": "15 Update Demo Note",
+          "name": "17 Update Demo Note",
           "event": [
             {
               "listen": "test",
@@ -609,8 +687,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -626,7 +704,7 @@
           }
         },
         {
-          "name": "16 List Notes",
+          "name": "18 List Notes",
           "event": [
             {
               "listen": "test",
@@ -650,15 +728,15 @@
             "description": "Lists active notes. Archived and deleted notes are excluded.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/notes"
           }
         },
         {
-          "name": "17 Toggle Holiday On",
+          "name": "19 Toggle Holiday On",
           "event": [
             {
               "listen": "test",
@@ -685,8 +763,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -702,7 +780,7 @@
           }
         },
         {
-          "name": "18 List Holidays",
+          "name": "20 List Holidays",
           "event": [
             {
               "listen": "test",
@@ -727,8 +805,8 @@
             "description": "Lists holidays in the generated date range.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/holidays?from={{fromDate}}&to={{toDate}}"
@@ -740,6 +818,105 @@
       "name": "01 Common API Requests",
       "description": "Single requests for day-to-day frontend testing. These reuse the IDs captured by the demo flow where possible.",
       "item": [
+        {
+          "name": "Signup New User",
+          "request": {
+            "method": "POST",
+            "description": "Creates a new test user. Change email before re-running, or expect 409 USER_ALREADY_EXISTS.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice+{{runId}}@kims.local\",\n  \"name\": \"Alice Test\",\n  \"password\": \"alicepass123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/auth/signup"
+          }
+        },
+        {
+          "name": "Get Current User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Current user returned', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Current user matches token user', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.user.id).to.eql(pm.collectionVariables.get('userId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "Verifies the cached JWT and returns the current user profile.",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/me"
+          }
+        },
+        {
+          "name": "Login Demo User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeds', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('authToken', body.token);",
+                  "pm.environment.set('authToken', body.token);",
+                  "pm.collectionVariables.set('userId', body.user.id);",
+                  "pm.environment.set('userId', body.user.id);",
+                  "pm.test('Token and user returned', function () {",
+                  "  pm.expect(body.token).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.user.email).to.eql(pm.collectionVariables.get('demoEmail'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Logs in as the seeded demo user and stores authToken for all later protected requests.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{demoEmail}}\",\n  \"password\": \"{{demoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          }
+        },
         {
           "name": "Live Check",
           "request": {
@@ -763,8 +940,8 @@
             "description": "Returns non-deleted tasks for date. Sorted by priority then creation time.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/tasks?date={{date}}"
@@ -796,8 +973,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -823,8 +1000,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -846,8 +1023,8 @@
             "description": "Soft deletes a task. The row remains in DB with deletedAt set.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/tasks/{{taskId}}"
@@ -860,8 +1037,8 @@
             "description": "Restores a soft-deleted task.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/tasks/{{taskId}}/restore"
@@ -874,8 +1051,8 @@
             "description": "Returns active notes. Archived/deleted notes are excluded.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/notes"
@@ -907,8 +1084,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -934,8 +1111,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -957,8 +1134,8 @@
             "description": "Archives a note. Archived notes are hidden from list results.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/notes/{{noteId}}/archive"
@@ -971,8 +1148,8 @@
             "description": "Soft deletes a note.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/notes/{{noteId}}"
@@ -989,8 +1166,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -1012,8 +1189,8 @@
             "description": "Lists holidays between fromDate and toDate, inclusive.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/holidays?from={{fromDate}}&to={{toDate}}"
@@ -1030,8 +1207,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -1053,8 +1230,8 @@
             "description": "Retrieves the day-plan snapshot for date.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/day-plan?date={{date}}"
@@ -1077,8 +1254,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -1100,8 +1277,8 @@
             "description": "Multipart audio to AI task extraction. In Postman, manually select fusion-audio.wav or another audio file for the audio field.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -1124,8 +1301,8 @@
             "description": "Multipart image to AI OCR/task extraction. In Postman, manually select fusion-image.png or another image file for the image field.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -1148,8 +1325,8 @@
             "description": "Single fusion endpoint. At least one of text, audio, or image is required. Manually attach files if using audio/image.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -1197,8 +1374,8 @@
             "description": "Evening closeout. Requires a day plan for {{date}} and an audio file in the audio field. It can take 10-20 seconds because it makes AI calls.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -1231,8 +1408,8 @@
             "description": "Fetches the submitted day closure for {{date}}.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/day-closure?date={{date}}"
@@ -1255,8 +1432,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -1278,8 +1455,8 @@
             "description": "Expected 404 DAY_PLAN_NOT_FOUND for a date that should not have a submitted plan.",
             "header": [
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "url": "{{baseUrl}}/api/v1/day-plan?date=2099-12-31"
@@ -1296,8 +1473,8 @@
                 "value": "application/json"
               },
               {
-                "key": "X-User-Id",
-                "value": "{{userId}}"
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
               }
             ],
             "body": {
@@ -1375,6 +1552,18 @@
     {
       "key": "activeNoteId",
       "value": ""
+    },
+    {
+      "key": "authToken",
+      "value": "login-first"
+    },
+    {
+      "key": "demoEmail",
+      "value": "demo@kims.local"
+    },
+    {
+      "key": "demoPassword",
+      "value": "demopass123"
     }
   ]
 }

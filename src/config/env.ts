@@ -38,7 +38,6 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   JWT_SECRET: z.string().min(32),
   JWT_TTL: z.string().min(1).default("30d"),
-  DEMO_USER_ID: z.string().min(1).default("demo-user-1"),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -55,7 +54,6 @@ export const env = {
   nodeEnv: parsed.data.NODE_ENV,
   jwtSecret: parsed.data.JWT_SECRET,
   jwtTtl: parsed.data.JWT_TTL,
-  demoUserId: parsed.data.DEMO_USER_ID,
   gcp: {
     credentials: parsed.data.GOOGLE_SERVICE_ACCOUNT_JSON,
     project: parsed.data.GOOGLE_CLOUD_PROJECT,

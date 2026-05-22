@@ -2,7 +2,7 @@
 
 > A single-document reference for the frontend team and product owner. Describes what the backend does, the supported user journeys, every endpoint with example requests, and the parts that are deliberately not built yet.
 
-**Backend version:** POC (Sprints 1–7 complete + text/fusion addendum; Sprint 8 deferred)
+**Backend version:** POC (Sprints 1-7 complete + text/fusion addendum + Sprint 8 lite JWT auth)
 **Last updated:** 2026-05-22
 
 ---
@@ -74,15 +74,28 @@ The backend handles **all persistence, all AI orchestration, and all task lifecy
 
 ## 3. Authentication & conventions
 
-### Auth (POC)
+### Auth
 
-Auth is **stubbed**. Every request must carry an `X-User-Id` header. If omitted, the backend falls back to a hardcoded demo user.
+Auth uses email/password login and JWT bearer tokens.
 
+Public endpoints:
+
+- `POST /api/v1/auth/signup`
+- `POST /api/v1/auth/login`
+
+All other `/api/v1` endpoints require:
+
+```text
+Authorization: Bearer <token>
 ```
-X-User-Id: demo-user-1
+
+Seeded demo login:
+
+```json
+{ "email": "demo@kims.local", "password": "demopass123" }
 ```
 
-When real auth lands, this header is replaced by a JWT-derived session — the shape of `req.user` stays the same so frontend code doesn't change.
+Both signup and login return `{ token, user }`. Frontend should store the token and call `GET /api/v1/auth/me` on app launch to verify the cached token and load the current user profile.
 
 ### Base URL
 
@@ -124,6 +137,7 @@ All errors come back in this shape:
 | `200 OK`                    | GET / PATCH success                                                   |
 | `201 Created`               | POST success (resource created)                                       |
 | `400 Bad Request`           | Validation error, malformed body, wrong file type                     |
+| `401 Unauthorized`          | Missing/invalid bearer token or bad login credentials                 |
 | `404 Not Found`             | Resource doesn't exist or is soft-deleted                             |
 | `409 Conflict`              | Duplicate submission (e.g., day plan twice), already-deleted/restored |
 | `413 Payload Too Large`     | File over the upload size limit                                       |
@@ -141,7 +155,7 @@ All errors come back in this shape:
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/voice/process \
-  -H "X-User-Id: demo-user-1" \
+  -H "Authorization: Bearer $TOKEN" \
   -F "audio=@morning-plan.webm;type=audio/webm"
 ```
 
@@ -181,7 +195,7 @@ curl -X POST http://localhost:3000/api/v1/voice/process \
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/images/process \
-  -H "X-User-Id: demo-user-1" \
+  -H "Authorization: Bearer $TOKEN" \
   -F "image=@task-sheet.jpg;type=image/jpeg"
 ```
 
@@ -217,7 +231,7 @@ After tasks have been created (manually or via voice/image), commit the plan:
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/day-plan/submit \
-  -H "X-User-Id: demo-user-1" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
@@ -241,34 +255,34 @@ curl -X POST http://localhost:3000/api/v1/day-plan/submit \
 
 ### 4.4 During the day: manual task management
 
-Standard CRUD. The simplest endpoints — frontend uses these for the regular task list UI.
+Standard CRUD. The simplest endpoints - frontend uses these for the regular task list UI. Examples assume `TOKEN` contains a valid login token.
 
 ```bash
 # List today's tasks
-curl http://localhost:3000/api/v1/tasks -H "X-User-Id: demo-user-1"
+curl http://localhost:3000/api/v1/tasks -H "Authorization: Bearer $TOKEN"
 
 # Create
 curl -X POST http://localhost:3000/api/v1/tasks \
-  -H "X-User-Id: demo-user-1" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"title":"Doctor follow-up","priority":"medium","notes":"Call after 4pm"}'
 
 # Mark complete
 curl -X PATCH http://localhost:3000/api/v1/tasks/cmpg... \
-  -H "X-User-Id: demo-user-1" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"completed":true}'
 
 # Soft delete (recoverable)
-curl -X DELETE http://localhost:3000/api/v1/tasks/cmpg... -H "X-User-Id: demo-user-1"
+curl -X DELETE http://localhost:3000/api/v1/tasks/cmpg... -H "Authorization: Bearer $TOKEN"
 
 # Restore a soft-deleted task
-curl -X POST http://localhost:3000/api/v1/tasks/cmpg.../restore -H "X-User-Id: demo-user-1"
+curl -X POST http://localhost:3000/api/v1/tasks/cmpg.../restore -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 4.5 Evening: close the day
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/day-closure/submit \
-  -H "X-User-Id: demo-user-1" \
+  -H "Authorization: Bearer $TOKEN" \
   -F "audio=@closure.wav;type=audio/wav" \
   -F "commentary=Busy day overall"
 ```
@@ -316,17 +330,17 @@ Notes are separate from tasks — they're free-form text the user wants to remem
 ```bash
 # Create
 curl -X POST http://localhost:3000/api/v1/notes \
-  -H "X-User-Id: demo-user-1" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"content":"Remember to renew medical license by July"}'
 
 # List active notes
-curl http://localhost:3000/api/v1/notes -H "X-User-Id: demo-user-1"
+curl http://localhost:3000/api/v1/notes -H "Authorization: Bearer $TOKEN"
 
 # Archive (hides from main view, still recoverable)
-curl -X POST http://localhost:3000/api/v1/notes/cmpg.../archive -H "X-User-Id: demo-user-1"
+curl -X POST http://localhost:3000/api/v1/notes/cmpg.../archive -H "Authorization: Bearer $TOKEN"
 
 # Soft delete
-curl -X DELETE http://localhost:3000/api/v1/notes/cmpg... -H "X-User-Id: demo-user-1"
+curl -X DELETE http://localhost:3000/api/v1/notes/cmpg... -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 4.7 Holidays (per-user calendar)
@@ -336,12 +350,12 @@ User marks dates they're off (leave, sick, religious observances). The day-closu
 ```bash
 # Toggle: adds if absent, removes if present
 curl -X POST http://localhost:3000/api/v1/holidays/toggle \
-  -H "X-User-Id: demo-user-1" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"date":"2026-06-12","reason":"Personal leave"}'
 
 # List holidays in range
 curl "http://localhost:3000/api/v1/holidays?from=2026-06-01&to=2026-06-30" \
-  -H "X-User-Id: demo-user-1"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 4.8 Morning: extract tasks from a typed paragraph
@@ -350,7 +364,7 @@ curl "http://localhost:3000/api/v1/holidays?from=2026-06-01&to=2026-06-30" \
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/text/process \
-  -H "X-User-Id: demo-user-1" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"text":"buy milk urgent, call doctor at 4pm, finish quarterly report draft, and aaj report compile karni hai"}'
 ```
@@ -406,7 +420,7 @@ curl -X POST http://localhost:3000/api/v1/text/process \
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/process \
-  -H "X-User-Id: demo-user-1" \
+  -H "Authorization: Bearer $TOKEN" \
   -F "audio=@subah-ki-planning.wav;type=audio/wav" \
   -F "image=@kaam-ki-list.png;type=image/png" \
   -F "text=Aur haan, evening mein doctor ko call karna hai"
@@ -468,6 +482,14 @@ curl -X POST http://localhost:3000/api/v1/process \
 | ------ | --------- | ---------------------------------------------------- |
 | GET    | `/livez`  | Liveness probe (always 200 if process is running)    |
 | GET    | `/readyz` | Readiness probe — 200 if DB reachable, 503 otherwise |
+
+### Auth
+
+| Method | Path                  | Purpose                                                      |
+| ------ | --------------------- | ------------------------------------------------------------ |
+| POST   | `/api/v1/auth/signup` | Create a user with `{email, name, password}`. Returns token. |
+| POST   | `/api/v1/auth/login`  | Login with `{email, password}`. Returns token.               |
+| GET    | `/api/v1/auth/me`     | Verify bearer token and return the current user profile.     |
 
 ### Tasks
 
@@ -665,7 +687,6 @@ These are intentional deferrals for the POC. Frontend should not expect any of t
 
 | Feature                                                            | Status                                                           | When                                   |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------- | -------------------------------------- |
-| **Real authentication** (login, JWT, sessions)                     | Stub via `X-User-Id` header                                      | Production milestone, not POC          |
 | **File / media storage** (audio + image persistence)               | Audio/image bytes are sent to AI but not stored                  | Deferred — needs GCS bucket + IAM      |
 | **Task media attachments** (proof-of-work photos/videos on a task) | Schema exists, no endpoints                                      | Deferred with file storage             |
 | **General uploads endpoint** (`POST /uploads`)                     | Not built                                                        | Deferred with file storage             |
@@ -695,9 +716,10 @@ These are intentional deferrals for the POC. Frontend should not expect any of t
   GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
   GOOGLE_CLOUD_PROJECT=your-gcp-project-id
   GOOGLE_CLOUD_LOCATION=us-central1
+  JWT_SECRET=replace-with-at-least-32-random-characters
+  JWT_TTL=30d
   PORT=3000
   NODE_ENV=development
-  DEMO_USER_ID=demo-user-1
   ```
 
 ### Spin up Postgres in Docker
@@ -730,8 +752,13 @@ curl http://localhost:3000/livez
 curl http://localhost:3000/readyz
 # → {"status":"ok","checks":{"db":"ok"}}
 
+TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"demo@kims.local","password":"demopass123"}' \
+  | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).token))")
+
 curl -X POST http://localhost:3000/api/v1/tasks \
-  -H "X-User-Id: demo-user-1" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"title":"My first task","priority":"high"}'
 # → 201 with the new task object

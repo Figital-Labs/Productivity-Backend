@@ -14,7 +14,7 @@ tags: [meta, state, coordination]
 
 ## Active Sprint
 
-**POC scope complete.** Sprints 1–7 all shipped + committed. Sprint 8 (Alerts + History) **deferred indefinitely per user 2026-05-22** — not needed for POC.
+**POC scope complete.** Sprints 1-7 all shipped + committed, plus post-Sprint-7 text/fusion and Sprint 8 lite JWT auth. Sprint 8 Alerts + History remains **deferred indefinitely per user 2026-05-22** - not needed for POC.
 
 Backend-facing integration doc lives at `Backend_task_list/BACKEND_GUIDE.md` (project root, not under `.agents/`) — single source of truth for frontend devs + product owner.
 
@@ -48,7 +48,7 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 | Resource | Owner | Started | Note |
 |---|---|---|---|
-| *(none — POC complete)* | — | — | — |
+| *(none — POC complete + Sprint 8 lite auth shipped)* | — | — | — |
 
 **How to claim a lock:** add a row with `Resource: <file or sprint name>`, `Owner: <session/agent identifier>`, `Started: <ISO timestamp>`, `Note: <one-line context>`. Remove the row when you're done.
 
@@ -110,9 +110,11 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 ---
 
+- Sprint 8 lite shipped: basic email/password + JWT auth. Added required `User.passwordHash`, bcrypt password helpers, JWT sign/verify helpers, user repository, auth schemas/service/controller/routes, public `POST /api/v1/auth/signup`, public `POST /api/v1/auth/login`, and protected `GET /api/v1/auth/me`. Removed `X-User-Id` stub path from source; all non-auth `/api/v1` routes now require `Authorization: Bearer <token>`. Seed updates `demo-user-1` with password `demopass123`. Env now requires `JWT_SECRET` and supports `JWT_TTL=30d`. ADR-0008 superseded by ADR-0022. Docs and Postman handoff updated for login-first bearer-token flow. Verification passed: migration + seed, demo login, `/auth/me`, unauth/bad token/wrong password 401s, signup + duplicate 409, short password 400, per-user task scoping, `npm run typecheck`, and `npm run lint`.
+
 ## What An Agent Should Do Right Now
 
-**POC is complete.** All planned sprints (1–7) are shipped, plus the post-Sprint-7 text + fusion addendum. Sprint 8 (Alerts + History) is deferred indefinitely.
+**POC is complete.** All planned sprints (1-7) are shipped, plus the post-Sprint-7 text + fusion addendum and Sprint 8 lite JWT auth. Sprint 8 Alerts + History remains deferred indefinitely.
 
 If you're a fresh agent session:
 1. Read `BACKEND_GUIDE.md` at the project root — that is the single source of truth for what endpoints exist and how they behave.

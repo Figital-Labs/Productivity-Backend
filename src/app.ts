@@ -1,7 +1,6 @@
 import express from "express";
 import type { Express } from "express";
 
-import { stubAuth } from "./middleware/auth.js";
 import { errorMiddleware } from "./middleware/error.js";
 import { healthRouter } from "./routes/health.routes.js";
 import { v1Router } from "./routes/v1.js";
@@ -17,9 +16,6 @@ export function createApp(): Express {
 
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
-
-  // Auth attaches req.user; everything downstream assumes it's present.
-  app.use(stubAuth);
 
   // Health endpoints (unversioned).
   app.use(healthRouter);

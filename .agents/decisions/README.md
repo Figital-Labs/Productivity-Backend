@@ -19,7 +19,7 @@ This directory holds the **why** behind every architectural choice in the codeba
 
 ## Adding a New ADR
 
-1. Check this index for the next sequence number (currently `0021`).
+1. Check this index for the next sequence number (currently `0022`).
 2. Claim it in `STATE.md` to avoid races with parallel agents.
 3. Create `00NN-slug.md` with frontmatter (use existing ADRs as templates).
 4. Add a row to the index below.
@@ -42,7 +42,7 @@ This directory holds the **why** behind every architectural choice in the codeba
 | [ADR-0005](./0005-recommendation-pattern.md) | Recommendation pattern for ad-hoc work | accepted | ai, product, ux |
 | [ADR-0006](./0006-ai-sugar-on-crud.md) | AI is sugar on conventional CRUD | accepted | architecture |
 | [ADR-0007](./0007-layered-architecture.md) | Layered architecture (routes → controllers → services → repositories) | accepted | architecture |
-| [ADR-0008](./0008-stub-auth.md) | Stub auth via `X-User-Id` header, multi-tenant-ready schema | accepted | auth, schema |
+| [ADR-0008](./0008-stub-auth.md) | Stub auth via `X-User-Id` header, multi-tenant-ready schema | superseded | auth, schema |
 | [ADR-0009](./0009-gcs-storage.md) | GCS from day 1 behind BlobStorage interface | accepted | storage, infrastructure |
 | [ADR-0010](./0010-per-user-timezone.md) | Per-user timezone, default `Asia/Kolkata` | accepted | schema, ux |
 | [ADR-0011](./0011-submit-snapshot.md) | Submit semantics: soft lock with immutable snapshot | accepted | schema, product |
@@ -55,3 +55,5 @@ This directory holds the **why** behind every architectural choice in the codeba
 | [ADR-0018](./0018-deferred-logging.md) | Deferred: structured logging (use `console.*` for POC) | accepted | observability, deferred |
 | [ADR-0019](./0019-deferred-tests.md) | Deferred: automated tests (manual curl at checkpoints) | accepted | testing, deferred |
 | [ADR-0020](./0020-deferred-openapi.md) | Deferred: OpenAPI / Swagger spec generation | accepted | api, deferred |
+| [ADR-0021](./0021-multimodal-fusion-composer.md) | Multimodal fusion composer (`/process`) | accepted | ai, architecture, multimodal |
+| [ADR-0022](./0022-basic-jwt-auth.md) | Basic JWT auth for frontend integration | accepted | auth, api |

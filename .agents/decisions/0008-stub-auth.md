@@ -1,7 +1,7 @@
 ---
 id: ADR-0008
 title: Stub auth via `X-User-Id` header, schema multi-tenant ready
-status: accepted
+status: superseded
 date: 2026-05-22
 tags: [auth, schema]
 supersedes: null

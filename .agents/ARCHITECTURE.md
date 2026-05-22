@@ -23,7 +23,7 @@ Backend_task_list/
 │   ├── repositories/                 # only place Prisma is called
 │   ├── schemas/                      # zod schemas (input + output)
 │   ├── middleware/
-│   │   ├── auth.ts                   # stub: reads X-User-Id
+│   │   ├── auth.ts                   # JWT bearer auth
 │   │   ├── error.ts                  # central error handler
 │   │   ├── idempotency.ts
 │   │   └── upload.ts                 # multer setup
@@ -65,6 +65,7 @@ model User {
   id        String   @id @default(cuid())
   email     String   @unique
   name      String
+  passwordHash String
   role      String   @default("staff")    // "staff" | "manager" | "admin" — for future
   orgId     String                         // single seed org for POC
   timezone  String   @default("Asia/Kolkata")
@@ -216,6 +217,15 @@ All routes under `/api/v1/`. All responses JSON. Standard error shape:
 |---|---|---|
 | GET | `/livez` | Liveness probe (no deps) |
 | GET | `/readyz` | Readiness probe (checks DB) |
+
+### Auth
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/auth/signup` | Create user with email/password. Returns `{token, user}`. |
+| POST | `/auth/login` | Verify email/password. Returns `{token, user}`. |
+| GET | `/auth/me` | Return current user for a valid bearer token. |
+
+All non-auth `/api/v1` routes require `Authorization: Bearer <token>`. Health endpoints stay public.
 
 ### Tasks
 | Method | Path | Purpose |
