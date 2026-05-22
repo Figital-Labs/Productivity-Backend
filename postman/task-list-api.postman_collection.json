@@ -1,0 +1,1380 @@
+{
+  "info": {
+    "_postman_id": "8e61be30-cda1-4b7f-bc6d-2f9e540b0e21",
+    "name": "Task List Backend API",
+    "description": "Frontend-ready Postman collection for the Task List backend. Run the first folder in order to create demo tasks, notes, a holiday, and a day-plan snapshot. Requests use {{baseUrl}} and stub auth header X-User-Id: {{userId}}.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 Run This Demo Flow In Order",
+      "description": "Use Postman's folder runner on this folder. It creates real demo data in the local database and captures IDs into variables for later requests.",
+      "item": [
+        {
+          "name": "01 Initialize Demo Run",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const pad = (n) => String(n).padStart(2, '0');",
+                  "const ymd = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;",
+                  "const now = new Date();",
+                  "const randomOffsetDays = 30 + Math.floor(Math.random() * 5000);",
+                  "const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());",
+                  "const demoDate = new Date(todayUtc + randomOffsetDays * 24 * 60 * 60 * 1000);",
+                  "const holidayDate = new Date(todayUtc + (randomOffsetDays + 7) * 24 * 60 * 60 * 1000);",
+                  "const fromDate = new Date(todayUtc + (randomOffsetDays - 2) * 24 * 60 * 60 * 1000);",
+                  "const toDate = new Date(todayUtc + (randomOffsetDays + 10) * 24 * 60 * 60 * 1000);",
+                  "const runId = `demo-${now.toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${Math.floor(Math.random() * 10000)}`;",
+                  "const values = {",
+                  "  baseUrl: pm.variables.get('baseUrl') || 'http://localhost:3000',",
+                  "  userId: pm.variables.get('userId') || 'demo-user-1',",
+                  "  runId,",
+                  "  date: ymd(demoDate),",
+                  "  holidayDate: ymd(holidayDate),",
+                  "  fromDate: ymd(fromDate),",
+                  "  toDate: ymd(toDate),",
+                  "  taskId: 'replace-after-create-task',",
+                  "  noteId: 'replace-after-create-note'",
+                  "};",
+                  "Object.entries(values).forEach(([key, value]) => {",
+                  "  pm.collectionVariables.set(key, value);",
+                  "  pm.environment.set(key, value);",
+                  "});",
+                  "['morningRoundsTaskId', 'labReportsTaskId', 'dischargeSummaryTaskId', 'dayPlanId', 'dayClosureId', 'activeNoteId'].forEach((key) => {",
+                  "  pm.collectionVariables.unset(key);",
+                  "  pm.environment.unset(key);",
+                  "});",
+                  "console.log(`Demo run ${runId} will use date ${values.date}`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Backend process is live', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Demo variables were initialized', function () {",
+                  "  pm.expect(pm.collectionVariables.get('runId')).to.be.a('string');",
+                  "  pm.expect(pm.collectionVariables.get('date')).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "Run this first. It checks /livez and sets runId, date, holidayDate, fromDate, and toDate. The demo date is intentionally random in the future so the day-plan unique constraint does not block repeated demos.",
+            "url": "{{baseUrl}}/livez"
+          }
+        },
+        {
+          "name": "02 Ready Check - DB Connected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Database readiness check passes', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('DB check is ok', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.checks.db).to.eql('ok');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "Verifies that the backend can reach Postgres. If this fails, run migrations/seed and check DATABASE_URL.",
+            "url": "{{baseUrl}}/readyz"
+          }
+        },
+        {
+          "name": "03 Create Demo Task - Patient Rounds",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Task created', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "const task = pm.response.json();",
+                  "pm.collectionVariables.set('morningRoundsTaskId', task.id);",
+                  "pm.environment.set('morningRoundsTaskId', task.id);",
+                  "pm.collectionVariables.set('taskId', task.id);",
+                  "pm.environment.set('taskId', task.id);",
+                  "pm.test('Created task has expected fields', function () {",
+                  "  pm.expect(task.title).to.include(pm.collectionVariables.get('runId'));",
+                  "  pm.expect(task.priority).to.eql('high');",
+                  "  pm.expect(task.completed).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Creates a high-priority task for the demo date and saves its id as morningRoundsTaskId.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"{{runId}} - Patient rounds at 8am\",\n  \"targetDate\": \"{{date}}\",\n  \"notes\": \"Check vitals, medication chart, and discharge readiness.\",\n  \"priority\": \"high\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/tasks"
+          }
+        },
+        {
+          "name": "04 Create Demo Task - Lab Reports",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Task created', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "const task = pm.response.json();",
+                  "pm.collectionVariables.set('labReportsTaskId', task.id);",
+                  "pm.environment.set('labReportsTaskId', task.id);",
+                  "pm.test('Medium priority task captured', function () {",
+                  "  pm.expect(task.priority).to.eql('medium');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Creates a medium-priority task that later gets marked partial.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"{{runId}} - Call lab for pending reports\",\n  \"targetDate\": \"{{date}}\",\n  \"notes\": \"Ask about CBC and LFT reports before 2pm.\",\n  \"priority\": \"medium\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/tasks"
+          }
+        },
+        {
+          "name": "05 Create Demo Task - Discharge Summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Task created', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "const task = pm.response.json();",
+                  "pm.collectionVariables.set('dischargeSummaryTaskId', task.id);",
+                  "pm.environment.set('dischargeSummaryTaskId', task.id);",
+                  "pm.test('Low priority task captured', function () {",
+                  "  pm.expect(task.priority).to.eql('low');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Creates a low-priority task that later demonstrates delete and restore.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"{{runId}} - Draft discharge summary\",\n  \"targetDate\": \"{{date}}\",\n  \"notes\": \"Prepare draft summary for tomorrow's consultant review.\",\n  \"priority\": \"low\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/tasks"
+          }
+        },
+        {
+          "name": "06 List Demo Tasks",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Tasks listed', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const tasks = pm.response.json();",
+                  "pm.test('At least three demo tasks exist', function () {",
+                  "  pm.expect(tasks).to.be.an('array');",
+                  "  const runId = pm.collectionVariables.get('runId');",
+                  "  const matching = tasks.filter((task) => task.title.includes(runId));",
+                  "  pm.expect(matching.length).to.be.at.least(3);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "Lists tasks for {{date}}. Frontend task-list screens usually start with this request.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/tasks?date={{date}}"
+          }
+        },
+        {
+          "name": "07 Submit Day Plan Snapshot",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Day plan submitted', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "const plan = pm.response.json();",
+                  "pm.collectionVariables.set('dayPlanId', plan.id);",
+                  "pm.environment.set('dayPlanId', plan.id);",
+                  "pm.test('Plan snapshot contains tasks', function () {",
+                  "  pm.expect(plan.taskSnapshot).to.be.an('array');",
+                  "  pm.expect(plan.taskSnapshot.length).to.be.at.least(3);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Commits the morning plan for {{date}}. The backend allows only one plan per user/date, so Initialize Demo Run chooses a fresh date.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{date}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/day-plan/submit"
+          }
+        },
+        {
+          "name": "08 Get Day Plan Snapshot",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Day plan returned', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Day plan id matches submitted plan', function () {",
+                  "  const plan = pm.response.json();",
+                  "  pm.expect(plan.id).to.eql(pm.collectionVariables.get('dayPlanId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "Fetches the immutable morning plan snapshot for {{date}}.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/day-plan?date={{date}}"
+          }
+        },
+        {
+          "name": "09 Complete Patient Rounds",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Task updated', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Task is completed', function () {",
+                  "  const task = pm.response.json();",
+                  "  pm.expect(task.completed).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "description": "Simulates during-the-day progress by marking the first task complete.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"completed\": true,\n  \"isPartial\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/tasks/{{morningRoundsTaskId}}"
+          }
+        },
+        {
+          "name": "10 Mark Lab Reports Partial",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Task updated', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Task is partial', function () {",
+                  "  const task = pm.response.json();",
+                  "  pm.expect(task.isPartial).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "description": "Simulates partial progress on a task.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isPartial\": true,\n  \"notes\": \"Lab answered, but one report is still pending.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/tasks/{{labReportsTaskId}}"
+          }
+        },
+        {
+          "name": "11 Delete Low Priority Task",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Task soft-deleted', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('deletedAt is set', function () {",
+                  "  const task = pm.response.json();",
+                  "  pm.expect(task.deletedAt).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "description": "Demonstrates soft delete. The task is hidden from list results until restored.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/tasks/{{dischargeSummaryTaskId}}"
+          }
+        },
+        {
+          "name": "12 Restore Low Priority Task",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Task restored', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('deletedAt is cleared', function () {",
+                  "  const task = pm.response.json();",
+                  "  pm.expect(task.deletedAt).to.eql(null);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Restores the soft-deleted task.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/tasks/{{dischargeSummaryTaskId}}/restore"
+          }
+        },
+        {
+          "name": "13 List Updated Demo Tasks",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Updated task list returned', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Completed and partial states are visible', function () {",
+                  "  const tasks = pm.response.json();",
+                  "  const completed = tasks.find((task) => task.id === pm.collectionVariables.get('morningRoundsTaskId'));",
+                  "  const partial = tasks.find((task) => task.id === pm.collectionVariables.get('labReportsTaskId'));",
+                  "  pm.expect(completed.completed).to.eql(true);",
+                  "  pm.expect(partial.isPartial).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "Shows the frontend what the task-list UI receives after updates.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/tasks?date={{date}}"
+          }
+        },
+        {
+          "name": "14 Create Demo Note",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Note created', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "const note = pm.response.json();",
+                  "pm.collectionVariables.set('activeNoteId', note.id);",
+                  "pm.environment.set('activeNoteId', note.id);",
+                  "pm.collectionVariables.set('noteId', note.id);",
+                  "pm.environment.set('noteId', note.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Creates a standalone note. Notes are not dated and are separate from tasks.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"{{runId}} - Family asked for medication timing clarification.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/notes"
+          }
+        },
+        {
+          "name": "15 Update Demo Note",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Note updated', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Updated content returned', function () {",
+                  "  const note = pm.response.json();",
+                  "  pm.expect(note.content).to.include('Updated');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "description": "Updates the note captured from the previous request.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"{{runId}} - Updated: family asked for medication timing clarification after lunch.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/notes/{{activeNoteId}}"
+          }
+        },
+        {
+          "name": "16 List Notes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Notes listed', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Demo note is present', function () {",
+                  "  const notes = pm.response.json();",
+                  "  const note = notes.find((item) => item.id === pm.collectionVariables.get('activeNoteId'));",
+                  "  pm.expect(note).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "Lists active notes. Archived and deleted notes are excluded.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/notes"
+          }
+        },
+        {
+          "name": "17 Toggle Holiday On",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Holiday added', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test('Response marks added true', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.added).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Adds a user holiday for holidayDate. Running the same request again toggles it off.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{holidayDate}}\",\n  \"reason\": \"{{runId}} - Personal leave\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/holidays/toggle"
+          }
+        },
+        {
+          "name": "18 List Holidays",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Holidays listed', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Demo holiday is present', function () {",
+                  "  const holidays = pm.response.json();",
+                  "  const expectedDate = pm.collectionVariables.get('holidayDate');",
+                  "  const found = holidays.some((holiday) => String(holiday.date).slice(0, 10) === expectedDate);",
+                  "  pm.expect(found).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "description": "Lists holidays in the generated date range.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/holidays?from={{fromDate}}&to={{toDate}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 Common API Requests",
+      "description": "Single requests for day-to-day frontend testing. These reuse the IDs captured by the demo flow where possible.",
+      "item": [
+        {
+          "name": "Live Check",
+          "request": {
+            "method": "GET",
+            "description": "Process liveness check. Does not verify DB.",
+            "url": "{{baseUrl}}/livez"
+          }
+        },
+        {
+          "name": "Ready Check",
+          "request": {
+            "method": "GET",
+            "description": "Readiness check. Returns 503 if DB is unreachable.",
+            "url": "{{baseUrl}}/readyz"
+          }
+        },
+        {
+          "name": "List Tasks By Date",
+          "request": {
+            "method": "GET",
+            "description": "Returns non-deleted tasks for date. Sorted by priority then creation time.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/tasks?date={{date}}"
+          }
+        },
+        {
+          "name": "Create Task",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const task = pm.response.json();",
+                  "  pm.collectionVariables.set('taskId', task.id);",
+                  "  pm.environment.set('taskId', task.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Manual task creation. The response id is saved as taskId.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Frontend manual test task\",\n  \"targetDate\": \"{{date}}\",\n  \"notes\": \"Created from Postman common request.\",\n  \"priority\": \"medium\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/tasks"
+          }
+        },
+        {
+          "name": "Update Task",
+          "request": {
+            "method": "PATCH",
+            "description": "Patch any subset of title, notes, priority, completed, and isPartial.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"completed\": true,\n  \"priority\": \"high\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/tasks/{{taskId}}"
+          }
+        },
+        {
+          "name": "Delete Task",
+          "request": {
+            "method": "DELETE",
+            "description": "Soft deletes a task. The row remains in DB with deletedAt set.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/tasks/{{taskId}}"
+          }
+        },
+        {
+          "name": "Restore Task",
+          "request": {
+            "method": "POST",
+            "description": "Restores a soft-deleted task.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/tasks/{{taskId}}/restore"
+          }
+        },
+        {
+          "name": "List Notes",
+          "request": {
+            "method": "GET",
+            "description": "Returns active notes. Archived/deleted notes are excluded.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/notes"
+          }
+        },
+        {
+          "name": "Create Note",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const note = pm.response.json();",
+                  "  pm.collectionVariables.set('noteId', note.id);",
+                  "  pm.environment.set('noteId', note.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Creates a standalone note and saves the id as noteId.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Frontend note test from Postman.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/notes"
+          }
+        },
+        {
+          "name": "Update Note",
+          "request": {
+            "method": "PATCH",
+            "description": "Updates note content.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Updated frontend note test from Postman.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/notes/{{noteId}}"
+          }
+        },
+        {
+          "name": "Archive Note",
+          "request": {
+            "method": "POST",
+            "description": "Archives a note. Archived notes are hidden from list results.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/notes/{{noteId}}/archive"
+          }
+        },
+        {
+          "name": "Delete Note",
+          "request": {
+            "method": "DELETE",
+            "description": "Soft deletes a note.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/notes/{{noteId}}"
+          }
+        },
+        {
+          "name": "Toggle Holiday",
+          "request": {
+            "method": "POST",
+            "description": "Adds a holiday if missing, removes it if already present.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{holidayDate}}\",\n  \"reason\": \"Postman holiday test\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/holidays/toggle"
+          }
+        },
+        {
+          "name": "List Holidays",
+          "request": {
+            "method": "GET",
+            "description": "Lists holidays between fromDate and toDate, inclusive.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/holidays?from={{fromDate}}&to={{toDate}}"
+          }
+        },
+        {
+          "name": "Submit Day Plan",
+          "request": {
+            "method": "POST",
+            "description": "Creates an immutable snapshot of tasks for date. Only one plan per user/date is allowed.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{date}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/day-plan/submit"
+          }
+        },
+        {
+          "name": "Get Day Plan",
+          "request": {
+            "method": "GET",
+            "description": "Retrieves the day-plan snapshot for date.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/day-plan?date={{date}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Optional AI And File Uploads",
+      "description": "These require Vertex credentials and/or manually selected files. They are intentionally separate from the basic demo flow.",
+      "item": [
+        {
+          "name": "Process Text With AI",
+          "request": {
+            "method": "POST",
+            "description": "Free-form text to AI task extraction. Requires working Vertex configuration. AI-created tasks are created for the backend's current date.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Aaj patient rounds complete karne hain, lab reports urgent follow up karna hai, aur discharge summary draft banana hai.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/text/process"
+          }
+        },
+        {
+          "name": "Process Voice With AI",
+          "request": {
+            "method": "POST",
+            "description": "Multipart audio to AI task extraction. In Postman, manually select fusion-audio.wav or another audio file for the audio field.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "audio",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/voice/process"
+          }
+        },
+        {
+          "name": "Process Image With AI",
+          "request": {
+            "method": "POST",
+            "description": "Multipart image to AI OCR/task extraction. In Postman, manually select fusion-image.png or another image file for the image field.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/images/process"
+          }
+        },
+        {
+          "name": "Process Unified Text Audio Image With AI",
+          "request": {
+            "method": "POST",
+            "description": "Single fusion endpoint. At least one of text, audio, or image is required. Manually attach files if using audio/image.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "text",
+                  "value": "Add one high priority follow-up task from this note.",
+                  "type": "text"
+                },
+                {
+                  "key": "audio",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/process"
+          }
+        },
+        {
+          "name": "Submit Day Closure With Audio",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const body = pm.response.json();",
+                  "  pm.collectionVariables.set('dayClosureId', body.dayClosureId);",
+                  "  pm.environment.set('dayClosureId', body.dayClosureId);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "description": "Evening closeout. Requires a day plan for {{date}} and an audio file in the audio field. It can take 10-20 seconds because it makes AI calls.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "audio",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "commentary",
+                  "value": "Patient rounds completed. Lab reports were partially done. Discharge summary is still pending.",
+                  "type": "text"
+                },
+                {
+                  "key": "date",
+                  "value": "{{date}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/day-closure/submit"
+          }
+        },
+        {
+          "name": "Get Day Closure",
+          "request": {
+            "method": "GET",
+            "description": "Fetches the submitted day closure for {{date}}.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/day-closure?date={{date}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Error Shape Examples",
+      "description": "Requests that intentionally fail so frontend developers can see the standard error response.",
+      "item": [
+        {
+          "name": "Validation Error - Empty Task Body",
+          "request": {
+            "method": "POST",
+            "description": "Expected 400 VALIDATION_ERROR because title is required.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/tasks"
+          }
+        },
+        {
+          "name": "Not Found - Missing Day Plan",
+          "request": {
+            "method": "GET",
+            "description": "Expected 404 DAY_PLAN_NOT_FOUND for a date that should not have a submitted plan.",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/day-plan?date=2099-12-31"
+          }
+        },
+        {
+          "name": "Conflict - Submit Same Day Plan Twice",
+          "request": {
+            "method": "POST",
+            "description": "Expected 409 DAY_PLAN_ALREADY_SUBMITTED if you already ran the demo flow for {{date}}.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-User-Id",
+                "value": "{{userId}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{date}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/day-plan/submit"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "userId",
+      "value": "demo-user-1"
+    },
+    {
+      "key": "runId",
+      "value": "demo-manual"
+    },
+    {
+      "key": "date",
+      "value": "2026-05-22"
+    },
+    {
+      "key": "holidayDate",
+      "value": "2026-05-29"
+    },
+    {
+      "key": "fromDate",
+      "value": "2026-05-01"
+    },
+    {
+      "key": "toDate",
+      "value": "2026-05-31"
+    },
+    {
+      "key": "taskId",
+      "value": "replace-after-create-task"
+    },
+    {
+      "key": "noteId",
+      "value": "replace-after-create-note"
+    },
+    {
+      "key": "morningRoundsTaskId",
+      "value": ""
+    },
+    {
+      "key": "labReportsTaskId",
+      "value": ""
+    },
+    {
+      "key": "dischargeSummaryTaskId",
+      "value": ""
+    },
+    {
+      "key": "dayPlanId",
+      "value": ""
+    },
+    {
+      "key": "dayClosureId",
+      "value": ""
+    },
+    {
+      "key": "activeNoteId",
+      "value": ""
+    }
+  ]
+}
