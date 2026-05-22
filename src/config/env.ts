@@ -36,6 +36,15 @@ const EnvSchema = z.object({
   GOOGLE_CLOUD_LOCATION: z.string().min(1),
   PORT: z.coerce.number().int().positive().default(3000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  CORS_ORIGINS: z
+    .string()
+    .default("*")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter((origin) => origin.length > 0),
+    ),
   JWT_SECRET: z.string().min(32),
   JWT_TTL: z.string().min(1).default("30d"),
 });
@@ -52,6 +61,7 @@ export const env = {
   databaseUrl: parsed.data.DATABASE_URL,
   port: parsed.data.PORT,
   nodeEnv: parsed.data.NODE_ENV,
+  corsOrigins: parsed.data.CORS_ORIGINS,
   jwtSecret: parsed.data.JWT_SECRET,
   jwtTtl: parsed.data.JWT_TTL,
   gcp: {

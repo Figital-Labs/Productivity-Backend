@@ -1,6 +1,7 @@
 import express from "express";
 import type { Express } from "express";
 
+import { corsMiddleware } from "./middleware/cors.js";
 import { errorMiddleware } from "./middleware/error.js";
 import { healthRouter } from "./routes/health.routes.js";
 import { v1Router } from "./routes/v1.js";
@@ -15,6 +16,7 @@ export function createApp(): Express {
   const app = express();
 
   app.disable("x-powered-by");
+  app.use(corsMiddleware);
   app.use(express.json({ limit: "1mb" }));
 
   // Health endpoints (unversioned).

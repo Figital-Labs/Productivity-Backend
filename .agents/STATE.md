@@ -116,6 +116,8 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 - Storage provider switched from GCS to S3 (still deferred until credentials). ADR-0009 marked `superseded by ADR-0023`; new ADR-0023 documents the reversal and confirms the `BlobStorage` interface from ADR-0009 carries over unchanged. Forward-looking docs scrubbed (STATE/ARCHITECTURE/SCOPE/GLOSSARY/CONVENTIONS/BACKEND_GUIDE + decisions index); two code-level comments in `day-closure.schema.ts` and `errors.ts` flipped to S3. Sprint history files left untouched.
 
+- Frontend login integration fix: added backend CORS middleware with `CORS_ORIGINS` support. POC setting is now `CORS_ORIGINS=*`, and the code default also allows any origin. Browser preflight for `POST /api/v1/auth/login` returns `204` with `Access-Control-Allow-Origin: *`. Verified with `npm run typecheck`, `npm run lint`, OPTIONS preflight from a random Origin, and demo login with an Origin header.
+
 ## What An Agent Should Do Right Now
 
 **POC is complete.** All planned sprints (1-7) are shipped, plus the post-Sprint-7 text + fusion addendum and Sprint 8 lite JWT auth. Sprint 8 Alerts + History remains deferred indefinitely.
