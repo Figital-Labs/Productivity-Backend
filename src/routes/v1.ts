@@ -1,5 +1,7 @@
 import { Router } from "express";
 
+import { dayClosureRouter } from "./day-closure.routes.js";
+import { dayPlanRouter } from "./day-plan.routes.js";
 import { holidaysRouter } from "./holidays.routes.js";
 import { imagesRouter } from "./images.routes.js";
 import { notesRouter } from "./notes.routes.js";
@@ -13,3 +15,5 @@ v1Router.use("/notes", notesRouter);
 v1Router.use("/holidays", holidaysRouter);
 v1Router.use("/voice", voiceRouter);
 v1Router.use("/images", imagesRouter);
+v1Router.use("/day-plan", dayPlanRouter);
+v1Router.use("/day-closure", dayClosureRouter);

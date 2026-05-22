@@ -14,9 +14,9 @@ tags: [meta, state, coordination]
 
 ## Active Sprint
 
-**Sprint 6 — Image processing (`/images/process`)** — `Status: implementation complete; smoke tests passing; awaiting user review + commit`. Image-only scope. Storage + media attach/detach + audioUrl backfill all deferred to Sprint 7 (per user decision 2026-05-22, option C). Detail file: [sprints/06-image-processing.md](./sprints/06-image-processing.md).
+**Sprint 7 — Day Plan + Day Closure** — `Status: implementation complete; smoke tests green; awaiting user review + commit`. Tight scope: day-plan + day-closure only. Storage etc. still deferred (GCS not ready). Detail file: [sprints/07-day-plan-closure.md](./sprints/07-day-plan-closure.md).
 
-Previous: Sprint 5 — Voice intent (implementation complete, smoke tests green; user has been committing per sprint).
+Previous: Sprint 6 — Image processing (implementation complete, smoke tests green; user is committing per sprint).
 
 See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 
@@ -32,7 +32,7 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 | 04 — Schema + Pure CRUD | ✅ complete | claude-session | 2026-05-22 | 2026-05-22 | [sprints/04-schema-crud.md](./sprints/04-schema-crud.md) |
 | 05 — Voice intent + /voice/process | 🟢 ready for review | claude-session | 2026-05-22 | — | [sprints/05-voice-intent.md](./sprints/05-voice-intent.md) |
 | 06 — Image processing (image-only) | 🟢 ready for review | claude-session | 2026-05-22 | — | [sprints/06-image-processing.md](./sprints/06-image-processing.md) |
-| 07 — Day Plan + Day Closure | ⏸ not started | — | — | — | *(TBD)* |
+| 07 — Day Plan + Day Closure | 🟢 ready for review | claude-session | 2026-05-22 | — | [sprints/07-day-plan-closure.md](./sprints/07-day-plan-closure.md) |
 | 08 — Alerts + History | ⏸ not started | — | — | — | *(TBD)* |
 | 09 — Polish | ⏸ not started | — | — | — | *(TBD)* |
 
@@ -46,7 +46,7 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 | Resource | Owner | Started | Note |
 |---|---|---|---|
-| Sprint 6 — Image processing | claude-session | 2026-05-22 | Planning phase — awaiting plan approval |
+| Sprint 7 — Day Plan + Day Closure | claude-session | 2026-05-22 | Planning phase — awaiting plan approval |
 
 **How to claim a lock:** add a row with `Resource: <file or sprint name>`, `Owner: <session/agent identifier>`, `Started: <ISO timestamp>`, `Note: <one-line context>`. Remove the row when you're done.
 
@@ -98,6 +98,10 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 - Sprint 6 refactor: extracted `dispatchAiAction` + `PersistedAiAction` from voice-intent.service.ts into shared `src/services/action-dispatch.service.ts` (used by both voice + image; will also serve day-closure in Sprint 7). Voice service updated to use it; typecheck + lint still green. The `VoiceAction` schema type is reused for the dispatcher parameter — modality-neutral despite its Sprint-5 name (rename deferred until 3+ callers agree).
 - Sprint 6 stack: `src/middleware/upload.ts` extended with `imageUpload` preset (15 MB, JPEG/PNG/WebP/HEIC/HEIF). `src/repositories/image.repository.ts`. `src/services/image-extraction.service.ts` (mirror of voice service, uses shared dispatcher). `src/controllers/image.controller.ts` + `src/routes/images.routes.ts` mounted at `/api/v1/images/process`.
 - Sprint 6 smoke (synthetic 800x600 PNG with 4 task items via GDI/PowerShell): HTTP 201 in ~9s; `extractedText` captured all 4 items with newlines preserved; 4 `created` actions emitted; "URGENT: Pay electricity bill" correctly resolved to `priority: "high"` while the other 3 had no priority; all 4 created tasks landed in DB with `sourceType: "image"` + same `sourceId` → ImageExtraction row; reasoning sensible on each. Error paths: 400 on wrong MIME, 400 on missing image field, both with `VALIDATION_ERROR` shape. Voice flow not re-smoked but contract-verified via typecheck/lint after refactor.
+- Sprint 7 kicked off + completed same day. Tight scope per user (option A): day-plan + day-closure only, no storage/media/backfill. Two product rules baked in: (a) closure requires a prior day-plan for the date (409 `NO_DAY_PLAN_FOR_DATE`), (b) one-submit-per-(user,date) for both endpoints (`@@unique([userId, date])` enforces; 409 `ALREADY_SUBMITTED` on dup). User confirmed one-per-day is correct semantics; PATCH support deferred to "revisit if".
+- Sprint 7 stack: `src/schemas/day-plan.schema.ts` (with a `type` alias `TaskSnapshotEntry` + targeted lint-disable for `consistent-type-definitions` — interfaces don't satisfy Prisma `InputJsonObject`'s index signature, documented why). `src/repositories/day-plan.repository.ts`. `src/services/day-plan.service.ts` (snapshots `taskRepo.listByDate(user.id, date)` excluding nullable fields when null). `src/controllers/day-plan.controller.ts` + `src/routes/day-plan.routes.ts` mounted at `/api/v1/day-plan`.
+- Sprint 7 closure: `src/schemas/day-closure-feedback.schema.ts` (6-field structured: achievements/missed/partial/additions/tips/summary, with `.describe()` annotations for the generated JSON Schema). `src/lib/prompts/day-closure-feedback.ts` — Hinglish-only output rule + clear priority rules (CURRENT_TASK_STATES is source of truth for completion, narrative is source for additions). `src/schemas/day-closure.schema.ts`. `src/repositories/day-closure.repository.ts`. `src/services/day-closure.service.ts` (orchestrator: validate plan exists + no duplicate → call `voiceIntentService.processVoice` first to execute task updates → load current task states post-update → SECOND Vertex call for structured `aiFeedback` → persist `DayClosureSubmission`). `src/controllers/day-closure.controller.ts` + `src/routes/day-closure.routes.ts` mounted at `/api/v1/day-closure`. Sync point 1 (prompt review) was pre-approved by user, so written without intermediate pause.
+- Sprint 7 smoke (3 seeded tasks → day-plan submit → closure with SAPI TTS WAV: "I bought the groceries. The doctor appointment is partial. I called but they were closed. Also I attended an emergency meeting today, that was not planned."): closure took ~16s (2 Vertex calls). Voice flow correctly classified `completed` (Buy groceries) + `partial` (Doctor appointment) by exact taskId match; emergency meeting went to `recommendations` not auto-created (ADR-0005 honored). `aiFeedback` came back fully populated: achievements/missed/partial/additions correct based on plan-vs-current diff; **tips and summary genuinely in Hinglish** ("Doctor appointment ke liye pehle timings confirm kar lo." / "Aaj ka din busy tha, groceries done aur emergency meeting bhi manage ki. Doctor appointment partial raha aur research paper miss ho gaya, but achha effort tha overall."). DB verified: 3 Tasks with correct end states, 1 DayPlanSubmission (plan_size=3), 1 DayClosureSubmission (6 feedback fields), 1 VoiceInteraction (2 actions, 1 rec). All 5 error paths green: duplicate plan → 409, duplicate closure → 409, closure without plan → 409 `NO_DAY_PLAN_FOR_DATE`, missing audio → 400, GET non-submitted date → 404 `DAY_CLOSURE_NOT_FOUND`.
 
 ---
 
