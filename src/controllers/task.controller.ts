@@ -10,7 +10,7 @@ import * as taskService from "../services/task.service.js";
 
 export async function list(req: Request, res: Response): Promise<void> {
   const query = listTasksQuerySchema.parse(req.query);
-  const tasks = await taskService.listTasks(req.user, query.date);
+  const tasks = await taskService.listTasks(req.user, query);
   res.json(tasks);
 }
 

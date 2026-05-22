@@ -24,7 +24,12 @@ export const updateTaskInputSchema = z
   });
 export type UpdateTaskInput = z.infer<typeof updateTaskInputSchema>;
 
-export const listTasksQuerySchema = z.object({
-  date: dateStringSchema.optional(),
-});
+export const listTasksQuerySchema = z
+  .object({
+    date: dateStringSchema.optional(),
+    openCarryOver: z.coerce.boolean().optional(),
+  })
+  .refine((v) => !(v.date && v.openCarryOver), {
+    message: "date and openCarryOver are mutually exclusive",
+  });
 export type ListTasksQuery = z.infer<typeof listTasksQuerySchema>;

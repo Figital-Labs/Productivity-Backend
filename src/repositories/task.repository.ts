@@ -45,6 +45,13 @@ export function listPending(userId: string, limit: number): Promise<Task[]> {
   });
 }
 
+export function listOpenCarryOver(userId: string, today: Date): Promise<Task[]> {
+  return prisma.task.findMany({
+    where: { userId, completed: false, deletedAt: null, targetDate: { lt: today } },
+    orderBy: [{ targetDate: "asc" }, { createdAt: "asc" }],
+  });
+}
+
 export function create(data: CreateTaskData): Promise<Task> {
   return prisma.task.create({ data: omitUndefined(data) });
 }

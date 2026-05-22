@@ -498,13 +498,14 @@ curl -X POST http://localhost:3000/api/v1/process \
 
 ### Tasks
 
-| Method | Path                            | Purpose                                                                                                                                                                                         |
-| ------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/v1/tasks?date=YYYY-MM-DD` | List tasks for a date (default: today in user's TZ). Sorted by priority then creation time. Excludes soft-deleted.                                                                              |
-| POST   | `/api/v1/tasks`                 | Create a task manually. Body: `{title, targetDate?, notes?, priority?}`                                                                                                                         |
-| PATCH  | `/api/v1/tasks/:id`             | Update fields. Body: any subset of `{title, notes, completed, isPartial, priority, targetDate}`. Use `targetDate` to move a task between days (e.g. roll over yesterday's leftover into today). |
-| DELETE | `/api/v1/tasks/:id`             | Soft delete (sets `deletedAt`). 409 if already deleted.                                                                                                                                         |
-| POST   | `/api/v1/tasks/:id/restore`     | Clear `deletedAt`. 409 if task is not deleted.                                                                                                                                                  |
+| Method | Path                               | Purpose                                                                                                                                                                                                                              |
+| ------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/api/v1/tasks?date=YYYY-MM-DD`    | List tasks for a date (default: today in user's TZ). Sorted by priority then creation time. Excludes soft-deleted.                                                                                                                   |
+| GET    | `/api/v1/tasks?openCarryOver=true` | Return all incomplete tasks (`completed:false`, `deletedAt:null`) whose `targetDate` is strictly before today (Asia/Kolkata). Ordered `targetDate ASC, createdAt ASC`. Mutually exclusive with `?date` — sending both returns `400`. |
+| POST   | `/api/v1/tasks`                    | Create a task manually. Body: `{title, targetDate?, notes?, priority?}`                                                                                                                                                              |
+| PATCH  | `/api/v1/tasks/:id`                | Update fields. Body: any subset of `{title, notes, completed, isPartial, priority, targetDate}`. Use `targetDate` to move a task between days (e.g. roll over yesterday's leftover into today).                                      |
+| DELETE | `/api/v1/tasks/:id`                | Soft delete (sets `deletedAt`). 409 if already deleted.                                                                                                                                                                              |
+| POST   | `/api/v1/tasks/:id/restore`        | Clear `deletedAt`. 409 if task is not deleted.                                                                                                                                                                                       |
 
 **Body fields for create/update:**
 

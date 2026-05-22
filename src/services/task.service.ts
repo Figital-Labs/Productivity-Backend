@@ -1,7 +1,7 @@
 import { ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as taskRepo from "../repositories/task.repository.js";
-import type { CreateTaskInput, UpdateTaskInput } from "../schemas/task.schema.js";
+import type { CreateTaskInput, ListTasksQuery, UpdateTaskInput } from "../schemas/task.schema.js";
 import { canAccess } from "../utils/auth.js";
 import { parseDateString, todayInUserTz } from "../utils/date.js";
 
@@ -15,8 +15,14 @@ export async function getTask(user: AuthenticatedUser, id: string): Promise<task
   return task;
 }
 
-export function listTasks(user: AuthenticatedUser, dateStr?: string): Promise<taskRepo.Task[]> {
-  const date = dateStr ? parseDateString(dateStr) : todayInUserTz(DEFAULT_TIMEZONE);
+export function listTasks(
+  user: AuthenticatedUser,
+  query: ListTasksQuery,
+): Promise<taskRepo.Task[]> {
+  if (query.openCarryOver) {
+    return taskRepo.listOpenCarryOver(user.id, todayInUserTz(DEFAULT_TIMEZONE));
+  }
+  const date = query.date ? parseDateString(query.date) : todayInUserTz(DEFAULT_TIMEZONE);
   return taskRepo.listByDate(user.id, date);
 }
 

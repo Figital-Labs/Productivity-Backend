@@ -231,8 +231,9 @@ All non-auth `/api/v1` routes require `Authorization: Bearer <token>`. Health en
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/tasks?date=YYYY-MM-DD` | List tasks for a date (default today in user's TZ) |
+| GET | `/tasks?openCarryOver=true` | List incomplete tasks with `targetDate < today`, ordered by `targetDate ASC`. Mutually exclusive with `date` — sending both → 400 |
 | POST | `/tasks` | Create task manually `{title, targetDate?, notes?, priority?}` |
-| PATCH | `/tasks/:id` | Update task (title, notes, completed, isPartial, priority) |
+| PATCH | `/tasks/:id` | Update task (title, notes, completed, isPartial, priority, targetDate) |
 | DELETE | `/tasks/:id` | Soft delete (sets `deletedAt`) |
 | POST | `/tasks/:id/restore` | Clear `deletedAt` |
 | POST | `/tasks/:id/media` | Attach media (multipart) |

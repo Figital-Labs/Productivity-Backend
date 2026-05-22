@@ -118,6 +118,8 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 - Frontend login integration fix: added backend CORS middleware with `CORS_ORIGINS` support. POC setting is now `CORS_ORIGINS=*`, and the code default also allows any origin. Browser preflight for `POST /api/v1/auth/login` returns `204` with `Access-Control-Allow-Origin: *`. Verified with `npm run typecheck`, `npm run lint`, OPTIONS preflight from a random Origin, and demo login with an Origin header.
 
+- `GET /api/v1/tasks?openCarryOver=true` added — frontend-driven addition during Sprint 02.5 (drag-to-today UI surface). Returns incomplete tasks with `targetDate < todayInUserTz("Asia/Kolkata")`, ordered `targetDate ASC, createdAt ASC`. Mutually exclusive with `date` — sending both → 400 via zod `.refine()`. Changes: `listTasksQuerySchema` extended with `openCarryOver: z.coerce.boolean().optional()` + refine; `taskRepo.listOpenCarryOver(userId, today)` sibling of `listPending` (untouched); `listTasks` service signature changed from `(user, dateStr?)` to `(user, query)`; controller passes full `query`. ARCHITECTURE.md task endpoint table + BACKEND_GUIDE.md updated. `npm run lint` + `npm run build` green. Curl smoke: `?date=2026-05-22` ✅, `?openCarryOver=true` returns 12 incomplete tasks ✅, both params → 400 ✅. Implemented by a Sonnet subagent under foreground supervision from a frontend-side claude-session.
+
 ## What An Agent Should Do Right Now
 
 **POC is complete.** All planned sprints (1-7) are shipped, plus the post-Sprint-7 text + fusion addendum and Sprint 8 lite JWT auth. Sprint 8 Alerts + History remains deferred indefinitely.
