@@ -19,14 +19,16 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tasks             Task[]
-  notes             Note[]
-  alerts            Alert[]
-  holidays          Holiday[]
-  dayPlans          DayPlanSubmission[]
-  dayClosures       DayClosureSubmission[]
-  voiceInteractions VoiceInteraction[]
-  imageExtractions  ImageExtraction[]
+  tasks                Task[]
+  notes                Note[]
+  alerts               Alert[]
+  holidays             Holiday[]
+  dayPlans             DayPlanSubmission[]
+  dayClosures          DayClosureSubmission[]
+  voiceInteractions    VoiceInteraction[]
+  imageExtractions     ImageExtraction[]
+  textInteractions     TextInteraction[]
+  unifiedInteractions  UnifiedInteraction[]
 }
 
 model Task {
@@ -148,6 +150,34 @@ model ImageExtraction {
   userId          String
   imageUrl        String?
   extractedText   String?
+  actions         Json
+  recommendations Json
+  createdAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+model TextInteraction {
+  id              String   @id @default(cuid())
+  userId          String
+  inputText       String
+  actions         Json
+  recommendations Json
+  createdAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+model UnifiedInteraction {
+  id              String   @id @default(cuid())
+  userId          String
+  inputText       String?
+  audioUrl        String?
+  imageUrl        String?
   actions         Json
   recommendations Json
   createdAt       DateTime @default(now())

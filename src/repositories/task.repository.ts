@@ -4,7 +4,7 @@ import { omitUndefined } from "../utils/object.js";
 
 export type Task = TaskModel;
 
-export type TaskSourceType = "manual" | "voice" | "image";
+export type TaskSourceType = "manual" | "voice" | "image" | "text" | "unified";
 export type TaskPriority = "low" | "medium" | "high";
 
 export interface CreateTaskData {

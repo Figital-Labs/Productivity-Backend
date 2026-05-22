@@ -2,7 +2,7 @@
 
 > A single-document reference for the frontend team and product owner. Describes what the backend does, the supported user journeys, every endpoint with example requests, and the parts that are deliberately not built yet.
 
-**Backend version:** POC (Sprints 1–7 complete; Sprint 8 deferred)
+**Backend version:** POC (Sprints 1–7 complete + text/fusion addendum; Sprint 8 deferred)
 **Last updated:** 2026-05-22
 
 ---
@@ -28,9 +28,13 @@ The backend handles **all persistence, all AI orchestration, and all task lifecy
 │                          MORNING                            │
 │                                                             │
 │  User adds tasks via ANY of:                                │
-│    • Manual: POST /tasks                                    │
-│    • Voice:  POST /voice/process    (speak the plan)        │
-│    • Image:  POST /images/process   (photo of task sheet)   │
+│    • Manual:    POST /tasks                                 │
+│    • Voice:     POST /voice/process    (speak the plan)     │
+│    • Image:     POST /images/process   (photo of task sheet)│
+│    • Text:      POST /text/process     (typed paragraph)    │
+│    • All three: POST /process          (fusion: audio +     │
+│                                         image + text in     │
+│                                         one Vertex call)    │
 │                                                             │
 │  Then commits:                                              │
 │    POST /day-plan/submit  ──▶  immutable snapshot saved     │
@@ -95,6 +99,7 @@ http://localhost:3000/api/v1/...
   - `/voice/process` → field name `audio`
   - `/images/process` → field name `image`
   - `/day-closure/submit` → field name `audio`
+  - `/process` → optional fields `audio`, `image`, and/or body field `text` (at least one required)
 
 ### Standard error shape
 
@@ -339,6 +344,120 @@ curl "http://localhost:3000/api/v1/holidays?from=2026-06-01&to=2026-06-30" \
   -H "X-User-Id: demo-user-1"
 ```
 
+### 4.8 Morning: extract tasks from a typed paragraph
+
+> User types a free-form paragraph describing their day — mixing priorities, Hinglish, and run-on phrasing — and POSTs it as JSON. Backend classifies each phrase, creates tasks, and returns the same action/recommendation shape as the voice flow. No audio needed; the text itself is the primary input.
+
+```bash
+curl -X POST http://localhost:3000/api/v1/text/process \
+  -H "X-User-Id: demo-user-1" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"buy milk urgent, call doctor at 4pm, finish quarterly report draft, and aaj report compile karni hai"}'
+```
+
+**Response:**
+
+```json
+{
+  "textInteractionId": "cmpg...",
+  "actions": [
+    {
+      "type": "created",
+      "taskId": "cmpg...",
+      "title": "Buy milk",
+      "priority": "high",
+      "reasoning": "User wrote 'urgent' which indicates high priority."
+    },
+    {
+      "type": "created",
+      "taskId": "cmpg...",
+      "title": "Call doctor at 4pm",
+      "reasoning": "New task identified from user's text."
+    },
+    {
+      "type": "created",
+      "taskId": "cmpg...",
+      "title": "Finish quarterly report draft",
+      "reasoning": "New task identified."
+    },
+    {
+      "type": "created",
+      "taskId": "cmpg...",
+      "title": "Compile report",
+      "reasoning": "Hinglish phrase 'aaj report compile karni hai' resolved to this task."
+    }
+  ],
+  "recommendations": []
+}
+```
+
+**Key behaviors:**
+
+- JSON body `{ "text": string }`. No file upload. Min 1 char, max 5000 chars.
+- Hinglish phrases are handled natively — "aaj report compile karni hai" becomes a proper task title.
+- The word "urgent" (and equivalents like "ASAP", "jaldi") maps to `priority: "high"`.
+- There is **no `transcript` field** in the response — unlike voice, the input text IS the content; it is not re-transcribed.
+- When the AI is unsure about a phrase (too vague, or refers to a task not in the pending context), it goes into `recommendations`. Backend writes nothing for those.
+- Smoke tested 2026-05-22: 4-item Hinglish paragraph → 4 `created` tasks in ~13s, including correct Hinglish resolution and "urgent" → `priority: "high"`.
+
+### 4.9 Morning: composite input (audio + image + text in one call)
+
+> The morning composer flow often involves all three: user dictates into the mic, attaches a photo of their handwritten task sheet, and types a couple of extra notes. POST `/process` bundles all three into a **single Vertex call** — the model sees everything together and can cross-reference across modalities. Each returned action and recommendation carries a `source` field indicating which modality contributed it.
+
+```bash
+curl -X POST http://localhost:3000/api/v1/process \
+  -H "X-User-Id: demo-user-1" \
+  -F "audio=@subah-ki-planning.wav;type=audio/wav" \
+  -F "image=@kaam-ki-list.png;type=image/png" \
+  -F "text=Aur haan, evening mein doctor ko call karna hai"
+```
+
+**Response:**
+
+```json
+{
+  "unifiedInteractionId": "cmpg...",
+  "actions": [
+    {
+      "type": "created",
+      "taskId": "cmpg...",
+      "title": "Buy bread",
+      "source": "voice",
+      "reasoning": "User said 'buy bread' in the audio clip."
+    },
+    {
+      "type": "completed",
+      "taskId": "cmpg...",
+      "source": "image",
+      "reasoning": "Item crossed out in the photo matches pending task 'Pay electricity bill'."
+    }
+  ],
+  "recommendations": [
+    {
+      "title": "Milk lana",
+      "source": "image",
+      "reasoning": "Item visible in photo did not match any pending task — surfaced for user to confirm."
+    },
+    {
+      "title": "Doctor ko call karna (evening)",
+      "source": "text",
+      "reasoning": "Typed note added as ad-hoc; no matching pending task found."
+    }
+  ]
+}
+```
+
+**Key behaviors:**
+
+- Multipart body: optional `audio` file, optional `image` file, optional `text` body field. **At least one must be present** — empty request returns `400 VALIDATION_ERROR`.
+- All three modalities are processed in a **single Vertex `generateContent` call** — wall-clock time is one AI round-trip (~10–15s), not three sequential calls.
+- Each action and recommendation carries a `source: "voice" | "image" | "text"` tag indicating which modality drove it.
+- **Cross-modal grounding:** the model can relate what was said to what was written in the image. E.g., "complete the third item on my list" in audio, combined with a photo of that list, resolves correctly.
+- **Contradiction handling:** if audio and image appear to conflict about the same task, the model defaults to `recommendations` rather than auto-executing the action (conservative-default rule from ADR-0005 still applies).
+- **No `transcript` or `extractedText` fields in the response.** This is intentional — dropping them avoids the OCR-then-classify cascade where one step's hallucination compounds into the other. Per-action `reasoning` captures the modality cue inline, which is more useful to the frontend than a raw OCR dump.
+- The `source` tag on each action is the audit trail that was dropped from the top-level response.
+- Smoke tested 2026-05-22: audio + image + text → 201 in ~11s, 2 confirmed actions (one `source:"voice"`, one `source:"image"`), 2 recommendations (one `source:"image"` for unmatched image item, one `source:"text"` for ad-hoc note). DB verified: `UnifiedInteraction.actions` JSON carries per-action `source` tags. Subset tests (text+audio, text only, empty request) also passed.
+
 ---
 
 ## 5. API reference
@@ -390,7 +509,7 @@ curl "http://localhost:3000/api/v1/holidays?from=2026-06-01&to=2026-06-30" \
 }
 ```
 
-`sourceType` is `"manual" | "voice" | "image"` — tells you how the task was originally created. `sourceId` links AI-created tasks back to their VoiceInteraction / ImageExtraction record.
+`sourceType` is `"manual" | "voice" | "image" | "text" | "unified"` — tells you how the task was originally created. `sourceId` links AI-created tasks back to their VoiceInteraction / ImageExtraction / TextInteraction / UnifiedInteraction record.
 
 ### Notes
 
@@ -439,6 +558,53 @@ curl "http://localhost:3000/api/v1/holidays?from=2026-06-01&to=2026-06-30" \
 - `image` (file, required): JPEG, PNG, WebP, HEIC, HEIF. Max 15 MB.
 
 **Response:** similar to voice, with `extractedText` instead of `transcript`. See use case 4.2.
+
+### Text processing
+
+| Method | Path                   | Purpose                                                                                          |
+| ------ | ---------------------- | ------------------------------------------------------------------------------------------------ |
+| POST   | `/api/v1/text/process` | JSON text paragraph → AI intent classification → executes task actions + returns recommendations |
+
+**Request body (JSON):**
+
+- `text` (string, required): 1–5000 characters. Free-form paragraph; Hinglish supported.
+
+**Response fields:**
+
+- `textInteractionId`: id of the persisted `TextInteraction` audit row
+- `actions`: array of executed actions (already written to DB). Each has `type`, `taskId`, modality-specific fields, and `reasoning`. No `transcript` field — unlike voice, the input text is not re-transcribed.
+- `recommendations`: suggestions the AI was unsure about. Backend wrote nothing for these.
+
+See use case 4.8 for a full example.
+
+### Unified multimodal processing (`/process`)
+
+| Method | Path              | Purpose                                                                                           |
+| ------ | ----------------- | ------------------------------------------------------------------------------------------------- |
+| POST   | `/api/v1/process` | Multipart with any combination of `audio` + `image` + `text` → single Vertex call, fused response |
+
+**Multipart fields (all optional, but at least one required):**
+
+- `audio` (file): WebM, WAV, MP3, OGG, MP4, M4A. Max 25 MB.
+- `image` (file): JPEG, PNG, WebP, HEIC, HEIF. Max 15 MB.
+- `text` (body field): string, min 1 char, max 5000 chars.
+
+If all three are absent: `400 VALIDATION_ERROR` — "At least one of audio, image, or text must be provided."
+
+**Response fields:**
+
+- `unifiedInteractionId`: id of the persisted `UnifiedInteraction` audit row.
+- `actions`: array of executed actions. Each item has `type`, `taskId`, modality-specific fields, `reasoning`, and **`source: "voice" | "image" | "text"`** indicating which modality contributed the action.
+- `recommendations`: suggestions the AI was unsure about. Same `source` tag present. Backend wrote nothing for these.
+
+**Deliberately absent fields:**
+
+- `transcript` is **not returned**, even if audio was sent.
+- `extractedText` is **not returned**, even if an image was sent.
+
+_Rationale:_ dropping these top-level fields prevents the OCR-then-classify cascade hallucination, where a transcription/OCR error in one step compounds into incorrectly classified actions in the next. The per-action `reasoning` field captures the relevant modality cue inline, which is more actionable for the frontend than a raw dump.
+
+See use case 4.9 for a full example and cross-modal grounding behavior.
 
 ### Day plan
 
@@ -609,7 +775,7 @@ For architectural rationale on any decision, see `.agents/decisions/` (ADRs, 20+
 
 If your frontend team is about to build against any of these, sync with backend first:
 
-- **`POST /voice/process` accepting bundled images.** Today: audio-only. If you want to send a photo together with a voice clip in one request (multimodal fusion), backend needs to extend. Not a 1-line change.
+- **`POST /voice/process` accepting bundled images.** This specific endpoint remains audio-only. If you need audio + image together, use `POST /process` (the unified multimodal endpoint) instead — it accepts any combination of audio, image, and text in a single call.
 - **Per-action confidence scores.** Today: actions are confident, recommendations are not (binary). If frontend wants a 0–1 confidence number per item, see [.agents/decisions/](.agents/decisions/) for the reasoning — we deliberately did not add this because models fabricate it.
 - **Idempotency keys** for accidental double-submits (e.g., user double-clicks "Submit Plan"). Today: relies on the 409 from the unique constraint. Could add `Idempotency-Key` header if double-clicks are a real UX issue.
 - **WebSocket / SSE streaming** for long AI responses. Today: one HTTP response. Day-closure can take ~15s; if perceived latency is a problem, we can stream partial responses.

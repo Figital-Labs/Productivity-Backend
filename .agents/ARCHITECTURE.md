@@ -82,8 +82,8 @@ model Task {
   isPartial   Boolean   @default(false)
   notes       String?
   aiFeedback  String?                       // populated by day-closure AI review
-  sourceType  String                        // "manual" | "voice" | "image"
-  sourceId    String?                       // links to VoiceInteraction or ImageExtraction
+  sourceType  String                        // "manual" | "voice" | "image" | "text" | "unified"
+  sourceId    String?                       // links to VoiceInteraction / ImageExtraction / TextInteraction / UnifiedInteraction
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
@@ -171,10 +171,32 @@ model ImageExtraction {
   recommendations Json
   createdAt       DateTime @default(now())
 }
+
+model TextInteraction {
+  id              String   @id @default(cuid())
+  userId          String
+  inputText       String   // the raw text the user submitted
+  actions         Json
+  recommendations Json
+  createdAt       DateTime @default(now())
+}
+
+model UnifiedInteraction {
+  id              String   @id @default(cuid())
+  userId          String
+  inputText       String?  // typed text component (nullable — user may send audio/image only)
+  audioUrl        String?  // deferred (GCS not yet wired)
+  imageUrl        String?  // deferred (GCS not yet wired)
+  actions         Json     // persisted with per-action source tags
+  recommendations Json
+  createdAt       DateTime @default(now())
+}
 ```
 
 ### Notes on the model
-- `Task.sourceType` + `sourceId`: audit trail back to the voice/image interaction that produced this task.
+- `Task.sourceType` + `sourceId`: audit trail back to the voice/image/text/unified interaction that produced this task.
+- `TextInteraction`: mirrors `VoiceInteraction` minus the audio fields. `inputText` stores the raw user paragraph; no transcript column needed.
+- `UnifiedInteraction`: audit row for fusion calls. `audioUrl`/`imageUrl` are nullable because GCS storage is still deferred; the bytes are sent to Vertex inline but not persisted. The `actions` JSON carries per-action `source` provenance (not on the `Task` row itself, which only knows `sourceType: "unified"`).
 - `DayPlanSubmission.taskSnapshot`: per [ADR-0011](./decisions/0011-submit-snapshot.md), this is the immutable record of what the user committed to at submit time.
 - `Holiday`: composite primary key `(userId, date)`. No surrogate id needed.
 - All `@@index` entries are on the columns that will dominate WHERE clauses.
@@ -206,11 +228,13 @@ All routes under `/api/v1/`. All responses JSON. Standard error shape:
 | POST | `/tasks/:id/media` | Attach media (multipart) |
 | DELETE | `/tasks/:id/media/:mediaId` | Detach media |
 
-### Voice / Image Processing
+### Voice / Image / Text / Unified Processing
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/voice/process` | General-purpose voice action endpoint. Multipart audio. Backend includes top 20–100 pending tasks as context. Returns `{transcript, actions, recommendations}`. Persists `VoiceInteraction`. See [ADR-0003](./decisions/0003-voice-intent-classification.md). |
-| POST | `/images/process` | Multipart image → Gemini Vision. Same response shape minus transcript. |
+| POST | `/images/process` | Multipart image → Gemini Vision. Same response shape minus transcript, with `extractedText`. Persists `ImageExtraction`. |
+| POST | `/text/process` | JSON body `{text}`. AI intent classification on a typed paragraph (Hinglish supported). Same action/recommendation shape as voice, no `transcript` field (the input IS the text). Persists `TextInteraction`. |
+| POST | `/process` | Unified multimodal fusion. Multipart with optional `audio`, `image`, and/or body `text` — at least one required. Single Vertex `generateContent` call across all modalities; each action/recommendation carries `source: "voice"｜"image"｜"text"`. No `transcript` or `extractedText` in response (cascade-hallucination rationale; see ADR-0021). Persists `UnifiedInteraction`. |
 
 ### Day Plan / Closure
 | Method | Path | Purpose |
@@ -306,3 +330,27 @@ Same as voice, but the input is an image and the model used is Gemini Vision. Us
 ```
 
 Note: `recommendedNewTasks` is NOT auto-created. Frontend shows them as opt-in items; user taps Add or Skip. If Add, frontend POSTs to `/tasks`. See [ADR-0005](./decisions/0005-recommendation-pattern.md).
+
+### Text Flow (`POST /text/process`)
+
+Same as voice, except input is a JSON body `{ text }` instead of a multipart audio file. No media passed to Vertex — the text is inlined in the prompt body. Persists `TextInteraction`. Response shape is identical to voice minus `transcript`.
+
+### Unified Fusion Flow (`POST /process`)
+
+```
+1. Frontend sends multipart: any combination of audio file, image file, text body field
+2. Controller validates at least one modality present; 400 if all absent
+3. Backend creates empty UnifiedInteraction row (for sourceId referencing)
+4. Builds media[] array from whichever files are present
+5. Single Vertex generateContent call with:
+   - all media buffers as inline attachments
+   - fusion prompt (modality-aware: lists which inputs are present this call)
+   - pending task context (top 50)
+6. For each action returned: dispatch via shared dispatchAiAction (sourceType: "unified")
+   Per-action source tag (voice|image|text) is re-attached after dispatch
+7. Patch UnifiedInteraction with final actions + recommendations
+8. Returns: { unifiedInteractionId, actions (with source), recommendations (with source) }
+   NOTE: no transcript or extractedText — see ADR-0021
+```
+
+See [ADR-0021](./decisions/0021-multimodal-fusion-composer.md) for the full decision record.

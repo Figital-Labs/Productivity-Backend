@@ -17,7 +17,7 @@ import * as taskService from "./task.service.js";
  * new name.
  */
 
-export type AiSourceType = "voice" | "image";
+export type AiSourceType = "voice" | "image" | "text" | "unified";
 
 /**
  * The shape we persist into `VoiceInteraction.actions` / `ImageExtraction.actions`

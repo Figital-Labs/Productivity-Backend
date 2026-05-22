@@ -106,16 +106,16 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 - Sprint 7 smoke (3 seeded tasks → day-plan submit → closure with SAPI TTS WAV: "I bought the groceries. The doctor appointment is partial. I called but they were closed. Also I attended an emergency meeting today, that was not planned."): closure took ~16s (2 Vertex calls). Voice flow correctly classified `completed` (Buy groceries) + `partial` (Doctor appointment) by exact taskId match; emergency meeting went to `recommendations` not auto-created (ADR-0005 honored). `aiFeedback` came back fully populated: achievements/missed/partial/additions correct based on plan-vs-current diff; **tips and summary genuinely in Hinglish** ("Doctor appointment ke liye pehle timings confirm kar lo." / "Aaj ka din busy tha, groceries done aur emergency meeting bhi manage ki. Doctor appointment partial raha aur research paper miss ho gaya, but achha effort tha overall."). DB verified: 3 Tasks with correct end states, 1 DayPlanSubmission (plan_size=3), 1 DayClosureSubmission (6 feedback fields), 1 VoiceInteraction (2 actions, 1 rec). All 5 error paths green: duplicate plan → 409, duplicate closure → 409, closure without plan → 409 `NO_DAY_PLAN_FOR_DATE`, missing audio → 400, GET non-submitted date → 404 `DAY_CLOSURE_NOT_FOUND`.
 - Sprint 7 committed by user. Sprint 8 (Alerts + History) deferred indefinitely per user direction — not needed for POC. Sprint 9 (Polish) similarly folds in.
 - Wrote `Backend_task_list/BACKEND_GUIDE.md` (project root, not under `.agents/`) — single-document integration guide for frontend devs + product owner. Covers product loop, auth/conventions, 7 worked-through user journeys (voice morning, image scan, day-plan submit, manual CRUD, day closure, notes, holidays), complete API reference, AI feature details (Hinglish, recommendation pattern, server-generated IDs), explicit "not supported" list (auth/storage/media/alerts/history/multi-user/streaming), quick-start setup, code-organization pointers. Doc audience is non-agent; not in `.agents/` for discoverability.
+- **Post-Sprint-7 addendum (text + fusion endpoints) shipped + documented.** Two new endpoints implemented and smoke-tested: (1) `POST /api/v1/text/process` — JSON body `{text}`, mirrors voice flow minus audio, new `TextInteraction` Prisma model, no `transcript` in response. (2) `POST /api/v1/process` — true multimodal fusion: multipart with optional `audio` + `image` + `text`, single Vertex `generateContent` call, per-action `source: "voice"|"image"|"text"` tag, new `UnifiedInteraction` model, `AiSourceType` extended to include `"text"` and `"unified"`. Deliberately omitted from fusion response: `transcript` and `extractedText` (cascade-hallucination rationale; per-action `reasoning` carries cues inline). New `multiModalUpload` multer middleware with per-field MIME filtering. Smoke results: /text/process — Hinglish paragraph → 4 tasks in 13s including "urgent" → priority high and correct Hinglish resolution; /process (all 3 modalities) — 11s, 2 actions + 2 recommendations with source tags, DB lineage confirmed; subset (text+audio) and empty-request (400) also green. Existing /voice/process and /images/process unaffected. Docs updated: BACKEND_GUIDE.md (new use cases 4.8/4.9, new API reference entries, open-question updated), ARCHITECTURE.md (API surface + data model + AI flows), ADR-0021 created.
 
 ---
 
 ## What An Agent Should Do Right Now
 
-If you're a fresh agent session and want to be useful:
+**POC is complete.** All planned sprints (1–7) are shipped, plus the post-Sprint-7 text + fusion addendum. Sprint 8 (Alerts + History) is deferred indefinitely.
 
-1. The next sprint is **Sprint 2 — Repo setup & dev tooling**. It's collaborative; don't start autonomously.
-2. **Wait for user to kick it off** by saying something like "let's start Sprint 2" or by giving you concrete tasks.
-3. When kicked off, **read [sprints/02-repo-setup.md](./sprints/02-repo-setup.md)** for the task list.
-4. Claim the sprint lock above by adding a row to "Active Locks."
-5. Work through tasks one at a time, syncing with the user.
-6. When done, update the sprint table above and add a changelog entry.
+If you're a fresh agent session:
+1. Read `BACKEND_GUIDE.md` at the project root — that is the single source of truth for what endpoints exist and how they behave.
+2. Read `ARCHITECTURE.md` for data model and AI flow details.
+3. Check `decisions/` for rationale on any non-obvious design choice.
+4. Don't start new work autonomously — wait for explicit user direction.

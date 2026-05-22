@@ -58,3 +58,26 @@ export const imageUpload = createUpload({
   allowedMimeTypes: IMAGE_MIME_TYPES,
   maxFileSizeBytes: FIFTEEN_MB,
 });
+
+export const multiModalUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: TWENTY_FIVE_MB },
+  fileFilter: (_req, file, cb) => {
+    const allowed =
+      file.fieldname === "audio"
+        ? (AUDIO_MIME_TYPES as readonly string[])
+        : (IMAGE_MIME_TYPES as readonly string[]);
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+      return;
+    }
+    cb(
+      new ValidationError(
+        `Unsupported file type "${file.mimetype}" for field "${file.fieldname}".`,
+      ),
+    );
+  },
+}).fields([
+  { name: "audio", maxCount: 1 },
+  { name: "image", maxCount: 1 },
+]);
