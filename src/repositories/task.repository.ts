@@ -23,6 +23,7 @@ export interface UpdateTaskData {
   priority?: TaskPriority | null | undefined;
   completed?: boolean | undefined;
   isPartial?: boolean | undefined;
+  targetDate?: Date | undefined;
 }
 
 export function findById(id: string): Promise<Task | null> {

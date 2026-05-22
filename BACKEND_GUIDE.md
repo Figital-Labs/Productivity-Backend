@@ -271,6 +271,11 @@ curl -X PATCH http://localhost:3000/api/v1/tasks/cmpg... \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"completed":true}'
 
+# Move yesterday's leftover task to today
+curl -X PATCH http://localhost:3000/api/v1/tasks/cmpg... \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"targetDate":"2026-05-22"}'
+
 # Soft delete (recoverable)
 curl -X DELETE http://localhost:3000/api/v1/tasks/cmpg... -H "Authorization: Bearer $TOKEN"
 
@@ -493,13 +498,13 @@ curl -X POST http://localhost:3000/api/v1/process \
 
 ### Tasks
 
-| Method | Path                            | Purpose                                                                                                            |
-| ------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| GET    | `/api/v1/tasks?date=YYYY-MM-DD` | List tasks for a date (default: today in user's TZ). Sorted by priority then creation time. Excludes soft-deleted. |
-| POST   | `/api/v1/tasks`                 | Create a task manually. Body: `{title, targetDate?, notes?, priority?}`                                            |
-| PATCH  | `/api/v1/tasks/:id`             | Update fields. Body: any subset of `{title, notes, completed, isPartial, priority}`                                |
-| DELETE | `/api/v1/tasks/:id`             | Soft delete (sets `deletedAt`). 409 if already deleted.                                                            |
-| POST   | `/api/v1/tasks/:id/restore`     | Clear `deletedAt`. 409 if task is not deleted.                                                                     |
+| Method | Path                            | Purpose                                                                                                                                                                                         |
+| ------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/tasks?date=YYYY-MM-DD` | List tasks for a date (default: today in user's TZ). Sorted by priority then creation time. Excludes soft-deleted.                                                                              |
+| POST   | `/api/v1/tasks`                 | Create a task manually. Body: `{title, targetDate?, notes?, priority?}`                                                                                                                         |
+| PATCH  | `/api/v1/tasks/:id`             | Update fields. Body: any subset of `{title, notes, completed, isPartial, priority, targetDate}`. Use `targetDate` to move a task between days (e.g. roll over yesterday's leftover into today). |
+| DELETE | `/api/v1/tasks/:id`             | Soft delete (sets `deletedAt`). 409 if already deleted.                                                                                                                                         |
+| POST   | `/api/v1/tasks/:id/restore`     | Clear `deletedAt`. 409 if task is not deleted.                                                                                                                                                  |
 
 **Body fields for create/update:**
 
@@ -687,7 +692,7 @@ These are intentional deferrals for the POC. Frontend should not expect any of t
 
 | Feature                                                            | Status                                                           | When                                   |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------- | -------------------------------------- |
-| **File / media storage** (audio + image persistence)               | Audio/image bytes are sent to AI but not stored                  | Deferred — needs GCS bucket + IAM      |
+| **File / media storage** (audio + image persistence)               | Audio/image bytes are sent to AI but not stored                  | Deferred — needs S3 bucket + creds     |
 | **Task media attachments** (proof-of-work photos/videos on a task) | Schema exists, no endpoints                                      | Deferred with file storage             |
 | **General uploads endpoint** (`POST /uploads`)                     | Not built                                                        | Deferred with file storage             |
 | **Alerts inbox** (manual + AI-generated notifications)             | Schema exists, no endpoints                                      | Sprint 8 deferred indefinitely for POC |

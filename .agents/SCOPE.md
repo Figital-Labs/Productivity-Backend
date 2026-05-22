@@ -40,7 +40,7 @@ Goal: minimum surface area to demonstrate the product idea, with no accidental c
 - `POST /day-closure/submit` — see above.
 
 ### Media
-- Photos / videos / audio attached to tasks as proof-of-work, stored in **GCS**. See [ADR-0009](./decisions/0009-gcs-storage.md).
+- Photos / videos / audio attached to tasks as proof-of-work, stored in **S3** (deferred until credentials). See [ADR-0023](./decisions/0023-s3-storage.md) (supersedes ADR-0009).
 
 ### Cross-cutting
 - Per-user timezone, default `Asia/Kolkata`. See [ADR-0010](./decisions/0010-per-user-timezone.md).
@@ -113,7 +113,7 @@ Each item has a reason and the conditions under which we'd add it.
 
 | Item | Status | When to revisit |
 |---|---|---|
-| S3 / Cloudflare R2 storage backend | Deferred — GCS-only. Interface is in place. | Cheaper provider needed at scale. |
+| Cloudflare R2 storage backend | Deferred — S3 chosen but not wired. R2 is S3-compatible so the same impl can target it. | Cheaper provider needed at scale. |
 | CI/CD pipeline | Deferred — local dev only. | Any deployment. |
 | Dockerfile for the app | Deferred — user handles their own Postgres-via-Docker. | Any deployment OR onboarding a second contributor. |
 | Production deployment | Deferred. | Post-POC pilot. |

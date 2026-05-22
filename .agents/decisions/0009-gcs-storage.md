@@ -1,12 +1,14 @@
 ---
 id: ADR-0009
 title: GCS from day 1, behind BlobStorage interface (S3 deferred)
-status: accepted
+status: superseded by ADR-0023
 date: 2026-05-22
 tags: [storage, infrastructure]
 supersedes: null
-related: [ADR-0001]
+related: [ADR-0001, ADR-0023]
 ---
+
+> **Superseded by [ADR-0023](./0023-s3-storage.md) on 2026-05-22.** User reversed the storage provider choice: media now goes to S3, not GCS. The `BlobStorage` interface concept from this ADR carries over to ADR-0023 unchanged — only the implementation file (and credentials) differ. The historical content below is kept for context on why GCS was originally chosen.
 
 # ADR-0009: GCS from Day 1, Behind a BlobStorage Interface
 

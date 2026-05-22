@@ -60,7 +60,7 @@ export class ConflictError extends AppError {
 }
 
 /**
- * Use when a downstream service (Vertex AI, GCS, etc.) returned something we
+ * Use when a downstream service (Vertex AI, S3, etc.) returned something we
  * can't make sense of — empty body, invalid JSON, schema violation. Maps to 502.
  */
 export class UpstreamError extends AppError {

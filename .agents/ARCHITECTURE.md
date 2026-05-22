@@ -32,7 +32,7 @@ Backend_task_list/
 │   │   ├── vertex.ts                 # Vertex AI client + prompt templates
 │   │   ├── storage/
 │   │   │   ├── index.ts              # BlobStorage interface
-│   │   │   └── gcs.ts                # GCS implementation
+│   │   │   └── s3.ts                 # S3 implementation (deferred until creds)
 │   │   └── errors.ts                 # AppError class hierarchy
 │   ├── config/
 │   │   └── env.ts                    # zod-validated env loader
@@ -99,7 +99,7 @@ model TaskMedia {
   id        String   @id @default(cuid())
   taskId    String
   type      String   // "image" | "video" | "audio"
-  url       String   // gs:// URI (see ADR-0009)
+  url       String   // s3:// URI (see ADR-0023)
   createdAt DateTime @default(now())
   task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
 }
@@ -186,8 +186,8 @@ model UnifiedInteraction {
   id              String   @id @default(cuid())
   userId          String
   inputText       String?  // typed text component (nullable — user may send audio/image only)
-  audioUrl        String?  // deferred (GCS not yet wired)
-  imageUrl        String?  // deferred (GCS not yet wired)
+  audioUrl        String?  // deferred (S3 not yet wired)
+  imageUrl        String?  // deferred (S3 not yet wired)
   actions         Json     // persisted with per-action source tags
   recommendations Json
   createdAt       DateTime @default(now())
@@ -197,7 +197,7 @@ model UnifiedInteraction {
 ### Notes on the model
 - `Task.sourceType` + `sourceId`: audit trail back to the voice/image/text/unified interaction that produced this task.
 - `TextInteraction`: mirrors `VoiceInteraction` minus the audio fields. `inputText` stores the raw user paragraph; no transcript column needed.
-- `UnifiedInteraction`: audit row for fusion calls. `audioUrl`/`imageUrl` are nullable because GCS storage is still deferred; the bytes are sent to Vertex inline but not persisted. The `actions` JSON carries per-action `source` provenance (not on the `Task` row itself, which only knows `sourceType: "unified"`).
+- `UnifiedInteraction`: audit row for fusion calls. `audioUrl`/`imageUrl` are nullable because S3 storage is still deferred; the bytes are sent to Vertex inline but not persisted. The `actions` JSON carries per-action `source` provenance (not on the `Task` row itself, which only knows `sourceType: "unified"`).
 - `DayPlanSubmission.taskSnapshot`: per [ADR-0011](./decisions/0011-submit-snapshot.md), this is the immutable record of what the user committed to at submit time.
 - `Holiday`: composite primary key `(userId, date)`. No surrogate id needed.
 - All `@@index` entries are on the columns that will dominate WHERE clauses.

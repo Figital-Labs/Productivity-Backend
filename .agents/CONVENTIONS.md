@@ -96,7 +96,7 @@ When you propose a commit message (in chat, not via `git commit`), still follow 
 Per the approved plan, work is broken into small sprints. Each sprint ends with a checkpoint where the user reviews. Don't batch sprints.
 
 ### Web-Research Before Writing SDK Code
-Training data is from January 2026. The ecosystem moves. Before writing code against the Vertex AI SDK, GCS SDK, multer, or any moving-target library, **fetch current docs from the web**. Don't trust memory.
+Training data is from January 2026. The ecosystem moves. Before writing code against the Vertex AI SDK, AWS S3 SDK, multer, or any moving-target library, **fetch current docs from the web**. Don't trust memory.
 
 ### Use `/simplify` at Sprint Checkpoints
 At the end of every sprint that touches code, run `/simplify` on the new code. Fix anything it flags before declaring the sprint complete.

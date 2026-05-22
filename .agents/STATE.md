@@ -60,7 +60,7 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 | Blocker | Tagged | Resolution waits on |
 |---|---|---|
-| GCS bucket name + `roles/storage.objectAdmin` on the SA | 2026-05-22 | User to create bucket and grant IAM role. Now blocking Sprint 7 (audio backfill + image storage + task media + day-closure media). Deferred from Sprint 6 — Sprint 6 ships image processing without persisting source media. |
+| S3 bucket name + AWS credentials (access key/secret OR IAM role) | 2026-05-22 | User to provision the S3 bucket and access creds. Blocks any sprint that persists source media (audio/image/video) — currently deferred indefinitely for POC. Storage provider was switched from GCS to S3 on 2026-05-22 per user; see [ADR-0023](./decisions/0023-s3-storage.md) (supersedes ADR-0009). |
 | ~~Database URL for Prisma~~ | ~~2026-05-22~~ | **Resolved** — Postgres 18 in Docker (`task-list-postgres`), `DATABASE_URL` set, Sprint 4 unblocked. |
 | Confirm Vertex AI API is enabled on GCP project `nth-rookery-341212` and billing is active | 2026-05-22 | User to verify in GCP console. Blocking Sprint 5. We'll verify in Sprint 2 via a hello-world script. |
 
@@ -111,6 +111,10 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 ---
 
 - Sprint 8 lite shipped: basic email/password + JWT auth. Added required `User.passwordHash`, bcrypt password helpers, JWT sign/verify helpers, user repository, auth schemas/service/controller/routes, public `POST /api/v1/auth/signup`, public `POST /api/v1/auth/login`, and protected `GET /api/v1/auth/me`. Removed `X-User-Id` stub path from source; all non-auth `/api/v1` routes now require `Authorization: Bearer <token>`. Seed updates `demo-user-1` with password `demopass123`. Env now requires `JWT_SECRET` and supports `JWT_TTL=30d`. ADR-0008 superseded by ADR-0022. Docs and Postman handoff updated for login-first bearer-token flow. Verification passed: migration + seed, demo login, `/auth/me`, unauth/bad token/wrong password 401s, signup + duplicate 409, short password 400, per-user task scoping, `npm run typecheck`, and `npm run lint`.
+
+- `PATCH /api/v1/tasks/:id` now accepts `targetDate` (YYYY-MM-DD). Enables "move yesterday's leftover into today" without recreating the task. Schema, repository `UpdateTaskData`, and service all extended; date string is parsed via the existing `parseDateString` helper. Smoke verified: create on 2026-05-21 → PATCH to 2026-05-22 → 200 with updated `targetDate`; invalid string → 400 `VALIDATION_ERROR`; empty patch still rejected with "At least one field must be provided". BACKEND_GUIDE.md API reference + a new curl example updated.
+
+- Storage provider switched from GCS to S3 (still deferred until credentials). ADR-0009 marked `superseded by ADR-0023`; new ADR-0023 documents the reversal and confirms the `BlobStorage` interface from ADR-0009 carries over unchanged. Forward-looking docs scrubbed (STATE/ARCHITECTURE/SCOPE/GLOSSARY/CONVENTIONS/BACKEND_GUIDE + decisions index); two code-level comments in `day-closure.schema.ts` and `errors.ts` flipped to S3. Sprint history files left untouched.
 
 ## What An Agent Should Do Right Now
 

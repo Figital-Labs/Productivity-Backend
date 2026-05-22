@@ -5,7 +5,7 @@ import { dateStringSchema } from "./common.js";
 /**
  * Body fields for `POST /day-closure/submit`. Audio comes via multipart
  * (`req.file`), not in the body. `mediaIds` is intentionally NOT accepted in
- * Sprint 7 — task media + GCS storage land in a future sprint; the column
+ * Sprint 7 — task media + S3 storage land in a future sprint; the column
  * stays `String[]` defaulting to `[]`.
  */
 export const submitDayClosureInputSchema = z.object({

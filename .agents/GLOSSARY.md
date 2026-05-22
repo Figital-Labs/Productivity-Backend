@@ -38,7 +38,7 @@ If you encounter a term in code or docs that isn't in this glossary, either it's
 
 **Holiday** — A day the user is not working. Per-user calendar. Affects which days "today's tasks" considers as the user's working day.
 
-**Proof-of-Work** — Media (photo, video, audio) attached to a task as evidence that it was done. Stored in GCS, referenced by URL. See [ADR-0009](./decisions/0009-gcs-storage.md).
+**Proof-of-Work** — Media (photo, video, audio) attached to a task as evidence that it was done. Stored in S3 (deferred until credentials), referenced by URL. See [ADR-0023](./decisions/0023-s3-storage.md) (supersedes ADR-0009).
 
 ---
 
@@ -46,7 +46,7 @@ If you encounter a term in code or docs that isn't in this glossary, either it's
 
 **ADR** — Architectural Decision Record. One file per decision in `decisions/`. Stable IDs (`ADR-0001` through `ADR-NNNN`). Append-only — accepted ADRs are never edited; they're superseded by new ADRs.
 
-**BlobStorage** — Our abstraction over file storage. Interface (`src/lib/storage/index.ts`); GCS implementation (`src/lib/storage/gcs.ts`); S3 implementation deferred. See [ADR-0009](./decisions/0009-gcs-storage.md).
+**BlobStorage** — Our abstraction over file storage. Interface (`src/lib/storage/index.ts`); S3 implementation planned (`src/lib/storage/s3.ts`, not yet written). See [ADR-0023](./decisions/0023-s3-storage.md).
 
 **Repository Layer** — The only layer that calls Prisma. Services call repositories; controllers call services. See [ADR-0007](./decisions/0007-layered-architecture.md).
 
@@ -78,7 +78,7 @@ If you encounter a term in code or docs that isn't in this glossary, either it's
 
 **Gemini 2.5 Flash** — The specific Vertex AI model we call. Multimodal — accepts audio, images, and text in one call.
 
-**GCS** — Google Cloud Storage. Our blob storage provider. See [ADR-0009](./decisions/0009-gcs-storage.md).
+**S3** — AWS Simple Storage Service. Our planned blob storage provider (deferred until credentials). See [ADR-0023](./decisions/0023-s3-storage.md). The earlier choice was GCS — see [ADR-0009](./decisions/0009-gcs-storage.md) (superseded).
 
 **Prisma** — Our ORM. Postgres-backed.
 

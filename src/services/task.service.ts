@@ -44,7 +44,11 @@ export async function updateTask(
   patch: UpdateTaskInput,
 ): Promise<taskRepo.Task> {
   await getTask(user, id);
-  return taskRepo.update(id, patch);
+  const { targetDate, ...rest } = patch;
+  return taskRepo.update(id, {
+    ...rest,
+    ...(targetDate !== undefined && { targetDate: parseDateString(targetDate) }),
+  });
 }
 
 export async function deleteTask(user: AuthenticatedUser, id: string): Promise<taskRepo.Task> {

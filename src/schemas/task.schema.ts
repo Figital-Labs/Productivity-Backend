@@ -17,6 +17,7 @@ export const updateTaskInputSchema = z
     priority: priorityEnum.nullable().optional(),
     completed: z.boolean().optional(),
     isPartial: z.boolean().optional(),
+    targetDate: dateStringSchema.optional(),
   })
   .refine((v) => Object.keys(v).length > 0, {
     message: "At least one field must be provided",
