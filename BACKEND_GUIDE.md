@@ -556,6 +556,27 @@ curl -X POST http://localhost:3000/api/v1/process \
 | GET    | `/api/v1/holidays?from=...&to=...` | List holidays in range (both dates required, `from` ≤ `to`)                |
 | POST   | `/api/v1/holidays/toggle`          | Body: `{date, reason?}`. Adds if absent (201) or removes if present (200). |
 
+### Activity feed
+
+| Method | Path                               | Purpose                                                                                |
+| ------ | ---------------------------------- | -------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/activity?from=...&to=...` | Returns the user's activity timeline as newest-first `ActivityEvent[]` for History UI. |
+
+**Query parameters (all optional):**
+
+- `from=YYYY-MM-DD` - inclusive lower bound (IST midnight)
+- `to=YYYY-MM-DD` - inclusive upper bound (IST end-of-day)
+
+If both are omitted, the endpoint returns the last 365 days of derived activity.
+
+**Response:** `ActivityEvent[]` - see `src/schemas/activity.schema.ts` for the discriminated union. Event types include AI batches (`ai_voice_batch`, `ai_text_batch`, `ai_image_batch`, `ai_unified_batch`), manual task creation, task completion, day-plan submission, and day-closure submission.
+
+**Caveats:**
+
+- `task_completed` events use `task.updatedAt` as the timestamp. This is intentionally lossy if the user toggled complete/incomplete multiple times.
+- Deleted tasks are excluded from standalone manual-created events and from AI batch `affectedTasks`.
+- This Sprint 9 implementation is a derived projection over existing tables, not a dedicated audit table. See ADR-0024 for POC scope, scale limits, and the migration trigger.
+
 ### Voice processing
 
 | Method | Path                    | Purpose                                                                                      |

@@ -24,3 +24,24 @@ export function findByUserAndDate(
 export function create(data: CreateDayClosureData): Promise<DayClosureSubmission> {
   return prisma.dayClosureSubmission.create({ data });
 }
+
+export function listSubmittedInRange(
+  userId: string,
+  from?: Date,
+  to?: Date,
+): Promise<DayClosureSubmission[]> {
+  return prisma.dayClosureSubmission.findMany({
+    where: {
+      userId,
+      ...(from !== undefined || to !== undefined
+        ? {
+            submittedAt: {
+              ...(from !== undefined ? { gte: from } : {}),
+              ...(to !== undefined ? { lte: to } : {}),
+            },
+          }
+        : {}),
+    },
+    orderBy: [{ submittedAt: "desc" }],
+  });
+}

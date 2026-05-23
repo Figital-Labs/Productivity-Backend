@@ -30,3 +30,20 @@ export function update(id: string, patch: UpdateVoiceInteractionData): Promise<V
     data: omitUndefined(patch),
   });
 }
+
+export function listInRange(userId: string, from?: Date, to?: Date): Promise<VoiceInteraction[]> {
+  return prisma.voiceInteraction.findMany({
+    where: {
+      userId,
+      ...(from !== undefined || to !== undefined
+        ? {
+            createdAt: {
+              ...(from !== undefined ? { gte: from } : {}),
+              ...(to !== undefined ? { lte: to } : {}),
+            },
+          }
+        : {}),
+    },
+    orderBy: [{ createdAt: "desc" }],
+  });
+}

@@ -14,7 +14,9 @@ tags: [meta, state, coordination]
 
 ## Active Sprint
 
-**Sprint 08 implemented — AI date intent + context enrichment + safety caps + prompt rewrite (BUG-003 absorbed mid-sprint).** Ready for user review. Unblocks [Frontend Sprint 07](../../Task-List/.agents/sprints/07-date-intent-and-acknowledgement.md). Backwards-compatible: frontend can adopt at its own pace.
+**Sprint 09 implemented — History activity feed (derived projection).** Ready for user review. Unblocks [Frontend Sprint 09](../../Task-List/.agents/sprints/09-history-activity-feed.md) integration. `GET /api/v1/activity` endpoint live and curl-smoked: returns sorted `ActivityEvent[]` with proper IST date-range filtering, 400 on bad range, title lookup via `listByIds`. Explicit POC-scope choice documented in [ADR-0024](./decisions/0024-history-derived-projection.md).
+
+Previous: Sprint 08 — AI date intent + context enrichment + safety caps. Committed by user; all six bundled concerns shipped (BUG-002 BE, BUG-003 prompt rewrite, BUG-004, BUG-006, BUG-009 BE, CONSIDER-001).
 
 Sprints 1-7 all shipped + committed, plus post-Sprint-7 text/fusion and lite JWT auth. Original Sprint 8 (Alerts + History) renumbered to Sprint 9 and remains deferred indefinitely per user 2026-05-22.
 
@@ -37,9 +39,10 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 | 05 — Voice intent + /voice/process | 🟢 ready for review | claude-session | 2026-05-22 | — | [sprints/05-voice-intent.md](./sprints/05-voice-intent.md) |
 | 06 — Image processing (image-only) | 🟢 ready for review | claude-session | 2026-05-22 | — | [sprints/06-image-processing.md](./sprints/06-image-processing.md) |
 | 07 — Day Plan + Day Closure | ✅ complete | claude-session | 2026-05-22 | 2026-05-22 | [sprints/07-day-plan-closure.md](./sprints/07-day-plan-closure.md) |
-| 08 — AI date intent + context + safety caps | 🟢 ready for review | claude-session | 2026-05-23 | 2026-05-23 | [sprints/08-ai-date-intent-and-safety.md](./sprints/08-ai-date-intent-and-safety.md) |
-| 09 — Alerts + History (was 08) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
-| 10 — Polish (was 09) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
+| 08 — AI date intent + context + safety caps | ✅ committed | claude-session | 2026-05-23 | 2026-05-23 | [sprints/08-ai-date-intent-and-safety.md](./sprints/08-ai-date-intent-and-safety.md) |
+| 09 — History activity feed (derived projection) | 🟢 ready for review | codex-session | 2026-05-23 | 2026-05-23 | [sprints/09-history-activity-feed.md](./sprints/09-history-activity-feed.md) |
+| 10 — Alerts (was 09) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
+| 11 — Polish (was 10) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
 
 Sprints 3–9 don't have detail files yet. Per our working style, **detail the next sprint right before starting it**, not all upfront. Each sprint file gets created when the previous one is at the checkpoint.
 
@@ -139,11 +142,18 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 ## What An Agent Should Do Right Now
 
-**Sprint 08 is scoped and ready to start.** All prior sprints (1-7 + Sprint 8 lite auth + post-Sprint-7 text/fusion) are shipped. Sprint 08 picks up backend-side polish surfaced from frontend smoke-testing.
+**Sprint 09 is scoped and ready to start.** Sprint 08 (AI date intent + context + safety caps) is committed. Sprint 09 is the History activity-feed endpoint — a derived projection over existing tables, explicitly POC-scoped per [ADR-0024](./decisions/0024-history-derived-projection.md).
 
-If you're a fresh agent session:
-1. Read `BACKEND_GUIDE.md` at the project root — that is the single source of truth for what endpoints exist and how they behave.
-2. Read `ARCHITECTURE.md` for data model and AI flow details.
-3. Check `decisions/` for rationale on any non-obvious design choice.
-4. If picking up Sprint 08, read the detail file at [sprints/08-ai-date-intent-and-safety.md](./sprints/08-ai-date-intent-and-safety.md) and stop at the sync point (8.3 prompt review) before locking in prompt changes.
+This sprint is designed to run **in parallel with [Frontend Sprint 09](../../Task-List/.agents/sprints/09-history-activity-feed.md)** because they touch disjoint files. The full `ActivityEvent` contract is locked in the backend sprint file ("Backend Contract" section); the frontend reads from there.
+
+If you're a fresh agent session picking up Sprint 09:
+1. Read `BACKEND_GUIDE.md` at the project root — single source of truth for what endpoints exist.
+2. Read `ARCHITECTURE.md` for data model + AI flow details.
+3. Read [ADR-0024](./decisions/0024-history-derived-projection.md) BEFORE implementing — it explains why this is a derived projection (not an audit table) and the scale limits.
+4. Read the sprint file at [sprints/09-history-activity-feed.md](./sprints/09-history-activity-feed.md). The contract is the canonical reference for the frontend team.
 5. Don't start any other work autonomously — wait for explicit user direction.
+
+### 2026-05-23 (later)
+
+- **Sprint 09 scoped — History activity feed (derived projection).** Will add `GET /api/v1/activity?from&to` returning a sorted `ActivityEvent[]`. Projects 8 event types from existing tables (4 AI batch types + manual task creation + task completion + 2 submission types). Explicit POC choice per ADR-0024 — derived projection ships in ~1 sprint, scale-warning baked into the service's top-of-file comment + ADR + sprint doc. Migration to a proper `TaskAuditEvent` table is documented for when POC scale (~5K tasks/user) is exceeded.
+- ADR-0024 created. Existing Sprints 9 (Alerts) + 10 (Polish) renumbered to 10 + 11.

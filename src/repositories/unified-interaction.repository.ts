@@ -35,3 +35,20 @@ export function update(
     data: omitUndefined(patch),
   });
 }
+
+export function listInRange(userId: string, from?: Date, to?: Date): Promise<UnifiedInteraction[]> {
+  return prisma.unifiedInteraction.findMany({
+    where: {
+      userId,
+      ...(from !== undefined || to !== undefined
+        ? {
+            createdAt: {
+              ...(from !== undefined ? { gte: from } : {}),
+              ...(to !== undefined ? { lte: to } : {}),
+            },
+          }
+        : {}),
+    },
+    orderBy: [{ createdAt: "desc" }],
+  });
+}

@@ -62,6 +62,51 @@ export function listOpenCarryOver(userId: string, today: Date): Promise<Task[]> 
   });
 }
 
+export function listByIds(userId: string, ids: string[]): Promise<Task[]> {
+  if (ids.length === 0) return Promise.resolve([]);
+  return prisma.task.findMany({
+    where: { userId, id: { in: ids }, deletedAt: null },
+  });
+}
+
+export function listManualCreatedInRange(userId: string, from?: Date, to?: Date): Promise<Task[]> {
+  return prisma.task.findMany({
+    where: {
+      userId,
+      sourceType: "manual",
+      deletedAt: null,
+      ...(from !== undefined || to !== undefined
+        ? {
+            createdAt: {
+              ...(from !== undefined ? { gte: from } : {}),
+              ...(to !== undefined ? { lte: to } : {}),
+            },
+          }
+        : {}),
+    },
+    orderBy: [{ createdAt: "desc" }],
+  });
+}
+
+export function listCompletedInRange(userId: string, from?: Date, to?: Date): Promise<Task[]> {
+  return prisma.task.findMany({
+    where: {
+      userId,
+      completed: true,
+      deletedAt: null,
+      ...(from !== undefined || to !== undefined
+        ? {
+            updatedAt: {
+              ...(from !== undefined ? { gte: from } : {}),
+              ...(to !== undefined ? { lte: to } : {}),
+            },
+          }
+        : {}),
+    },
+    orderBy: [{ updatedAt: "desc" }],
+  });
+}
+
 export function create(data: CreateTaskData): Promise<Task> {
   return prisma.task.create({ data: omitUndefined(data) });
 }

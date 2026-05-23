@@ -28,3 +28,20 @@ export function update(id: string, patch: UpdateTextInteractionData): Promise<Te
     data: omitUndefined(patch),
   });
 }
+
+export function listInRange(userId: string, from?: Date, to?: Date): Promise<TextInteraction[]> {
+  return prisma.textInteraction.findMany({
+    where: {
+      userId,
+      ...(from !== undefined || to !== undefined
+        ? {
+            createdAt: {
+              ...(from !== undefined ? { gte: from } : {}),
+              ...(to !== undefined ? { lte: to } : {}),
+            },
+          }
+        : {}),
+    },
+    orderBy: [{ createdAt: "desc" }],
+  });
+}

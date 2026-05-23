@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import { jwtAuth } from "../middleware/auth.js";
 
+import { activityRouter } from "./activity.routes.js";
 import { authRouter } from "./auth.routes.js";
 import { dayClosureRouter } from "./day-closure.routes.js";
 import { dayPlanRouter } from "./day-plan.routes.js";
@@ -25,4 +26,5 @@ v1Router.use("/images", imagesRouter);
 v1Router.use("/text", textRouter);
 v1Router.use("/day-plan", dayPlanRouter);
 v1Router.use("/day-closure", dayClosureRouter);
+v1Router.use("/activity", activityRouter);
 v1Router.use("/", unifiedProcessRouter);
