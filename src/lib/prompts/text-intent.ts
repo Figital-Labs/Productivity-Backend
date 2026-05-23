@@ -83,26 +83,45 @@ Bad reasoning (DO NOT produce):
   ✗ "This task already exists in the user's pending task list, which suggests a possible duplication concern."  (English when user wrote Hinglish)
 
 INTENT TYPES (use exact "type" values):
-  "created"            — user wants to add a new task
-  "priority_updated"   — user wants to change the priority of an existing task
-  "completed"          — user marks an existing task as done
-  "partial"            — user partially did an existing task (started but not finished)
+  "created"             — user wants to add a new task
+  "priority_updated"    — user wants to change the priority of an existing task
+  "completed"           — user marks an existing task as done
+  "partial"             — user partially did an existing task (started but not finished)
+  "target_date_updated" — user wants to MOVE an existing task to a different date
+                          (not create a duplicate, not mark it done)
 
 RULES (in priority order):
 
 1. CONSERVATIVE BY DEFAULT
    When uncertain, put the item in "recommendations", never "actions". The frontend asks the user to confirm recommendations before any DB write. When in doubt: RECOMMEND, never ACT.
 
-2. EXISTING-TASK MATCHING — priority_updated / completed / partial
+2. EXISTING-TASK MATCHING — priority_updated / completed / partial / target_date_updated
    Match user phrases primarily by task TITLE. Use the exact "id" from the pending-tasks JSON. Do NOT invent or guess ids.
    - If two pending tasks have similar titles, use the optional "notes" field for disambiguation. (E.g., two tasks titled "Patient rounds" — notes say "Ward A morning" vs "Ward B afternoon".)
    - Notes are CONTEXT for disambiguation only. Do NOT take action on something that's only mentioned in notes — the user's text is the source of action intent.
    - If no pending task plausibly matches, put it in "recommendations" with the inferred state.
 
-3. AD-HOC WORK GOES TO RECOMMENDATIONS
+3. TARGET DATE UPDATE — moving an existing task to a different date
+   When the user clearly references an EXISTING pending task (matched by title) AND clearly specifies a new date (relative or absolute), emit a "target_date_updated" action. Do NOT create a duplicate. Do NOT emit a recommendation.
+
+   ✓ Text: "Sneha se baat karna hai - Monday ko karna hai" + existing task "Sneha se baat karna hai"
+     → target_date_updated { taskId: <existing>, targetDate: "<resolved Monday>" }
+   ✓ Text: "Friday ko ward 12 visit shift kar do" + existing task "Ward 12 visit"
+     → target_date_updated { taskId: <existing>, targetDate: "<upcoming Friday>" }
+   ✓ Text: "Move the report submission to parso" + existing task "Submit report"
+     → target_date_updated { taskId: <existing>, targetDate: "<parso>" }
+
+   When NOT to use target_date_updated:
+   - User says a date but NO existing task plausibly matches → use "created" with "targetDate".
+   - User ambiguously names which task ("us wale ko shift karo") with multiple candidates → recommendation (carry the resolved "targetDate" on the recommendation per rule 9 below).
+   - User explicitly asks for a duplicate ("create a new one for Monday too") → use "created".
+
+   Use the same TODAY + Hinglish-tense rules above to resolve the date.
+
+4. AD-HOC WORK GOES TO RECOMMENDATIONS
    If the user mentions doing something that isn't on the pending list, do NOT auto-create it. Put it in "recommendations" with completed=true and a brief reasoning.
 
-4. TARGET DATE FOR "created" ACTIONS
+5. TARGET DATE FOR "created" ACTIONS
    If the user mentions a specific date or relative time ("kal", "tomorrow", "Friday", "next Monday"), resolve against TODAY'S DATE (above) and include "targetDate": "YYYY-MM-DD" in the created action.
    - Apply the HINDI "KAL" / "PARSO" tense rule above.
    - If the user did NOT mention a date, OMIT targetDate — the backend defaults to today.
@@ -112,19 +131,33 @@ RULES (in priority order):
        Text: "Friday ko follow-up call"          → created with targetDate=<upcoming Friday>
        Text: "add: review reports"               → created with NO targetDate
 
-5. CREATED ACTIONS — title (mandatory) + notes (optional)
+6. CREATED ACTIONS — title (mandatory) + notes (optional)
    - "title" is concise (max ~80 chars, Hinglish/English).
    - "notes" is OPTIONAL longer context (max ~500 chars) — only include if user provided detail beyond the title. Don't restate the title.
 
-6. PRIORITY
+7. PRIORITY
    Allowed values: "low", "medium", "high". Omit if user didn't indicate priority.
    Cues for HIGH: "urgent", "ASAP", "जरूरी", "abhi karna hai", "important", "!!!".
 
-7. CHUNKING THE PARAGRAPH
+8. CHUNKING THE PARAGRAPH
    A typed paragraph may have items separated by commas, line breaks, bullets, semicolons, or natural prose ("I need to do X, and also Y, and don't forget Z"). Split into individual task units. Don't conflate multiple tasks; don't split a single task across items.
 
-8. EMPTY OR OFF-TOPIC TEXT
-   If the text contains no task-related content, return empty "actions" and "recommendations" arrays.
+9. RECOMMENDATION TITLE FORMAT — and optional "targetDate"
+   The "title" field on a recommendation is what the task will be CALLED when the user taps ADD. It MUST be a clean, declarative task name — NOT a question, NOT a "Shift X to Y?" prompt, NOT a sentence with quoted strings inside it.
+
+   ✓ "Sneha se baat karna hai"
+   ✓ "Submit quarterly report"
+   ✓ "Ward 12 round (Monday)"
+   ✗ "Shift 'Sneha se baat karna hai' (today's task) to tomorrow?"
+   ✗ "Did you mean to create a new task for X?"
+   ✗ "Add task: Sneha se baat karna hai"
+
+   The question/explanation belongs in "reasoning". The "title" is the title.
+
+   When the recommendation implies a specific date (user said "Monday" but match is ambiguous, ad-hoc work with a date-bearing phrase, etc.), include the resolved date as "targetDate": "YYYY-MM-DD" on the recommendation. The frontend uses this so ADD lands the task on that date instead of the user's current viewDate.
+
+10. EMPTY OR OFF-TOPIC TEXT
+    If the text contains no task-related content, return empty "actions" and "recommendations" arrays.
 
 USER TEXT:
 ${userText}

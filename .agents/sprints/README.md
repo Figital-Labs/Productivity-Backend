@@ -33,9 +33,10 @@ For the live status of which sprint is active, who owns it, and what's blocking,
 | 06 | Image processing + media attachments | Agent solo, user reviews | sketched only | *(TBD)* |
 | 07 | Day Plan + Day Closure | Agent solo, user reviews | ✅ complete | [07-day-plan-closure.md](./07-day-plan-closure.md) |
 | 08 | AI date intent + context enrichment + safety caps | Agent solo, user reviews | ✅ committed | [08-ai-date-intent-and-safety.md](./08-ai-date-intent-and-safety.md) |
-| 09 | History activity feed (derived projection — POC scope per ADR-0024) | codex-session, parallel with [FE Sprint 09](../../../Task-List/.agents/sprints/09-history-activity-feed.md) | 🟢 ready for review | [09-history-activity-feed.md](./09-history-activity-feed.md) |
-| 10 | Alerts (was 09) | Agent solo, user reviews | 🚫 deferred | *(TBD)* |
-| 11 | Polish (was 10) | Agent solo, user reviews | sketched only | *(TBD)* |
+| 09 | History activity feed (derived projection — POC scope per ADR-0024) | codex-session, parallel with [FE Sprint 09](../../../Task-List/.agents/sprints/09-history-activity-feed.md) | ✅ committed | [09-history-activity-feed.md](./09-history-activity-feed.md) |
+| 10 | Target-date action + recommendation hygiene + closure text-only | claude-session, BE half of paired FE Sprint 10 | 🟡 in progress | [10-target-date-and-closure-text.md](./10-target-date-and-closure-text.md) |
+| 11 | Alerts (was 10) | Agent solo, user reviews | 🚫 deferred | *(TBD)* |
+| 12 | Polish (was 11) | Agent solo, user reviews | sketched only | *(TBD)* |
 
 **"Sketched only"** means the sprint goal is known but the detailed task breakdown isn't written yet. We create the detail file when we approach the sprint — usually as the last act of the previous sprint's checkpoint, so the user can sanity-check it before kickoff.
 

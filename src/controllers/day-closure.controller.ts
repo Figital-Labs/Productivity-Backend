@@ -8,15 +8,16 @@ import {
 import * as dayClosureService from "../services/day-closure.service.js";
 
 export async function submit(req: Request, res: Response): Promise<void> {
-  if (!req.file) {
-    throw new ValidationError("Missing required multipart field: audio");
-  }
   const input = submitDayClosureInputSchema.parse(req.body);
-  const result = await dayClosureService.submitDayClosure(
-    req.user,
-    { buffer: req.file.buffer, mimeType: req.file.mimetype },
-    input,
-  );
+  // Sprint 10: audio is now optional. The EOD multi-recording fix on the
+  // frontend processes each recording via `/voice/process` and accumulates
+  // transcripts into `commentary` — by the time we land here, the user has
+  // already submitted a text commentary. Either modality must be present.
+  if (!req.file && !input.commentary?.trim()) {
+    throw new ValidationError("Either audio or commentary is required");
+  }
+  const audio = req.file ? { buffer: req.file.buffer, mimeType: req.file.mimetype } : undefined;
+  const result = await dayClosureService.submitDayClosure(req.user, audio, input);
   res.status(201).json(result);
 }
 

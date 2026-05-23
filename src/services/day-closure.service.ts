@@ -57,7 +57,7 @@ function currentTaskStateFrom(
 
 export async function submitDayClosure(
   user: AuthenticatedUser,
-  audio: DayClosureAudioInput,
+  audio: DayClosureAudioInput | undefined,
   input: SubmitDayClosureInput,
 ): Promise<DayClosureSubmitResult> {
   const date = input.date ? parseDateString(input.date) : todayInUserTz(DEFAULT_TIMEZONE);
@@ -80,9 +80,16 @@ export async function submitDayClosure(
     );
   }
 
-  // Run the voice flow first — this executes any task updates the user mentioned,
-  // so the subsequent listByDate() reflects end-of-day reality.
-  const voiceResult = await voiceIntentService.processVoice(user, audio);
+  // Sprint 10: audio is optional. When the user submits an EOD with text-only
+  // commentary (the FE multi-recording flow already ran each clip through
+  // `/voice/process`, so all task updates have already landed), skip voice
+  // intent entirely — there's nothing left to transcribe or dispatch.
+  const voiceResult: Pick<
+    voiceIntentService.VoiceProcessResult,
+    "transcript" | "actions" | "recommendations"
+  > = audio
+    ? await voiceIntentService.processVoice(user, audio)
+    : { transcript: "", actions: [], recommendations: [] };
 
   const currentTasks = await taskRepo.listByDate(user.id, date);
   const closureNarrative = [input.commentary, voiceResult.transcript]

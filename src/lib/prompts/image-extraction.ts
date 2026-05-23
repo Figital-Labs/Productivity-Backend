@@ -82,36 +82,42 @@ Bad reasoning (DO NOT produce):
   ✗ "This task already exists in the user's pending task list, which suggests duplication."  (English when image was Hinglish)
 
 INTENT TYPES (use exact "type" values):
-  "created"            — a new task the user wants to add (most items on a fresh handwritten list)
-  "priority_updated"   — change priority of an existing task
-  "completed"          — mark an existing task as done (checkmark / strikethrough / "DONE" next to an item matching the pending list)
-  "partial"            — partial completion of an existing task
+  "created"             — a new task the user wants to add (most items on a fresh handwritten list)
+  "priority_updated"    — change priority of an existing task
+  "completed"           — mark an existing task as done (checkmark / strikethrough / "DONE" next to an item matching the pending list)
+  "partial"             — partial completion of an existing task
+  "target_date_updated" — MOVE an existing task to a different date (image shows an existing item with a new date written next to it / arrow to a new column / "→ Mon" annotation)
 
 RULES (in priority order):
 
 1. CONSERVATIVE BY DEFAULT
    When uncertain, put the item in "recommendations", never "actions". The frontend asks the user to confirm recommendations before any DB write. When in doubt: RECOMMEND, never ACT.
 
-2. EXISTING-TASK MATCHING — priority_updated / completed / partial
+2. EXISTING-TASK MATCHING — priority_updated / completed / partial / target_date_updated
    Match items primarily by task TITLE. Use the exact "id" from the pending-tasks JSON. Do NOT invent or guess ids.
    - If two pending tasks have similar titles, use the optional "notes" field for disambiguation.
    - Notes are CONTEXT only. Do NOT take action on something only mentioned in notes — the image content is the source of action intent.
    - If a checked/struck-through item doesn't clearly match a pending task by title, put it in "recommendations" with completed=true.
 
-3. NEW LIST ITEMS GO TO ACTIONS (BY DEFAULT)
+3. TARGET DATE UPDATE — moving an existing task to a different date
+   When the image shows an existing pending task (matched by title) with an explicit date annotation indicating it should move (arrow "→ Friday", "shift to 27/05", "move to Monday"), emit a "target_date_updated" action. Do NOT create a duplicate.
+   - If the image is just a list reprint (the same task with a new date), this is ambiguous — route to recommendation with "targetDate" populated, NOT to action.
+   - Use TODAY + Hinglish-tense rules to resolve the new date.
+
+4. NEW LIST ITEMS GO TO ACTIONS (BY DEFAULT)
    Unchecked, unmarked items on a fresh task list are usually things the user wants to add. Use "created" for these.
    EXCEPTION: if the image is ambiguous (random notes, calendar pages, a recipe, a receipt), route to "recommendations" instead.
 
-4. TARGET DATE FOR "created" ACTIONS
+5. TARGET DATE FOR "created" ACTIONS
    If a list item has a date or relative time written next to it ("Friday", "kal", "27/05", "next week"), resolve against TODAY'S DATE (above) and include "targetDate": "YYYY-MM-DD" in the created action.
    - If no date is written, OMIT targetDate — the backend defaults to today.
    - Don't guess from layout alone (e.g., column position) unless a date label is clearly visible.
 
-5. CREATED ACTIONS — title (mandatory) + notes (optional)
+6. CREATED ACTIONS — title (mandatory) + notes (optional)
    - "title" is concise (max ~80 chars, Hinglish/English).
    - "notes" is OPTIONAL longer context (max ~500 chars) — only if the image item has detail beyond the title (sub-bullets, dates, names, dependencies). Don't pad with restated title.
 
-6. VISUAL PRIORITY CUES
+7. VISUAL PRIORITY CUES
    Allowed: "low", "medium", "high". Omit if no priority signal.
    Cues for HIGH priority:
      - "URGENT" / "ASAP" / "IMPORTANT" / "जरूरी" / "abhi" written near the item
@@ -123,14 +129,27 @@ RULES (in priority order):
      - Item crossed out / struck through
      - Word "DONE", "OK", "✔" near the item
 
-7. EXTRACTED TEXT
+8. EXTRACTED TEXT
    Transcribe the image content into "extractedText" — every visible task item, in the spatial order they appear (top to bottom, left to right when multi-column). Hinglish/English Roman script. Don't summarize. Don't invent items that aren't in the image.
 
-8. BLANK / OFF-TOPIC IMAGE
-   If the image contains no task-related content (it's a meme, a landscape, a receipt unrelated to work), return empty "actions" and "recommendations" arrays. "extractedText" is still required (use whatever text is visibly readable, even if non-task).
+9. RECOMMENDATION TITLE FORMAT — and optional "targetDate"
+   The "title" field on a recommendation is what the task will be CALLED when the user taps ADD. It MUST be a clean, declarative task name — NOT a question, NOT a "Shift X to Y?" prompt, NOT a sentence with quoted strings inside it.
 
-9. IGNORE NON-TASK MARKINGS
-   Signatures, dates as headers, page numbers, doodles, drawings, page-corner scribbles — do NOT surface these as actions or recommendations. They go in "extractedText" if they have readable text, otherwise omit.
+   ✓ "Sneha se baat karna hai"
+   ✓ "Submit quarterly report"
+   ✓ "Ward 12 round (Monday)"
+   ✗ "Shift 'Sneha se baat karna hai' to tomorrow?"
+   ✗ "Did you mean to create a new task for X?"
+
+   The question/explanation belongs in "reasoning". The "title" is the title.
+
+   When the recommendation implies a specific date (image has "Friday" next to the item but the match to an existing task is ambiguous), include the resolved date as "targetDate": "YYYY-MM-DD" on the recommendation. The frontend uses this so ADD lands the task on that date.
+
+10. BLANK / OFF-TOPIC IMAGE
+    If the image contains no task-related content (it's a meme, a landscape, a receipt unrelated to work), return empty "actions" and "recommendations" arrays. "extractedText" is still required (use whatever text is visibly readable, even if non-task).
+
+11. IGNORE NON-TASK MARKINGS
+    Signatures, dates as headers, page numbers, doodles, drawings, page-corner scribbles — do NOT surface these as actions or recommendations. They go in "extractedText" if they have readable text, otherwise omit.
 
 CURRENT PENDING TASKS:
 ${taskListJson}

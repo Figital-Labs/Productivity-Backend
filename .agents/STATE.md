@@ -14,7 +14,9 @@ tags: [meta, state, coordination]
 
 ## Active Sprint
 
-**Sprint 09 implemented — History activity feed (derived projection).** Ready for user review. Unblocks [Frontend Sprint 09](../../Task-List/.agents/sprints/09-history-activity-feed.md) integration. `GET /api/v1/activity` endpoint live and curl-smoked: returns sorted `ActivityEvent[]` with proper IST date-range filtering, 400 on bad range, title lookup via `listByIds`. Explicit POC-scope choice documented in [ADR-0024](./decisions/0024-history-derived-projection.md).
+**Sprint 10 implemented — Target-date action + recommendation hygiene + closure text-only.** Ready for user review. Three tightly-related backend changes from post-Sprint-09 smoke: (a) new `target_date_updated` action primitive so the AI can shift an existing task to a new date without creating duplicates; (b) recommendation hygiene (clean-title rule + optional `targetDate` field) for the ambiguous cases that still need recommendations; (c) `/day-closure/submit` now accepts text-only commentary (unblocks FE EOD multi-recording fix). 5/5 smoke tests passed. See [sprints/10-target-date-and-closure-text.md](./sprints/10-target-date-and-closure-text.md).
+
+Previous: **Sprint 09 — History activity feed (derived projection).** Committed by user. `GET /api/v1/activity` endpoint live: returns sorted `ActivityEvent[]` with proper IST date-range filtering, 400 on bad range, title lookup via `listByIds`. Explicit POC-scope choice in [ADR-0024](./decisions/0024-history-derived-projection.md).
 
 Previous: Sprint 08 — AI date intent + context enrichment + safety caps. Committed by user; all six bundled concerns shipped (BUG-002 BE, BUG-003 prompt rewrite, BUG-004, BUG-006, BUG-009 BE, CONSIDER-001).
 
@@ -40,9 +42,10 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 | 06 — Image processing (image-only) | 🟢 ready for review | claude-session | 2026-05-22 | — | [sprints/06-image-processing.md](./sprints/06-image-processing.md) |
 | 07 — Day Plan + Day Closure | ✅ complete | claude-session | 2026-05-22 | 2026-05-22 | [sprints/07-day-plan-closure.md](./sprints/07-day-plan-closure.md) |
 | 08 — AI date intent + context + safety caps | ✅ committed | claude-session | 2026-05-23 | 2026-05-23 | [sprints/08-ai-date-intent-and-safety.md](./sprints/08-ai-date-intent-and-safety.md) |
-| 09 — History activity feed (derived projection) | 🟢 ready for review | codex-session | 2026-05-23 | 2026-05-23 | [sprints/09-history-activity-feed.md](./sprints/09-history-activity-feed.md) |
-| 10 — Alerts (was 09) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
-| 11 — Polish (was 10) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
+| 09 — History activity feed (derived projection) | ✅ committed | codex-session | 2026-05-23 | 2026-05-23 | [sprints/09-history-activity-feed.md](./sprints/09-history-activity-feed.md) |
+| 10 — Target-date action + recommendation hygiene + closure text-only | 🟢 ready for review | claude-session | 2026-05-24 | 2026-05-24 | [sprints/10-target-date-and-closure-text.md](./sprints/10-target-date-and-closure-text.md) |
+| 11 — Alerts (was 10) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
+| 12 — Polish (was 11) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
 
 Sprints 3–9 don't have detail files yet. Per our working style, **detail the next sprint right before starting it**, not all upfront. Each sprint file gets created when the previous one is at the checkpoint.
 
@@ -157,3 +160,26 @@ If you're a fresh agent session picking up Sprint 09:
 
 - **Sprint 09 scoped — History activity feed (derived projection).** Will add `GET /api/v1/activity?from&to` returning a sorted `ActivityEvent[]`. Projects 8 event types from existing tables (4 AI batch types + manual task creation + task completion + 2 submission types). Explicit POC choice per ADR-0024 — derived projection ships in ~1 sprint, scale-warning baked into the service's top-of-file comment + ADR + sprint doc. Migration to a proper `TaskAuditEvent` table is documented for when POC scale (~5K tasks/user) is exceeded.
 - ADR-0024 created. Existing Sprints 9 (Alerts) + 10 (Polish) renumbered to 10 + 11.
+
+### 2026-05-24
+
+- **Sprint 10 kicked off — Target-date action + recommendation hygiene + closure text-only.** User smoke surfaced two cascading bugs: (1) AI has no `target_date_updated` action variant, so date-shift intents fall to recommendations; (2) recommendation `title` field gets prompt-question strings instead of clean task titles, and recommendation schema lacks `targetDate`, so `+ ADD` lands a garbage-titled task on the wrong date. Plus EOD multi-recording fix (BUG-B) needs `/day-closure/submit` to accept text-only commentary. Existing deferred Sprints 10 (Alerts) + 11 (Polish) renumbered to 11 + 12. Sprint file at [sprints/10-target-date-and-closure-text.md](./sprints/10-target-date-and-closure-text.md).
+
+- **Sprint 10 implemented.** Five concrete changes:
+  - **10.1** — `target_date_updated` action variant added to `voiceActionSchema` (cascades to text + image which re-export) + `unifiedActionSchema`. `targetDate` is REQUIRED on this variant (vs optional on `created`) since the new date IS the action. Dispatcher case added in `action-dispatch.service.ts` — `taskRepo.update(taskId, { targetDate })` with `taskService.getTask` auth check. `PersistedAiAction` union extended.
+  - **10.1.b** — Recommendation schemas (`voiceRecommendationSchema` + `unifiedRecommendationSchema`) gain optional `targetDate: ymdDateSchema.optional()`. Frontend `+ ADD` will honor this in FE Sprint 10.
+  - **10.2** — All four prompts (`voice-intent.ts`, `text-intent.ts`, `image-extraction.ts`, `unified-intent.ts`) extended:
+    - INTENT TYPES section lists the 5th type with one-line description.
+    - New TARGET DATE UPDATE rule (positioned right after EXISTING-TASK MATCHING) with 3 concrete examples each + an explicit "when NOT to use it" list (no match → `created`; ambiguous → recommendation; explicit duplicate → `created`).
+    - New RECOMMENDATION TITLE FORMAT rule with good/bad examples — title must be a clean task name, NOT a "Shift X to Y?" question. Also notes the optional `targetDate` carry-through.
+  - **10.3** — `/day-closure/submit` made audio-optional. Controller drops the `if (!req.file)` precondition; instead validates "audio OR commentary required" after parsing body. Service signature changes to `audio: DayClosureAudioInput | undefined`; when absent, skips `voiceIntentService.processVoice` entirely (uses `{ transcript: "", actions: [], recommendations: [] }` placeholder via `Pick<VoiceProcessResult, ...>`). Closure narrative falls back to `input.commentary` alone. No schema change needed — commentary already optional in the body schema.
+  - Sprint file: [sprints/10-target-date-and-closure-text.md](./sprints/10-target-date-and-closure-text.md).
+  - **Verification:** `npm run typecheck` ✅, `npm run lint` ✅. Smoke tests against live dev server:
+    - (1) Date-shift via text: created task "Sneha se baat karna hai" on 2026-05-24 → text "Sneha se baat karna hai - Monday ko karna hai" → AI emitted `target_date_updated { taskId: <existing>, targetDate: "2026-05-25" }` with empty recommendations. Task moved to 2026-05-25, identity preserved (same id). ✅
+    - (2) Ambiguous reference: created two tasks "Patient rounds ward A" + "Patient rounds ward B" → text "patient rounds wale ko Monday shift karo" → AI emitted empty actions + ONE recommendation with clean title "Patient rounds" (not a "Shift X to Y?" question), populated `targetDate`, and a clean Hinglish disambiguation question in `reasoning` ("Kaunse patient rounds ko Monday shift karna hai? Ward A ya Ward B?"). Recommendation hygiene works as designed. Minor: AI resolved Monday to 2026-05-26 (Tuesday) instead of 2026-05-25 — a separate weekday-resolution accuracy concern, not blocking. ✅
+    - (3) Regression: "kal ward 12 me jaana hai" → `created` action with `targetDate: 2026-05-25` (Sprint 8 behavior preserved). ✅
+    - (4) EOD text-only submit: commentary-only POST → 201 with `taskUpdates: []` (voice skipped) and 6 populated `aiFeedback` fields. ✅
+    - (5) EOD missing both: no audio + no commentary → 400 with `VALIDATION_ERROR: "Either audio or commentary is required"`. ✅
+    - (6) EOD with audio (regression): not re-smoked — code path is unchanged when audio is present (the only branch added is `audio ? processVoice : empty`). Confidence is high; FE Sprint 10 will exercise this implicitly with the old single-recording flow.
+  - **Backwards-compatible.** All existing AI clients continue to work; the new action type is additive, recommendation `targetDate` is optional, day-closure with audio still behaves identically.
+  - **Handoff:** FE Sprint 10 picks up the DTO updates + recommendation ADD handler + EOD modal refactor. See plan file `C:\Users\ashoka\.claude\plans\hey-calude-i-was-jiggly-torvalds.md` for the paired FE scope.

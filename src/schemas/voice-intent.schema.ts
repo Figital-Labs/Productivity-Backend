@@ -31,6 +31,11 @@ export type SubmitVoiceInput = z.infer<typeof submitVoiceInputSchema>;
  * relative date phrase ("kal", "Friday", "next Monday"), the AI resolves it
  * against the prompt's TODAY anchor and emits it here. The dispatcher uses it
  * verbatim; absent → falls back to the request's effective `today`.
+ *
+ * `target_date_updated` (Sprint 10) — shifts an existing task to a new date.
+ * Lets the AI express "Monday ko karna hai" about an existing task without
+ * creating a duplicate. `targetDate` is REQUIRED here (vs optional on `created`)
+ * because the new date IS the action.
  */
 export const voiceActionSchema = z.discriminatedUnion("type", [
   z.object({
@@ -57,13 +62,26 @@ export const voiceActionSchema = z.discriminatedUnion("type", [
     taskId: z.string().min(1),
     reasoning: z.string(),
   }),
+  z.object({
+    type: z.literal("target_date_updated"),
+    taskId: z.string().min(1),
+    targetDate: ymdDateSchema,
+    reasoning: z.string(),
+  }),
 ]);
 export type VoiceAction = z.infer<typeof voiceActionSchema>;
 
+/**
+ * Recommendation shape. `targetDate` (Sprint 10) is optional — when the AI
+ * surfaces a date-related recommendation (ambiguous date-shift, date-bearing
+ * ad-hoc work), it includes the resolved date so the frontend's `+ ADD` path
+ * lands the task on that date instead of the user's current viewDate.
+ */
 export const voiceRecommendationSchema = z.object({
   title: z.string().min(1),
   priority: priorityEnum.optional(),
   completed: z.boolean().optional(),
+  targetDate: ymdDateSchema.optional(),
   reasoning: z.string(),
 });
 export type VoiceRecommendation = z.infer<typeof voiceRecommendationSchema>;

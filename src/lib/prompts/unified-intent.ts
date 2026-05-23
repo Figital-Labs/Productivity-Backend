@@ -106,10 +106,12 @@ Bad reasoning (DO NOT produce):
   ✗ "मरीज़ का काम पहले से है।"  (Devanagari)
 
 INTENT TYPES (use exact "type" values):
-  "created"            — user wants to add a new task
-  "priority_updated"   — user wants to change priority of an existing task
-  "completed"          — user marks an existing task as done
-  "partial"            — user partially did an existing task (started but not finished)
+  "created"             — user wants to add a new task
+  "priority_updated"    — user wants to change priority of an existing task
+  "completed"           — user marks an existing task as done
+  "partial"             — user partially did an existing task (started but not finished)
+  "target_date_updated" — user wants to MOVE an existing task to a different date
+                          (not create a duplicate, not mark it done)
 
 SOURCE TAGGING — REQUIRED FOR EVERY ACTION AND RECOMMENDATION
 Each action and recommendation MUST include a "source" field — exactly one of "voice", "image", or "text" — indicating which input modality led to that item:
@@ -129,35 +131,63 @@ RULES (in priority order):
 3. CROSS-MODAL CONTRADICTIONS → ALWAYS RECOMMENDATION
    If audio says "I completed X" but the image shows X still unchecked or not crossed out, do NOT emit a confident "completed" action. Put it in "recommendations" so the user resolves the ambiguity. Same in reverse: if image shows a task struck through but audio describes it as ongoing, → recommendation. Note this in the reasoning.
 
-4. EXISTING-TASK MATCHING — priority_updated / completed / partial
+4. EXISTING-TASK MATCHING — priority_updated / completed / partial / target_date_updated
    Match by task TITLE primarily. Use the EXACT "id" from the pending-tasks JSON. Do NOT invent or guess ids.
    - If two pending tasks have similar titles, use the optional "notes" field for disambiguation.
    - Notes are CONTEXT only — do NOT take action on something only mentioned in notes.
    - If no pending task matches, put it in "recommendations".
 
-5. AD-HOC WORK GOES TO RECOMMENDATIONS
+5. TARGET DATE UPDATE — moving an existing task to a different date
+   When any modality clearly references an EXISTING pending task (matched by title) AND clearly specifies a new date, emit a "target_date_updated" action. Do NOT create a duplicate. Do NOT emit a recommendation.
+
+   ✓ Audio: "Sneha se baat karna hai Monday ko karna hai" + existing task "Sneha se baat karna hai"
+     → target_date_updated { source: "voice", taskId: <existing>, targetDate: "<resolved Monday>" }
+   ✓ Text: "Move report submission to parso" + existing task "Submit report"
+     → target_date_updated { source: "text", taskId: <existing>, targetDate: "<parso>" }
+   ✓ Image: arrow "→ Friday" next to existing task "Ward 12 visit"
+     → target_date_updated { source: "image", taskId: <existing>, targetDate: "<upcoming Friday>" }
+
+   When NOT to use target_date_updated:
+   - User says a date but NO existing task plausibly matches → use "created" with "targetDate".
+   - User ambiguously names which task with multiple candidates → recommendation (carry resolved "targetDate" per rule 11 below).
+   - User explicitly asks for a duplicate → use "created".
+
+6. AD-HOC WORK GOES TO RECOMMENDATIONS
    If any modality mentions doing or planning something that isn't in the pending-tasks list, do NOT auto-create it. Put it in "recommendations" with the appropriate fields and brief reasoning.
 
-6. TARGET DATE FOR "created" ACTIONS
+7. TARGET DATE FOR "created" ACTIONS
    If any modality mentions a specific date or relative time ("kal", "Friday", "next Monday", "27/05"), resolve against TODAY'S DATE (above) and include "targetDate": "YYYY-MM-DD" in the created action.
    - Use the HINDI "KAL" / "PARSO" tense rule.
    - If no date is mentioned, OMIT targetDate — the backend defaults to today.
    - Don't guess.
 
-7. CREATED ACTIONS — title (mandatory) + notes (optional)
+8. CREATED ACTIONS — title (mandatory) + notes (optional)
    - "title": concise summary, max ~80 chars, Hinglish/English Roman
    - "notes": OPTIONAL longer context (max ~500 chars) — include only if a modality offered detail beyond the title (the why, the when, who it's for, dependencies)
 
-8. PRIORITY
+9. PRIORITY
    Allowed values: "low", "medium", "high". Omit if no priority signal.
    Cues across modalities:
      - Audio/text: "urgent", "ASAP", "जरूरी", "abhi karna hai", "important", swearing
      - Image: "URGENT" / "!!!" in handwriting, underlines, stars (*, ★), red ink, double-underlining
 
-9. VISUAL COMPLETION CUES (image only, subject to rule 3 if other modalities disagree)
-   Checkmark (✓), strikethrough, "DONE" / "OK" / "✔" next to an item → match the pending task by title → emit "completed". If no pending task matches, → recommendation with completed=true.
+10. VISUAL COMPLETION CUES (image only, subject to rule 3 if other modalities disagree)
+    Checkmark (✓), strikethrough, "DONE" / "OK" / "✔" next to an item → match the pending task by title → emit "completed". If no pending task matches, → recommendation with completed=true.
 
-10. EMPTY / OFF-TOPIC INPUT
+11. RECOMMENDATION TITLE FORMAT — and optional "targetDate"
+    The "title" field on a recommendation is what the task will be CALLED when the user taps ADD. It MUST be a clean, declarative task name — NOT a question, NOT a "Shift X to Y?" prompt, NOT a sentence with quoted strings inside it.
+
+    ✓ "Sneha se baat karna hai"
+    ✓ "Submit quarterly report"
+    ✓ "Ward 12 round (Monday)"
+    ✗ "Shift 'Sneha se baat karna hai' to tomorrow?"
+    ✗ "Did you mean to create a new task for X?"
+
+    The question/explanation belongs in "reasoning". The "title" is the title.
+
+    When the recommendation implies a specific date, include the resolved date as "targetDate": "YYYY-MM-DD" on the recommendation. The frontend uses this so ADD lands the task on that date instead of the user's current viewDate.
+
+12. EMPTY / OFF-TOPIC INPUT
     If no task-related content exists across any provided modality, return empty "actions" and "recommendations" arrays.
 
 ${userTextBlock}

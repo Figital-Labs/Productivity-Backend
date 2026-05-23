@@ -67,6 +67,13 @@ export const unifiedActionSchema = z.discriminatedUnion("type", [
     taskId: z.string().min(1),
     reasoning: z.string(),
   }),
+  z.object({
+    type: z.literal("target_date_updated"),
+    source: sourceModalityEnum,
+    taskId: z.string().min(1),
+    targetDate: ymdDateSchema,
+    reasoning: z.string(),
+  }),
 ]);
 export type UnifiedAction = z.infer<typeof unifiedActionSchema>;
 
@@ -75,6 +82,7 @@ export const unifiedRecommendationSchema = z.object({
   title: z.string().min(1),
   priority: priorityEnum.optional(),
   completed: z.boolean().optional(),
+  targetDate: ymdDateSchema.optional(),
   reasoning: z.string(),
 });
 export type UnifiedRecommendation = z.infer<typeof unifiedRecommendationSchema>;

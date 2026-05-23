@@ -39,7 +39,8 @@ export type PersistedAiAction =
     }
   | { type: "priority_updated"; taskId: string; priority: Priority; reasoning: string }
   | { type: "completed"; taskId: string; reasoning: string }
-  | { type: "partial"; taskId: string; reasoning: string };
+  | { type: "partial"; taskId: string; reasoning: string }
+  | { type: "target_date_updated"; taskId: string; targetDate: string; reasoning: string };
 
 export interface DispatchOptions {
   sourceType: AiSourceType;
@@ -109,6 +110,16 @@ export async function dispatchAiAction(
       return {
         type: "partial",
         taskId: action.taskId,
+        reasoning: action.reasoning,
+      };
+    }
+    case "target_date_updated": {
+      await taskService.getTask(user, action.taskId);
+      await taskRepo.update(action.taskId, { targetDate: parseDateString(action.targetDate) });
+      return {
+        type: "target_date_updated",
+        taskId: action.taskId,
+        targetDate: action.targetDate,
         reasoning: action.reasoning,
       };
     }
