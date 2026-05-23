@@ -19,7 +19,7 @@
     "format:check": "prettier --check \"src/**/*.{ts,json}\" \"*.{ts,js,json,md}\"",
     "typecheck": "tsc --noEmit",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "lint-staged": {
     "*.{ts,js}": [
@@ -33,6 +33,10 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "engines": {
+    "node": "22.x",
+    "npm": ">=10.0.0"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/express": "^5.0.6",
