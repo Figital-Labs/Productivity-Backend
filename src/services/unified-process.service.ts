@@ -1,5 +1,6 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
 import { ValidationError } from "../lib/errors.js";
+import { truncateNotesForContext } from "../lib/notes-context.js";
 import {
   buildUnifiedIntentPrompt,
   type PendingTaskContext,
@@ -13,7 +14,7 @@ import {
   type SourceModality,
   type UnifiedRecommendation,
 } from "../schemas/unified-intent.schema.js";
-import { todayInUserTz } from "../utils/date.js";
+import { formatDateYmd, parseDateString, promptDateAnchors, todayInUserTz } from "../utils/date.js";
 
 import { dispatchAiAction, type PersistedAiAction } from "./action-dispatch.service.js";
 
@@ -29,6 +30,7 @@ export interface UnifiedProcessInput {
   audio?: ModalityBuffer | undefined;
   image?: ModalityBuffer | undefined;
   text?: string | undefined;
+  targetDate?: string | undefined;
 }
 
 /**
@@ -54,13 +56,21 @@ export async function processUnified(
     throw new ValidationError("At least one of audio, image, or text must be provided.");
   }
 
+  const today = input.targetDate
+    ? parseDateString(input.targetDate)
+    : todayInUserTz(DEFAULT_TIMEZONE);
+
   const pending = await taskRepo.listPending(user.id, PENDING_CONTEXT_LIMIT);
-  const taskContext: PendingTaskContext[] = pending.map((t) => ({
-    id: t.id,
-    title: t.title,
-    priority: t.priority,
-    targetDate: formatDateYMD(t.targetDate),
-  }));
+  const taskContext: PendingTaskContext[] = pending.map((t) => {
+    const notesForContext = truncateNotesForContext(t.notes);
+    return {
+      id: t.id,
+      title: t.title,
+      priority: t.priority,
+      targetDate: formatDateYmd(t.targetDate),
+      ...(notesForContext !== undefined && { notes: notesForContext }),
+    };
+  });
 
   // Empty row first so created tasks can reference it via sourceId.
   // Atomicity intentionally skipped (matches voice/image/closure pattern).
@@ -82,12 +92,12 @@ export async function processUnified(
       hasAudio: input.audio !== undefined,
       hasImage: input.image !== undefined,
       text: input.text,
+      ...promptDateAnchors(today),
     }),
     schema: unifiedIntentResponseSchema,
     media,
   });
 
-  const today = todayInUserTz(DEFAULT_TIMEZONE);
   const persistedActions: PersistedUnifiedAction[] = [];
   for (const action of aiResponse.actions) {
     // Dispatcher takes a VoiceAction-shaped object; UnifiedAction is a structural
@@ -112,8 +122,4 @@ export async function processUnified(
     actions: persistedActions,
     recommendations: aiResponse.recommendations,
   };
-}
-
-function formatDateYMD(d: Date): string {
-  return d.toISOString().slice(0, 10);
 }

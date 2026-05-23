@@ -1,10 +1,8 @@
 import type { Request, Response } from "express";
-import { z } from "zod";
 
 import { ValidationError } from "../lib/errors.js";
+import { submitUnifiedInputSchema } from "../schemas/unified-intent.schema.js";
 import * as unifiedProcessService from "../services/unified-process.service.js";
-
-const bodySchema = z.object({ text: z.string().min(1).optional() });
 
 export async function process(req: Request, res: Response): Promise<void> {
   const files = req.files as
@@ -16,7 +14,7 @@ export async function process(req: Request, res: Response): Promise<void> {
   // req.body is undefined when no multipart payload reaches the parser
   // (curl with no -F flags). Default to {} so the "at least one modality"
   // error message wins over zod's generic "expected object" message.
-  const { text } = bodySchema.parse((req.body as unknown) ?? {});
+  const { text, targetDate } = submitUnifiedInputSchema.parse((req.body as unknown) ?? {});
 
   if (audioFile === undefined && imageFile === undefined && text === undefined) {
     throw new ValidationError("At least one of audio, image, or text must be provided.");
@@ -30,6 +28,7 @@ export async function process(req: Request, res: Response): Promise<void> {
       image: { buffer: imageFile.buffer, mimeType: imageFile.mimetype },
     }),
     ...(text !== undefined && { text }),
+    ...(targetDate !== undefined && { targetDate }),
   };
 
   const result = await unifiedProcessService.processUnified(req.user, input);

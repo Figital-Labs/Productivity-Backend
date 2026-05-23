@@ -2,6 +2,7 @@ import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as taskRepo from "../repositories/task.repository.js";
 import type { Priority } from "../schemas/common.js";
 import type { VoiceAction } from "../schemas/voice-intent.schema.js";
+import { parseDateString } from "../utils/date.js";
 
 import * as taskService from "./task.service.js";
 
@@ -23,7 +24,8 @@ export type AiSourceType = "voice" | "image" | "text" | "unified";
  * The shape we persist into `VoiceInteraction.actions` / `ImageExtraction.actions`
  * and return to the controller. Identical content to the AI's output but with
  * `taskId` resolved on every variant — including `created`, where we use the
- * freshly-created task's id.
+ * freshly-created task's id. `targetDate` on created actions reflects the AI's
+ * resolution of any relative-date phrase the user used (e.g., "kal" → tomorrow).
  */
 export type PersistedAiAction =
   | {
@@ -32,6 +34,7 @@ export type PersistedAiAction =
       title: string;
       notes?: string;
       priority?: Priority;
+      targetDate?: string;
       reasoning: string;
     }
   | { type: "priority_updated"; taskId: string; priority: Priority; reasoning: string }
@@ -41,6 +44,11 @@ export type PersistedAiAction =
 export interface DispatchOptions {
   sourceType: AiSourceType;
   sourceId: string;
+  /**
+   * The effective "today" for this dispatch. Used as the default targetDate
+   * when the AI didn't supply one on a `created` action. Either the
+   * request's `targetDate` (Sprint 8 BUG-002) or `todayInUserTz` fallback.
+   */
   today: Date;
 }
 
@@ -51,10 +59,16 @@ export async function dispatchAiAction(
 ): Promise<PersistedAiAction> {
   switch (action.type) {
     case "created": {
+      // The AI may have resolved a relative-date phrase from user input
+      // ("kal", "Friday", "next Monday") into a concrete YYYY-MM-DD. If
+      // present, use it. Otherwise fall back to the request's effective
+      // today (which is either the frontend-supplied targetDate or the
+      // server's todayInUserTz). See BUG-002 + BUG-006 in BUGS.md.
+      const targetDate = action.targetDate ? parseDateString(action.targetDate) : opts.today;
       const created = await taskRepo.create({
         userId: user.id,
         title: action.title,
-        targetDate: opts.today,
+        targetDate,
         sourceType: opts.sourceType,
         sourceId: opts.sourceId,
         ...(action.notes !== undefined && { notes: action.notes }),
@@ -67,6 +81,7 @@ export async function dispatchAiAction(
         reasoning: action.reasoning,
         ...(action.notes !== undefined && { notes: action.notes }),
         ...(action.priority !== undefined && { priority: action.priority }),
+        ...(action.targetDate !== undefined && { targetDate: action.targetDate }),
       };
     }
     case "priority_updated": {

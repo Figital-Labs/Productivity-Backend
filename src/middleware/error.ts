@@ -40,8 +40,20 @@ export function errorMiddleware(
   }
 
   if (err instanceof multer.MulterError) {
-    const status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
-    res.status(status).json({
+    if (err.code === "LIMIT_FILE_SIZE") {
+      // Stable error code + clearer message for the frontend (BUG-009). The
+      // 10 MB cap matches the frontend file-pick guard in TaskSheetImportModal
+      // and the duration cap in useAudioRecorder.
+      res.status(413).json({
+        error: {
+          code: "FILE_TOO_LARGE",
+          message: "Uploaded file exceeds the 10 MB limit.",
+          ...(err.field !== undefined ? { details: { field: err.field } } : {}),
+        },
+      });
+      return;
+    }
+    res.status(400).json({
       error: {
         code: err.code,
         message: err.message,

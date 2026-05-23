@@ -1,4 +1,5 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
+import { truncateNotesForContext } from "../lib/notes-context.js";
 import {
   buildImageExtractionPrompt,
   type PendingTaskContext,
@@ -10,8 +11,9 @@ import * as taskRepo from "../repositories/task.repository.js";
 import {
   imageExtractionResponseSchema,
   type ImageRecommendation,
+  type SubmitImageInput,
 } from "../schemas/image-extraction.schema.js";
-import { todayInUserTz } from "../utils/date.js";
+import { formatDateYmd, parseDateString, promptDateAnchors, todayInUserTz } from "../utils/date.js";
 
 import { dispatchAiAction, type PersistedAiAction } from "./action-dispatch.service.js";
 
@@ -33,14 +35,23 @@ export interface ImageProcessResult {
 export async function processImage(
   user: AuthenticatedUser,
   image: ImageInput,
+  input: SubmitImageInput = {},
 ): Promise<ImageProcessResult> {
+  const today = input.targetDate
+    ? parseDateString(input.targetDate)
+    : todayInUserTz(DEFAULT_TIMEZONE);
+
   const pending = await taskRepo.listPending(user.id, PENDING_CONTEXT_LIMIT);
-  const taskContext: PendingTaskContext[] = pending.map((t) => ({
-    id: t.id,
-    title: t.title,
-    priority: t.priority,
-    targetDate: formatDateYMD(t.targetDate),
-  }));
+  const taskContext: PendingTaskContext[] = pending.map((t) => {
+    const notesForContext = truncateNotesForContext(t.notes);
+    return {
+      id: t.id,
+      title: t.title,
+      priority: t.priority,
+      targetDate: formatDateYmd(t.targetDate),
+      ...(notesForContext !== undefined && { notes: notesForContext }),
+    };
+  });
 
   // Create empty row first so created tasks can carry sourceId = this row's id.
   // Atomicity intentionally skipped for POC (matches the voice flow).
@@ -52,12 +63,14 @@ export async function processImage(
 
   const aiResponse = await generateStructured({
     model: GEMINI_FLASH_MODEL,
-    prompt: buildImageExtractionPrompt(taskContext),
+    prompt: buildImageExtractionPrompt({
+      pendingTasks: taskContext,
+      ...promptDateAnchors(today),
+    }),
     schema: imageExtractionResponseSchema,
     media: [{ mimeType: image.mimeType, buffer: image.buffer }],
   });
 
-  const today = todayInUserTz(DEFAULT_TIMEZONE);
   const persistedActions: PersistedAiAction[] = [];
   for (const action of aiResponse.actions) {
     persistedActions.push(
@@ -81,8 +94,4 @@ export async function processImage(
     actions: persistedActions,
     recommendations: aiResponse.recommendations,
   };
-}
-
-function formatDateYMD(d: Date): string {
-  return d.toISOString().slice(0, 10);
 }

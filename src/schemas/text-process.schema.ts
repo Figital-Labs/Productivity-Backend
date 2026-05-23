@@ -6,9 +6,17 @@ import { voiceActionSchema, voiceRecommendationSchema } from "./voice-intent.sch
  * Input for `POST /api/v1/text/process`. The text is the user's free-form
  * paragraph; the AI extracts intent (created / completed / partial /
  * priority_updated) just like the voice flow does, minus the audio part.
+ *
+ * `targetDate` is optional — when present, both the AI prompt's TODAY value
+ * and the dispatcher's default target date use it. Sprint 8 addition for
+ * BUG-002: lets the frontend pass the user's selected `viewDate`.
  */
 export const submitTextInputSchema = z.object({
   text: z.string().trim().min(1).max(5000),
+  targetDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "targetDate must be YYYY-MM-DD")
+    .optional(),
 });
 export type SubmitTextInput = z.infer<typeof submitTextInputSchema>;
 

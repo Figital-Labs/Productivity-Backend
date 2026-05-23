@@ -14,7 +14,9 @@ tags: [meta, state, coordination]
 
 ## Active Sprint
 
-**POC scope complete.** Sprints 1-7 all shipped + committed, plus post-Sprint-7 text/fusion and Sprint 8 lite JWT auth. Sprint 8 Alerts + History remains **deferred indefinitely per user 2026-05-22** - not needed for POC.
+**Sprint 08 implemented — AI date intent + context enrichment + safety caps + prompt rewrite (BUG-003 absorbed mid-sprint).** Ready for user review. Unblocks [Frontend Sprint 07](../../Task-List/.agents/sprints/07-date-intent-and-acknowledgement.md). Backwards-compatible: frontend can adopt at its own pace.
+
+Sprints 1-7 all shipped + committed, plus post-Sprint-7 text/fusion and lite JWT auth. Original Sprint 8 (Alerts + History) renumbered to Sprint 9 and remains deferred indefinitely per user 2026-05-22.
 
 Backend-facing integration doc lives at `Backend_task_list/BACKEND_GUIDE.md` (project root, not under `.agents/`) — single source of truth for frontend devs + product owner.
 
@@ -35,8 +37,9 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 | 05 — Voice intent + /voice/process | 🟢 ready for review | claude-session | 2026-05-22 | — | [sprints/05-voice-intent.md](./sprints/05-voice-intent.md) |
 | 06 — Image processing (image-only) | 🟢 ready for review | claude-session | 2026-05-22 | — | [sprints/06-image-processing.md](./sprints/06-image-processing.md) |
 | 07 — Day Plan + Day Closure | ✅ complete | claude-session | 2026-05-22 | 2026-05-22 | [sprints/07-day-plan-closure.md](./sprints/07-day-plan-closure.md) |
-| 08 — Alerts + History | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
-| 09 — Polish | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
+| 08 — AI date intent + context + safety caps | 🟢 ready for review | claude-session | 2026-05-23 | 2026-05-23 | [sprints/08-ai-date-intent-and-safety.md](./sprints/08-ai-date-intent-and-safety.md) |
+| 09 — Alerts + History (was 08) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
+| 10 — Polish (was 09) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
 
 Sprints 3–9 don't have detail files yet. Per our working style, **detail the next sprint right before starting it**, not all upfront. Each sprint file gets created when the previous one is at the checkpoint.
 
@@ -120,12 +123,27 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 - `GET /api/v1/tasks?openCarryOver=true` added — frontend-driven addition during Sprint 02.5 (drag-to-today UI surface). Returns incomplete tasks with `targetDate < todayInUserTz("Asia/Kolkata")`, ordered `targetDate ASC, createdAt ASC`. Mutually exclusive with `date` — sending both → 400 via zod `.refine()`. Changes: `listTasksQuerySchema` extended with `openCarryOver: z.coerce.boolean().optional()` + refine; `taskRepo.listOpenCarryOver(userId, today)` sibling of `listPending` (untouched); `listTasks` service signature changed from `(user, dateStr?)` to `(user, query)`; controller passes full `query`. ARCHITECTURE.md task endpoint table + BACKEND_GUIDE.md updated. `npm run lint` + `npm run build` green. Curl smoke: `?date=2026-05-22` ✅, `?openCarryOver=true` returns 12 incomplete tasks ✅, both params → 400 ✅. Implemented by a Sonnet subagent under foreground supervision from a frontend-side claude-session.
 
+### 2026-05-23
+
+- **Sprint 08 implemented — AI Date Intent + Context Enrichment + Safety Caps + AI Reasoning Rewrite.** Six frontend-surfaced concerns bundled into one sprint because they all touch the AI processing surface. BUG-003 was absorbed mid-sprint (user direction updated: reasoning stays user-facing but the prompt enforces brief + native-language + P.A. tone). The bundle:
+  - **BUG-002 backend half** — input schemas on `/text/process`, `/voice/process`, `/images/process`, `/process` all accept optional `targetDate: YYYY-MM-DD`. New `submitVoiceInputSchema` / `submitImageInputSchema` / `submitUnifiedInputSchema`; `submitTextInputSchema` extended.
+  - **BUG-003** — all four prompts rewritten with a USER-FACING REASONING rule: language matches the user's input (English in → English out; Hinglish in → Hinglish out), ≤ 20 words, P.A. tone, no rule references. Explicit good/bad examples in each prompt.
+  - **BUG-004** — `task.repository.ts.listByDate` + `listOpenCarryOver` switched to `orderBy: [{ updatedAt: "desc" }]`. `listPending` (AI-context helper) unchanged.
+  - **BUG-006** — all four prompts gained TODAY'S DATE anchor + Hindi tense disambiguation section ("kal" past vs future). `created` action schema extended with optional `targetDate`. `action-dispatch.service.ts` uses `action.targetDate ?? opts.today`.
+  - **BUG-009 backend half** — `src/middleware/upload.ts` voice + image + multiModal caps unified at 10 MB (was 25 / 15 / 25). `MulterError.LIMIT_FILE_SIZE` returns `{ code: "FILE_TOO_LARGE", message: "Uploaded file exceeds the 10 MB limit." }` (was multer's raw code+message).
+  - **CONSIDER-001** — new `src/lib/notes-context.ts` with `truncateNotesForContext(notes)`: word-aware truncation to 200 chars + ellipsis. All four AI services include truncated notes in the pending-task context.
+  - Plus a small incidental refactor: `formatDateYMD` was duplicated across four services; consolidated to `src/utils/date.ts` as `formatDateYmd`, alongside new `promptDateAnchors(today)` helper.
+  - **Verification:** `npm run typecheck` ✅ `npm run lint` ✅ `npm run build` ✅. Five curl smoke tests against live dev server all green: (1) frontend `targetDate` lands tasks on the chosen day; (2) "kal ward 12 me jaana hai" (future) → AI emits `targetDate: tomorrow`; (3) "kal report submit kar di thi" (past) → recommendation, not future create; (4) PATCH → task floats to top of `listByDate`; (5) 11 MB upload → `413 FILE_TOO_LARGE`.
+  - **Backwards-compatible.** All input additions are optional. The frontend currently doesn't send `targetDate` and behavior is preserved (tasks land on today). Frontend Sprint 07 can adopt at its own pace.
+  - Original Sprint 8 (Alerts + History) renumbered to Sprint 9.
+
 ## What An Agent Should Do Right Now
 
-**POC is complete.** All planned sprints (1-7) are shipped, plus the post-Sprint-7 text + fusion addendum and Sprint 8 lite JWT auth. Sprint 8 Alerts + History remains deferred indefinitely.
+**Sprint 08 is scoped and ready to start.** All prior sprints (1-7 + Sprint 8 lite auth + post-Sprint-7 text/fusion) are shipped. Sprint 08 picks up backend-side polish surfaced from frontend smoke-testing.
 
 If you're a fresh agent session:
 1. Read `BACKEND_GUIDE.md` at the project root — that is the single source of truth for what endpoints exist and how they behave.
 2. Read `ARCHITECTURE.md` for data model and AI flow details.
 3. Check `decisions/` for rationale on any non-obvious design choice.
-4. Don't start new work autonomously — wait for explicit user direction.
+4. If picking up Sprint 08, read the detail file at [sprints/08-ai-date-intent-and-safety.md](./sprints/08-ai-date-intent-and-safety.md) and stop at the sync point (8.3 prompt review) before locking in prompt changes.
+5. Don't start any other work autonomously — wait for explicit user direction.

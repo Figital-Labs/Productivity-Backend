@@ -46,22 +46,25 @@ const IMAGE_MIME_TYPES = [
   "image/heif",
 ] as const;
 
-const TWENTY_FIVE_MB = 25 * 1024 * 1024;
-const FIFTEEN_MB = 15 * 1024 * 1024;
+// Sprint 8 (BUG-009): tightened from 25/15 MB to a unified 10 MB cap for both
+// audio and image. Covers ~5 min audio at typical bitrate + standard phone-camera
+// JPEGs. Frontend (FE Sprint 08) caps at the same number for symmetric UX.
+// MulterError.LIMIT_FILE_SIZE → 413 FILE_TOO_LARGE in src/middleware/error.ts.
+const TEN_MB = 10 * 1024 * 1024;
 
 export const voiceUpload = createUpload({
   allowedMimeTypes: AUDIO_MIME_TYPES,
-  maxFileSizeBytes: TWENTY_FIVE_MB,
+  maxFileSizeBytes: TEN_MB,
 });
 
 export const imageUpload = createUpload({
   allowedMimeTypes: IMAGE_MIME_TYPES,
-  maxFileSizeBytes: FIFTEEN_MB,
+  maxFileSizeBytes: TEN_MB,
 });
 
 export const multiModalUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: TWENTY_FIVE_MB },
+  limits: { fileSize: TEN_MB },
   fileFilter: (_req, file, cb) => {
     const allowed =
       file.fieldname === "audio"

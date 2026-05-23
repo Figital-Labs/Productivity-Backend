@@ -31,13 +31,21 @@ export function findById(id: string): Promise<Task | null> {
 }
 
 export function listByDate(userId: string, date: Date): Promise<Task[]> {
+  // Sprint 8 (BUG-004): user-facing list sorts by recency of last edit so the
+  // task they just touched floats to top. Previous order was [priority asc,
+  // createdAt asc] which left recently-edited tasks buried.
   return prisma.task.findMany({
     where: { userId, targetDate: date, deletedAt: null },
-    orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
+    orderBy: [{ updatedAt: "desc" }],
   });
 }
 
 export function listPending(userId: string, limit: number): Promise<Task[]> {
+  // Intentionally NOT changed in Sprint 8. This is the AI-context helper, not
+  // user-facing; the AI doesn't care about "recently touched" semantics.
+  // Sorted by oldest pending first so when truncated by `limit`, the oldest
+  // backlog wins the context budget (more likely to be what a voice note
+  // refers to than future-dated work).
   return prisma.task.findMany({
     where: { userId, completed: false, deletedAt: null },
     orderBy: [{ targetDate: "asc" }, { createdAt: "asc" }],
@@ -46,9 +54,11 @@ export function listPending(userId: string, limit: number): Promise<Task[]> {
 }
 
 export function listOpenCarryOver(userId: string, today: Date): Promise<Task[]> {
+  // Sprint 8 (BUG-004): same recency-of-edit ordering as `listByDate`, since
+  // carryover is also user-facing (rendered in the "Previous Days" section).
   return prisma.task.findMany({
     where: { userId, completed: false, deletedAt: null, targetDate: { lt: today } },
-    orderBy: [{ targetDate: "asc" }, { createdAt: "asc" }],
+    orderBy: [{ updatedAt: "desc" }],
   });
 }
 
