@@ -76,7 +76,8 @@ function isPersistedActivityAction(value: unknown): value is PersistedActivityAc
     (candidate["type"] === "created" ||
       candidate["type"] === "completed" ||
       candidate["type"] === "partial" ||
-      candidate["type"] === "priority_updated") &&
+      candidate["type"] === "priority_updated" ||
+      candidate["type"] === "target_date_updated") &&
     (candidate["taskId"] === undefined || typeof candidate["taskId"] === "string") &&
     (candidate["title"] === undefined || typeof candidate["title"] === "string")
   );
@@ -93,7 +94,7 @@ function actionCounts(actions: PersistedActivityAction[]): ActionCounts {
       ...counts,
       [action.type]: counts[action.type] + 1,
     }),
-    { created: 0, completed: 0, partial: 0, priority_updated: 0 },
+    { created: 0, completed: 0, partial: 0, priority_updated: 0, target_date_updated: 0 },
   );
 }
 

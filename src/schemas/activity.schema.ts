@@ -18,6 +18,9 @@ export const activityActionTypeSchema = z.enum([
   "completed",
   "partial",
   "priority_updated",
+  // Sprint 10 — date-shift action. Surfaces inside ai_*_batch events when the
+  // AI emitted a `target_date_updated` action for an existing task.
+  "target_date_updated",
 ]);
 export type ActivityActionType = z.infer<typeof activityActionTypeSchema>;
 
@@ -26,6 +29,7 @@ export const actionCountsSchema = z.object({
   completed: z.number().int().nonnegative(),
   partial: z.number().int().nonnegative(),
   priority_updated: z.number().int().nonnegative(),
+  target_date_updated: z.number().int().nonnegative(),
 });
 export type ActionCounts = z.infer<typeof actionCountsSchema>;
 
