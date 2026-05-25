@@ -51,6 +51,14 @@ export interface DispatchOptions {
    * request's `targetDate` (Sprint 8 BUG-002) or `todayInUserTz` fallback.
    */
   today: Date;
+  /**
+   * Sprint 11: only set by team delegation flows. When a manager dictates
+   * "Sneha ko ward 12 visit," the delegation service supplies
+   * `creatorId = manager.id` and the AI emits `assigneeId = sneha.id` on the
+   * action. For personal flows this is omitted and both sides resolve to
+   * `user.id` (the actor is also the assignee and creator).
+   */
+  creatorId?: string;
 }
 
 export async function dispatchAiAction(
@@ -66,8 +74,18 @@ export async function dispatchAiAction(
       // today (which is either the frontend-supplied targetDate or the
       // server's todayInUserTz). See BUG-002 + BUG-006 in BUGS.md.
       const targetDate = action.targetDate ? parseDateString(action.targetDate) : opts.today;
+      // Sprint 11: when the action carries an assigneeId (delegation flow),
+      // use it; otherwise default to the acting user (personal flow). Creator
+      // comes from opts.creatorId if the dispatch is a delegation, else
+      // mirrors assignee (self-create).
+      const assigneeId =
+        "assigneeId" in action && typeof action.assigneeId === "string"
+          ? action.assigneeId
+          : user.id;
+      const creatorId = opts.creatorId ?? user.id;
       const created = await taskRepo.create({
-        userId: user.id,
+        assigneeId,
+        creatorId,
         title: action.title,
         targetDate,
         sourceType: opts.sourceType,

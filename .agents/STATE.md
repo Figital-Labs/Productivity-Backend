@@ -14,7 +14,9 @@ tags: [meta, state, coordination]
 
 ## Active Sprint
 
-**Sprint 10 implemented — Target-date action + recommendation hygiene + closure text-only.** Ready for user review. Three tightly-related backend changes from post-Sprint-09 smoke: (a) new `target_date_updated` action primitive so the AI can shift an existing task to a new date without creating duplicates; (b) recommendation hygiene (clean-title rule + optional `targetDate` field) for the ambiguous cases that still need recommendations; (c) `/day-closure/submit` now accepts text-only commentary (unblocks FE EOD multi-recording fix). 5/5 smoke tests passed. See [sprints/10-target-date-and-closure-text.md](./sprints/10-target-date-and-closure-text.md).
+**Sprint 11 implemented — Hospital hierarchy + manager delegation.** Ready for user review. Largest backend sprint since Sprint 02. Pivots the data model from single-user to matrix multi-user: M2M self-relation on User (managers/reports), Task.userId split into assigneeId + creatorId, precomputed `reportIds` on AuthenticatedUser, new `canAccessTask` extension for matrix permissions. Adds the entire `/team/*` API surface — voice/text/image AI delegation prompts (sharing a new shared-rules.ts), manual delegation, user CRUD with manager-controlled passwords (no email infra), reports rollup with per-day progress, drill-down endpoints, activity feed enriched with `delegatedBy/delegatedTo` on task events. 12-user demo seed (4 managers, 8 staff, mixed matrix). All 13 smoke tests pass; lint + typecheck + build clean. See [sprints/11-hierarchy-and-delegation.md](./sprints/11-hierarchy-and-delegation.md). FE Sprint 11 (Codex) runs in parallel against the documented contract.
+
+Previous: **Sprint 10 — Target-date action + recommendation hygiene + closure text-only.** Committed by user. Three tightly-related backend changes from post-Sprint-09 smoke: (a) new `target_date_updated` action primitive so the AI can shift an existing task to a new date without creating duplicates; (b) recommendation hygiene (clean-title rule + optional `targetDate` field) for the ambiguous cases that still need recommendations; (c) `/day-closure/submit` now accepts text-only commentary (unblocks FE EOD multi-recording fix). See [sprints/10-target-date-and-closure-text.md](./sprints/10-target-date-and-closure-text.md).
 
 Previous: **Sprint 09 — History activity feed (derived projection).** Committed by user. `GET /api/v1/activity` endpoint live: returns sorted `ActivityEvent[]` with proper IST date-range filtering, 400 on bad range, title lookup via `listByIds`. Explicit POC-scope choice in [ADR-0024](./decisions/0024-history-derived-projection.md).
 
@@ -43,9 +45,10 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 | 07 — Day Plan + Day Closure | ✅ complete | claude-session | 2026-05-22 | 2026-05-22 | [sprints/07-day-plan-closure.md](./sprints/07-day-plan-closure.md) |
 | 08 — AI date intent + context + safety caps | ✅ committed | claude-session | 2026-05-23 | 2026-05-23 | [sprints/08-ai-date-intent-and-safety.md](./sprints/08-ai-date-intent-and-safety.md) |
 | 09 — History activity feed (derived projection) | ✅ committed | codex-session | 2026-05-23 | 2026-05-23 | [sprints/09-history-activity-feed.md](./sprints/09-history-activity-feed.md) |
-| 10 — Target-date action + recommendation hygiene + closure text-only | 🟢 ready for review | claude-session | 2026-05-24 | 2026-05-24 | [sprints/10-target-date-and-closure-text.md](./sprints/10-target-date-and-closure-text.md) |
-| 11 — Alerts (was 10) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
-| 12 — Polish (was 11) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
+| 10 — Target-date action + recommendation hygiene + closure text-only | ✅ committed | claude-session | 2026-05-24 | 2026-05-24 | [sprints/10-target-date-and-closure-text.md](./sprints/10-target-date-and-closure-text.md) |
+| 11 — Hospital hierarchy + manager delegation | 🟢 ready for review | claude-session | 2026-05-25 | 2026-05-25 | [sprints/11-hierarchy-and-delegation.md](./sprints/11-hierarchy-and-delegation.md) |
+| 12 — Alerts (was 10/11) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
+| 13 — Polish (was 11/12) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
 
 Sprints 3–9 don't have detail files yet. Per our working style, **detail the next sprint right before starting it**, not all upfront. Each sprint file gets created when the previous one is at the checkpoint.
 

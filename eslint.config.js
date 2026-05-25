@@ -11,6 +11,7 @@ export default tseslint.config(
       "node_modules/",
       "scripts/",
       "prisma/seed.ts",
+      "prisma/seed-hierarchy.ts",
       "prisma.config.ts",
       "eslint.config.js",
     ],

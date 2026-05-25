@@ -20,7 +20,18 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  tasks                Task[]
+  // Sprint 11: Task ownership split — assigneeId is who does the work,
+  // creatorId is who created/delegated. For self-created tasks they're equal.
+  assignedTasks Task[] @relation("AssignedTasks")
+  createdTasks  Task[] @relation("CreatedTasks")
+
+  // Sprint 11: M2M self-relation for matrix hospital authority.
+  // A staff nurse can have multiple managers (Head Nurse + Attending Doctor)
+  // and a manager can have multiple reports. Declared as Prisma implicit M2M;
+  // join table `_UserHierarchy` has columns A (manager) and B (report).
+  reports  User[] @relation("UserHierarchy")
+  managers User[] @relation("UserHierarchy")
+
   notes                Note[]
   alerts               Alert[]
   holidays             Holiday[]
@@ -34,7 +45,12 @@ model User {
 
 model Task {
   id         String    @id @default(cuid())
-  userId     String
+  // Sprint 11: split `userId` into assignee + creator.
+  // assigneeId — the user whose task list this lives on (does the work).
+  // creatorId  — the user who created/delegated it. Equal to assigneeId for
+  //               self-created tasks; different when a manager delegates.
+  assigneeId String
+  creatorId  String
   title      String
   targetDate DateTime  @db.Date
   priority   String?
@@ -48,11 +64,12 @@ model Task {
   updatedAt  DateTime  @updatedAt
   deletedAt  DateTime?
 
-  user  User        @relation(fields: [userId], references: [id])
-  media TaskMedia[]
+  assignee User        @relation("AssignedTasks", fields: [assigneeId], references: [id])
+  creator  User        @relation("CreatedTasks", fields: [creatorId], references: [id])
+  media    TaskMedia[]
 
-  @@index([userId, targetDate])
-  @@index([userId, deletedAt])
+  @@index([assigneeId, targetDate])
+  @@index([assigneeId, deletedAt])
 }
 
 model TaskMedia {

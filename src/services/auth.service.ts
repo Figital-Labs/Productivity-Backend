@@ -61,7 +61,7 @@ export async function signup(input: SignupInput): Promise<AuthResponse> {
     name: input.name,
     passwordHash: await hashPassword(input.password),
     orgId: DEFAULT_ORG_ID,
-    role: DEFAULT_ROLE,
+    role: input.role ?? DEFAULT_ROLE,
   });
 
   return buildAuthResponse(user);

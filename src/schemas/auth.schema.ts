@@ -11,6 +11,10 @@ export const signupSchema = z.object({
   email: emailSchema,
   name: z.string().trim().min(1).max(120),
   password: z.string().min(8).max(72),
+  // Sprint 11: signup lets the user pick staff vs manager (POC convenience —
+  // production would gate manager creation to admins or org owners). Defaults
+  // to staff when omitted, preserving prior behavior.
+  role: z.enum(["staff", "manager"]).optional(),
 });
 export type SignupInput = z.infer<typeof signupSchema>;
 

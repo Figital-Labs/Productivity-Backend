@@ -2,7 +2,7 @@ import { ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as taskRepo from "../repositories/task.repository.js";
 import type { CreateTaskInput, ListTasksQuery, UpdateTaskInput } from "../schemas/task.schema.js";
-import { canAccess } from "../utils/auth.js";
+import { canAccessTask } from "../utils/auth.js";
 import { parseDateString, todayInUserTz } from "../utils/date.js";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata";
@@ -11,7 +11,7 @@ export async function getTask(user: AuthenticatedUser, id: string): Promise<task
   const task = await taskRepo.findById(id);
   if (!task) throw new NotFoundError("Task", id);
   if (task.deletedAt !== null) throw new NotFoundError("Task", id);
-  if (!canAccess(user, task)) throw new ForbiddenError();
+  if (!canAccessTask(user, task)) throw new ForbiddenError();
   return task;
 }
 
@@ -35,7 +35,10 @@ export function createTask(
     : todayInUserTz(DEFAULT_TIMEZONE);
 
   return taskRepo.create({
-    userId: user.id,
+    // Sprint 11: a manually created task on one's own list is its own
+    // assignee + creator. Delegation goes through team.service.ts, not here.
+    assigneeId: user.id,
+    creatorId: user.id,
     title: input.title,
     targetDate,
     sourceType: "manual",
@@ -60,7 +63,7 @@ export async function updateTask(
 export async function deleteTask(user: AuthenticatedUser, id: string): Promise<taskRepo.Task> {
   const task = await taskRepo.findById(id);
   if (!task) throw new NotFoundError("Task", id);
-  if (!canAccess(user, task)) throw new ForbiddenError();
+  if (!canAccessTask(user, task)) throw new ForbiddenError();
   if (task.deletedAt !== null) {
     throw new ConflictError("TASK_ALREADY_DELETED", `Task ${id} is already deleted`);
   }
@@ -70,7 +73,7 @@ export async function deleteTask(user: AuthenticatedUser, id: string): Promise<t
 export async function restoreTask(user: AuthenticatedUser, id: string): Promise<taskRepo.Task> {
   const task = await taskRepo.findById(id);
   if (!task) throw new NotFoundError("Task", id);
-  if (!canAccess(user, task)) throw new ForbiddenError();
+  if (!canAccessTask(user, task)) throw new ForbiddenError();
   if (task.deletedAt === null) {
     throw new ConflictError("TASK_NOT_DELETED", `Task ${id} is not deleted`);
   }

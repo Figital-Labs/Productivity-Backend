@@ -47,6 +47,15 @@ const aiBatchBaseSchema = z.object({
   affectedTasks: z.array(affectedTaskSchema),
 });
 
+// Sprint 11: delegation enrichment. When a task's creator and assignee differ,
+// these fields surface who delegated it and to whom — frontend renders
+// "Dr. Sharma assigned this to you" or "You assigned this to Sneha" depending
+// on whose feed it is.
+const delegationParticipantSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
 const taskCreatedManualEventSchema = z.object({
   type: z.literal("task_created_manual"),
   at: z.string(),
@@ -55,6 +64,8 @@ const taskCreatedManualEventSchema = z.object({
     title: z.string(),
     priority: priorityEnum.nullable(),
   }),
+  delegatedBy: delegationParticipantSchema.optional(),
+  delegatedTo: delegationParticipantSchema.optional(),
 });
 
 const taskCompletedEventSchema = z.object({
@@ -64,6 +75,8 @@ const taskCompletedEventSchema = z.object({
     id: z.string(),
     title: z.string(),
   }),
+  delegatedBy: delegationParticipantSchema.optional(),
+  delegatedTo: delegationParticipantSchema.optional(),
 });
 
 const dayPlanSubmittedEventSchema = z.object({

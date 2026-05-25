@@ -4,11 +4,36 @@ interface OwnedResource {
   userId: string;
 }
 
+interface TaskResource {
+  assigneeId: string;
+  creatorId: string;
+}
+
 /**
- * Per ADR-0008: POC has a single user so this trivially passes. The check is
- * written out so that when manager/staff hierarchy lands the rule gets richer
- * here, not via a search-and-replace across services.
+ * Generic ownership check for resources that still carry a single `userId`
+ * (notes, alerts, holidays, day plans, day closures, AI interaction audit
+ * rows). For tasks — which split into assignee + creator after Sprint 11 —
+ * use `canAccessTask` instead.
  */
 export function canAccess(user: AuthenticatedUser, resource: OwnedResource): boolean {
   return user.id === resource.userId || user.role === "admin";
+}
+
+/**
+ * Sprint 11: tasks now have separate assignee and creator. A user can read
+ * or edit a task if:
+ *   - they're admin, OR
+ *   - they're the assignee (their own work), OR
+ *   - they're the creator (they delegated it), OR
+ *   - they're a manager of the assignee (matrix authority).
+ *
+ * Note: this is intentionally broad. A consultant who manages a staff nurse
+ * sees all of her tasks regardless of who assigned them — knowing how loaded
+ * staff are is hospital reality.
+ */
+export function canAccessTask(user: AuthenticatedUser, task: TaskResource): boolean {
+  if (user.role === "admin") return true;
+  if (task.assigneeId === user.id) return true;
+  if (task.creatorId === user.id) return true;
+  return user.reportIds.has(task.assigneeId);
 }

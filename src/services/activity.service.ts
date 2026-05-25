@@ -15,6 +15,7 @@
  * only this file's internals.
  */
 
+import prisma from "../lib/prisma.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as dayClosureRepo from "../repositories/day-closure.repository.js";
 import * as dayPlanRepo from "../repositories/day-plan.repository.js";
@@ -32,6 +33,11 @@ import type {
 } from "../schemas/activity.schema.js";
 import type { Priority } from "../schemas/common.js";
 import { formatDateYmd } from "../utils/date.js";
+
+interface DelegationFields {
+  delegatedBy?: { id: string; name: string };
+  delegatedTo?: { id: string; name: string };
+}
 
 interface PersistedActivityAction {
   type: ActivityActionType;
@@ -176,6 +182,56 @@ export async function listActivity(
   const titleRows = await taskRepo.listByIds(user.id, taskIds);
   const taskTitles = new Map(titleRows.map((task) => [task.id, task.title]));
 
+  // Sprint 11: build a delegation lookup for task_created_manual and
+  // task_completed events. For each task in the projection, if creator !==
+  // assignee, we attach delegatedBy + delegatedTo with the resolved names.
+  // The pool of users to resolve: every creator + assignee from manualTasks
+  // and completedTasks. Single batched query.
+  const delegationTaskIds = [
+    ...manualTasks.filter((t) => t.creatorId !== t.assigneeId).map((t) => t.id),
+    ...completedTasks.filter((t) => t.creatorId !== t.assigneeId).map((t) => t.id),
+  ];
+  const userIdsNeedingNames = new Set<string>();
+  for (const t of manualTasks) {
+    if (t.creatorId !== t.assigneeId) {
+      userIdsNeedingNames.add(t.creatorId);
+      userIdsNeedingNames.add(t.assigneeId);
+    }
+  }
+  for (const t of completedTasks) {
+    if (t.creatorId !== t.assigneeId) {
+      userIdsNeedingNames.add(t.creatorId);
+      userIdsNeedingNames.add(t.assigneeId);
+    }
+  }
+  const userNameRows =
+    userIdsNeedingNames.size > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: Array.from(userIdsNeedingNames) } },
+          select: { id: true, name: true },
+        })
+      : [];
+  const userNames = new Map(userNameRows.map((u) => [u.id, u.name]));
+
+  function delegationFor(task: {
+    id: string;
+    creatorId: string;
+    assigneeId: string;
+  }): DelegationFields {
+    if (task.creatorId === task.assigneeId) return {};
+    if (!delegationTaskIds.includes(task.id)) return {};
+    const byName = userNames.get(task.creatorId);
+    const toName = userNames.get(task.assigneeId);
+    return {
+      ...(byName !== undefined && {
+        delegatedBy: { id: task.creatorId, name: byName },
+      }),
+      ...(toName !== undefined && {
+        delegatedTo: { id: task.assigneeId, name: toName },
+      }),
+    };
+  }
+
   const events: ActivityEvent[] = [
     ...voiceInteractions.map((row): ActivityEvent => {
       const actions = persistedActions(row.actions);
@@ -229,6 +285,7 @@ export async function listActivity(
           title: task.title,
           priority: taskPriority(task.priority),
         },
+        ...delegationFor(task),
       }),
     ),
     ...completedTasks.map(
@@ -239,6 +296,7 @@ export async function listActivity(
           id: task.id,
           title: task.title,
         },
+        ...delegationFor(task),
       }),
     ),
     ...dayPlans.map(

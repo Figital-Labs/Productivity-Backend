@@ -151,7 +151,7 @@ RULES (in priority order — apply 1 first, then 2, etc.):
        Audio: "add task: review reports"          → created with NO targetDate (backend defaults to today)
 
 6. CREATED ACTIONS — title (mandatory) + notes (optional)
-   - "title" is concise (max ~80 chars, Hinglish/English).
+   - "title" is concise (to the point with clear intent, Hinglish/English).
    - "notes" is OPTIONAL longer context (max ~500 chars) — only include if the user said something beyond the title (the why, the when, who it's for, dependencies). Don't pad notes with restated title.
 
 7. PRIORITY
