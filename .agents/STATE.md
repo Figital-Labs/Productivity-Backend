@@ -50,8 +50,9 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 | 10 — Target-date action + recommendation hygiene + closure text-only | ✅ committed | claude-session | 2026-05-24 | 2026-05-24 | [sprints/10-target-date-and-closure-text.md](./sprints/10-target-date-and-closure-text.md) |
 | 11 — Hospital hierarchy + manager delegation | 🟢 ready for review | claude-session | 2026-05-25 | 2026-05-25 | [sprints/11-hierarchy-and-delegation.md](./sprints/11-hierarchy-and-delegation.md) |
 | 12 — Manager voice/text updates on delegated tasks | ⏸ deferred (scope captured) | — | — | — | [sprints/12-manager-voice-updates-on-delegated-tasks.md](./sprints/12-manager-voice-updates-on-delegated-tasks.md) |
-| 13 — Alerts (was 10/11/12) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
-| 14 — Polish (was 11/12/13) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
+| 13 — Delegation visibility polish (badge + drill-down edits + image modal) | checkpoint - browser smoke pending | codex-session | 2026-05-25 | — | [Task-List/.agents/sprints/13-delegation-visibility-polish.md](../../../Task-List/.agents/sprints/13-delegation-visibility-polish.md) |
+| 14 — Alerts (was 10/11/12/13) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
+| 15 — Polish (was 11/12/13/14) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
 
 Sprints 3–9 don't have detail files yet. Per our working style, **detail the next sprint right before starting it**, not all upfront. Each sprint file gets created when the previous one is at the checkpoint.
 

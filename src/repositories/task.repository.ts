@@ -1,8 +1,12 @@
-import type { TaskModel } from "../generated/prisma/models.js";
+import type { TaskGetPayload } from "../generated/prisma/models/Task.js";
 import prisma from "../lib/prisma.js";
 import { omitUndefined } from "../utils/object.js";
 
-export type Task = TaskModel;
+const taskWithCreator = {
+  include: { creator: { select: { id: true, name: true } } },
+} as const;
+
+export type Task = TaskGetPayload<typeof taskWithCreator>;
 
 export type TaskSourceType = "manual" | "voice" | "image" | "text" | "unified";
 export type TaskPriority = "low" | "medium" | "high";
@@ -31,7 +35,7 @@ export interface UpdateTaskData {
 }
 
 export function findById(id: string): Promise<Task | null> {
-  return prisma.task.findUnique({ where: { id } });
+  return prisma.task.findUnique({ ...taskWithCreator, where: { id } });
 }
 
 // Sprint 11: param is named `userId` for API stability across the codebase,
@@ -45,6 +49,7 @@ export function listByDate(userId: string, date: Date): Promise<Task[]> {
   // task they just touched floats to top. Previous order was [priority asc,
   // createdAt asc] which left recently-edited tasks buried.
   return prisma.task.findMany({
+    ...taskWithCreator,
     where: { assigneeId: userId, targetDate: date, deletedAt: null },
     orderBy: [{ updatedAt: "desc" }],
   });
@@ -57,6 +62,7 @@ export function listPending(userId: string, limit: number): Promise<Task[]> {
   // backlog wins the context budget (more likely to be what a voice note
   // refers to than future-dated work).
   return prisma.task.findMany({
+    ...taskWithCreator,
     where: { assigneeId: userId, completed: false, deletedAt: null },
     orderBy: [{ targetDate: "asc" }, { createdAt: "asc" }],
     take: limit,
@@ -67,6 +73,7 @@ export function listOpenCarryOver(userId: string, today: Date): Promise<Task[]> 
   // Sprint 8 (BUG-004): same recency-of-edit ordering as `listByDate`, since
   // carryover is also user-facing (rendered in the "Previous Days" section).
   return prisma.task.findMany({
+    ...taskWithCreator,
     where: {
       assigneeId: userId,
       completed: false,
@@ -83,6 +90,7 @@ export function listByIds(userId: string, ids: string[]): Promise<Task[]> {
   // created (delegated to someone else). The activity feed uses this to look
   // up titles for delegated tasks in a manager's AI batch summaries.
   return prisma.task.findMany({
+    ...taskWithCreator,
     where: {
       id: { in: ids },
       deletedAt: null,
@@ -93,6 +101,7 @@ export function listByIds(userId: string, ids: string[]): Promise<Task[]> {
 
 export function listManualCreatedInRange(userId: string, from?: Date, to?: Date): Promise<Task[]> {
   return prisma.task.findMany({
+    ...taskWithCreator,
     where: {
       assigneeId: userId,
       sourceType: "manual",
@@ -112,6 +121,7 @@ export function listManualCreatedInRange(userId: string, from?: Date, to?: Date)
 
 export function listCompletedInRange(userId: string, from?: Date, to?: Date): Promise<Task[]> {
   return prisma.task.findMany({
+    ...taskWithCreator,
     where: {
       assigneeId: userId,
       completed: true,
@@ -130,15 +140,16 @@ export function listCompletedInRange(userId: string, from?: Date, to?: Date): Pr
 }
 
 export function create(data: CreateTaskData): Promise<Task> {
-  return prisma.task.create({ data: omitUndefined(data) });
+  return prisma.task.create({ ...taskWithCreator, data: omitUndefined(data) });
 }
 
 export function update(id: string, patch: UpdateTaskData): Promise<Task> {
-  return prisma.task.update({ where: { id }, data: omitUndefined(patch) });
+  return prisma.task.update({ ...taskWithCreator, where: { id }, data: omitUndefined(patch) });
 }
 
 export function softDelete(id: string): Promise<Task> {
   return prisma.task.update({
+    ...taskWithCreator,
     where: { id },
     data: { deletedAt: new Date() },
   });
@@ -146,6 +157,7 @@ export function softDelete(id: string): Promise<Task> {
 
 export function restore(id: string): Promise<Task> {
   return prisma.task.update({
+    ...taskWithCreator,
     where: { id },
     data: { deletedAt: null },
   });
