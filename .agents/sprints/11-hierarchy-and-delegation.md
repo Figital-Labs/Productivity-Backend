@@ -610,6 +610,41 @@ Smoke tests run end-to-end against the live server:
 
 11 of 13 smoke tests run end-to-end; voice-specific tests (3, 5, 6) deferred to manual verification during the demo (text delegation already exercises the same prompt composition + dispatcher path).
 
+### Post-checkpoint patch (2026-05-25) — Delegation prompt-craft rewrite
+
+User flagged a quality bug in the delegation voice flow: dictating *"Suresh ko bolo kal Subh bhaiya ko project update de dega"* produced the terse title *"Project update dena"* — the recipient context (Subh bhaiya) and date intent were stripped. Root cause: the original Sprint 11 prompts had a "concise (max ~80 chars, declarative noun phrase)" title rule that aggressively distilled relay-style utterances. Per user direction, rewrote the 3 delegation prompts + shared-rules.ts to prime Gemini as a **conduit** (preserve intent) rather than a **summarizer** (distill to noun-phrase). Personal prompts untouched.
+
+Changes shipped:
+- **shared-rules.ts** gained `FIDELITY_PRINCIPLE`, `TITLE_RULE`, `NOTES_RULE`, `DELEGATION_RELAY_EXAMPLES`. The `RECOMMENDATION_TITLE_FORMAT_RULE` was reframed to align with the new TITLE_RULE.
+- **All 3 delegation prompts** (`team-voice-delegate.ts`, `team-text-delegate.ts`, `team-image-delegate.ts`):
+  - FIDELITY principle near the top, framed as "relaying the manager's instruction passively on their behalf".
+  - Opening reframed to acknowledge both delegation AND self-task as first-class intents.
+  - Rule 6 (title/notes) replaced with imports of TITLE_RULE + NOTES_RULE (no hard char cap; schema's `max(200)` is the hard limit).
+  - DELEGATION_RULE extended with explicit "RELAY PRESERVATION" clause — once the assignee is picked, the rest of the utterance belongs in title and notes, not discarded as scaffolding.
+  - Worked examples moved out of each prompt into the shared `DELEGATION_RELAY_EXAMPLES` constant for single-source-of-truth.
+- **systemInstruction split deferred** — was planned as Change 8 but dropped per user "don't overcomplicate" directive. Current single-bundled-prompt structure works; the system/user split is a future cleanup, not a bug fix.
+
+Validation set against `/team/text/delegate` as Sharma — 8/8 pass:
+
+| Test | Result |
+|---|---|
+| Bug case "Suresh ko bolo kal Subh bhaiya..." | ✅ title = "Subh bhaiya ko project update dena hai", targetDate=tomorrow, assigneeId=Suresh |
+| Simple "Sneha ko ward 12 visit karna" | ✅ "Ward 12 visit karna", no regression |
+| "Anita ko bolo ward rounds sham ko" (Anita not in Sharma's reports) | ✅ recommendation, title preserves "sham ko" |
+| Stakeholder "Sneha OT prep Dr. Mehta surgery ke liye urgent" | ✅ priority=high, notes="Dr. Mehta ke 9am surgery ke liye" |
+| Consequence "Sneha reminder warna escalation" | ✅ notes="Late hone par escalation", targetDate=tomorrow |
+| Multi-assignee "Sneha aur Amit ko OT prep" | ✅ 2 identical-title tasks |
+| Self-task "muje khud ka team meeting agenda" | ✅ assigneeId=Sharma, title="Team meeting agenda prepare karna" |
+| Not-in-directory "Rajesh ko bolo X" | ✅ recommendation only |
+
+Personal-flow regression check: `POST /text/process` with "kal ward 12 visit karna hai" → title "Ward 12 visit", targetDate tomorrow. Unchanged.
+
+Files touched in this patch:
+- `src/lib/prompts/shared-rules.ts` — added 4 new exports + reframed `RECOMMENDATION_TITLE_FORMAT_RULE`
+- `src/lib/prompts/team-voice-delegate.ts` — full rewrite (opening reframe, FIDELITY, TITLE_RULE+NOTES_RULE, relay-preservation, shared examples)
+- `src/lib/prompts/team-text-delegate.ts` — same shape
+- `src/lib/prompts/team-image-delegate.ts` — same shape, image-specific blocks preserved (column-pairing, visual priority cues)
+
 ### Behavioral surface area
 
 - **Existing personal flows are byte-identical** to pre-Sprint 11. Voice, text, image, unified intent all produce the same actions, just with `taskRepo.create` now passing `{ assigneeId: user.id, creatorId: user.id }` under the hood. No prompt changes, no schema changes the personal AI consumes.

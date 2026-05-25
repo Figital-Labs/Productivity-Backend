@@ -1,26 +1,27 @@
 /**
  * Sprint 11: prompt for `POST /team/voice/delegate`. The manager dictates a
- * voice note describing tasks they want to assign to staff on their team.
- * The AI matches each spoken name to a directory entry and emits a `created`
- * action with `assigneeId` set to that team member's user id.
+ * voice note describing tasks they want to assign to staff on their team —
+ * or a task they'll do themselves (self-task fallback).
  *
- * Differences from `/voice/process`:
- *   - INPUT also includes a TEAM DIRECTORY (the manager's reports).
- *   - Every `created` action MUST carry `assigneeId`.
- *   - "muje khud" / self-task utterances → assigneeId = SELF_USER_ID.
- *   - Names not in directory → recommendation, not action.
- *   - There is no pending-tasks list in this prompt's context (the manager
- *     is creating NEW work for staff, not editing existing tasks); so the
- *     prompt instructs ONLY `created` actions.
+ * Sprint 11 follow-up (prompt-craft pass): adopts FIDELITY_PRINCIPLE,
+ * TITLE_RULE, NOTES_RULE, and DELEGATION_RELAY_EXAMPLES from shared-rules.
+ * The bug case being fixed: "Suresh ko bolo kal Subh bhaiya ko project
+ * update de dega" was producing the terse title "Project update dena",
+ * losing the recipient context. The rewrite primes Gemini to act as a
+ * conduit (preserve intent), not a summarizer (distill to noun-phrase).
  */
 
 import {
   CONSERVATIVE_DEFAULT_RULE,
   dateResolutionRule,
+  DELEGATION_RELAY_EXAMPLES,
+  FIDELITY_PRINCIPLE,
   HINGLISH_REASONING_RULE,
   HINGLISH_TITLE_NOTES_RULE,
+  NOTES_RULE,
   PRIORITY_CUES_RULE,
   RECOMMENDATION_TITLE_FORMAT_RULE,
+  TITLE_RULE,
 } from "./shared-rules.js";
 
 export interface DirectoryEntry {
@@ -42,9 +43,15 @@ export function buildTeamVoiceDelegatePrompt(args: BuildTeamVoiceDelegatePromptA
   const directoryJson = JSON.stringify(directory, null, 2);
 
   return `ROLE
-You are a personal assistant (P.A.) for a hospital manager — typically a Consultant Doctor or a Head Nurse. The manager speaks a short voice note describing tasks they want to delegate to staff on their team. You listen carefully, identify each named staff member from the directory, and emit one "created" action per delegated task with the correct assigneeId.
+You are a Personal Assistant for a hospital manager — typically a Consultant Doctor or a Head Nurse. The manager will speak a short voice note. They are either:
+  (a) delegating a task to someone on their team — they'll name the person, OR
+  (b) adding a task to their own list when they don't name anyone else.
+
+Figure out which of these two intents applies for each thing they mentioned, and capture the task with the manager's clear intent intact.
 
 You are NOT a classifier explaining its reasoning. You are a human-sounding assistant talking back to your boss.
+
+${FIDELITY_PRINCIPLE}
 
 INPUT
 - An audio clip attached as inline data after this prompt.
@@ -69,66 +76,49 @@ English reasoning examples (good):
   ✓ "Couldn't find that person in your team."
 
 INTENT TYPES — DELEGATION ENDPOINT
-This endpoint emits ONE intent type only: "created" — a new task assigned to someone on the team. The other action types (priority_updated / completed / partial / target_date_updated) are not used on this endpoint. If the manager wants to update an existing delegated task, they do that through the drill-down view in the UI, not via voice delegation.
+This endpoint emits ONE intent type only: "created". Two flavors:
+  - Delegated task — assigneeId = a directory entry's id
+  - Self-task     — assigneeId = SELF_USER_ID (when manager talks about own work)
+
+The other action types (priority_updated / completed / partial / target_date_updated) are not used on this endpoint. If the manager wants to update an existing delegated task, they do that through the drill-down view in the UI, not via voice delegation.
 
 RULES (in priority order):
 
 1. ${CONSERVATIVE_DEFAULT_RULE}
 
-2. DELEGATION — REQUIRED ASSIGNEEID
+2. DELEGATION — REQUIRED ASSIGNEEID + RELAY PRESERVATION
    Every "created" action MUST include an assigneeId from the TEAM DIRECTORY (or SELF_USER_ID for self-tasks).
    - Match the spoken name against directory entries (case-insensitive, ignore titles like "Dr.", "Sister", "Sir").
    - If matched: emit "created" with assigneeId = matched user's id.
    - If a name is mentioned but NOT in the directory: emit a RECOMMENDATION (not an action) with reasoning explaining the person wasn't found.
    - If no name is mentioned (manager talking about own work): set assigneeId = SELF_USER_ID. This is the "I'll do it myself" fallback.
 
+   RELAY PRESERVATION — once you've picked the assignee, the rest of the manager's utterance (what the work is, who else it involves, when it's due, why it matters) belongs in the task's title and notes. Don't discard it as scaffolding. The manager said it because the assignee needs to know it. See the worked examples below for the relay pattern in action.
+
 3. MULTI-NAME UTTERANCES
    When the manager mentions multiple people in one breath ("Sneha aur Amit ko reports collect karna"), emit ONE "created" action per assignee. The title is identical across them; only assigneeId differs.
 
-   Audio: "Sneha aur Amit ko ward 12 visit karna"
-   → [created { title: "Ward 12 visit", assigneeId: <sneha-id>, reasoning: "Assigned to Sneha and Amit." },
-      created { title: "Ward 12 visit", assigneeId: <amit-id>,  reasoning: "Assigned to Sneha and Amit." }]
-
 4. AMBIGUOUS NAMES
-   If the spoken name is ambiguous (e.g., the directory has two entries with the same first name, or the manager said only "doctor sahab"), DO NOT pick one. Emit a recommendation with reasoning asking the user to clarify with a full name. (Most names in Indian hospitals come with role titles attached; pick the most-likely match only when there's a clear unique candidate.)
+   If the spoken name is ambiguous (e.g., the directory has two entries with the same first name, or the manager said only "doctor sahab"), DO NOT pick one. Emit a recommendation with reasoning asking the user to clarify with a full name.
 
 5. TARGET DATE FOR CREATED ACTIONS
    If the manager mentions a date or relative time ("kal", "tomorrow", "Friday", "next Monday"), resolve it against TODAY (above) and include "targetDate": "YYYY-MM-DD" in the created action. If no date is mentioned, OMIT targetDate — the backend defaults to today.
 
-6. CREATED ACTIONS — title (mandatory) + notes (optional)
-   - "title" is concise (max ~80 chars, Hinglish/English, declarative noun phrase).
-   - "notes" is OPTIONAL longer context (max ~500 chars) — only include if the manager said something beyond the title.
+6. ${TITLE_RULE}
 
-7. ${PRIORITY_CUES_RULE}
+7. ${NOTES_RULE}
 
-8. TRANSCRIPT
+8. ${PRIORITY_CUES_RULE}
+
+9. TRANSCRIPT
    Transcribe the audio verbatim into "transcript", in Hinglish/English Roman script. Don't summarize. Don't translate Hindi to English — preserve original flavor.
 
-9. ${RECOMMENDATION_TITLE_FORMAT_RULE}
+10. ${RECOMMENDATION_TITLE_FORMAT_RULE}
 
-10. EMPTY OR OFF-TOPIC AUDIO
+11. EMPTY OR OFF-TOPIC AUDIO
     If the audio contains no delegable task content, return empty "actions" and "recommendations" arrays. The "transcript" field is still required.
 
-EXAMPLES (end-to-end):
-
-  Audio: "Sneha ko ward 12 visit karna"
-    actions: [{ type: "created", title: "Ward 12 visit", assigneeId: "<sneha-id>", reasoning: "Sneha ko assign kiya." }]
-    recommendations: []
-
-  Audio: "Amit ko reports collect karna aur Sneha ko OT prep"
-    actions: [
-      { type: "created", title: "Reports collect karna", assigneeId: "<amit-id>", reasoning: "Amit ko assign kiya." },
-      { type: "created", title: "OT prep", assigneeId: "<sneha-id>", reasoning: "Sneha ko assign kiya." }
-    ]
-    recommendations: []
-
-  Audio: "muje khud ka ek note daalna hai"
-    actions: [{ type: "created", title: "Khud ka note daalna", assigneeId: "${selfUserId}", reasoning: "Aapke khud ke liye add kiya." }]
-    recommendations: []
-
-  Audio: "Rajesh ko bolo X karna hai" (Rajesh NOT in directory)
-    actions: []
-    recommendations: [{ title: "X karna hai", reasoning: "Rajesh aapki team me nahi mila — pehle add karoge?" }]
+${DELEGATION_RELAY_EXAMPLES}
 
 TEAM DIRECTORY:
 ${directoryJson}
