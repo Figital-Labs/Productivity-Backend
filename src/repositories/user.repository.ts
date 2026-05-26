@@ -23,3 +23,33 @@ export function findById(id: string): Promise<User | null> {
 export function create(data: CreateUserData): Promise<User> {
   return prisma.user.create({ data: omitUndefined(data) });
 }
+
+/**
+ * Sprint 14 addendum: same-org user search by name or email substring
+ * (case-insensitive). Used by the manager dashboard's "Add Existing" flow
+ * and intended for reuse on the Meetings page. `q` optional → returns the
+ * full org list (capped at `take`). Excludes deleted/disabled state filters
+ * because we don't have those columns yet — revisit when the schema gains
+ * `User.deletedAt` or `User.disabled`.
+ */
+export function searchSameOrg(
+  orgId: string,
+  q: string | undefined,
+  take: number,
+): Promise<Pick<User, "id" | "email" | "name" | "role">[]> {
+  const where = q
+    ? {
+        orgId,
+        OR: [
+          { name: { contains: q, mode: "insensitive" as const } },
+          { email: { contains: q, mode: "insensitive" as const } },
+        ],
+      }
+    : { orgId };
+  return prisma.user.findMany({
+    where,
+    take,
+    orderBy: { name: "asc" },
+    select: { id: true, email: true, name: true, role: true },
+  });
+}

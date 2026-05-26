@@ -51,8 +51,9 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 | 11 — Hospital hierarchy + manager delegation | 🟢 ready for review | claude-session | 2026-05-25 | 2026-05-25 | [sprints/11-hierarchy-and-delegation.md](./sprints/11-hierarchy-and-delegation.md) |
 | 12 — Manager voice/text updates on delegated tasks | ⏸ deferred (scope captured) | — | — | — | [sprints/12-manager-voice-updates-on-delegated-tasks.md](./sprints/12-manager-voice-updates-on-delegated-tasks.md) |
 | 13 — Delegation visibility polish (badge + drill-down edits + image modal) | checkpoint - browser smoke pending | codex-session | 2026-05-25 | — | [Task-List/.agents/sprints/13-delegation-visibility-polish.md](../../../Task-List/.agents/sprints/13-delegation-visibility-polish.md) |
-| 14 — Alerts (was 10/11/12/13) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
-| 15 — Polish (was 11/12/13/14) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
+| 14 — Attach existing user to team | 🟢 ready for review | claude-session | 2026-05-26 | 2026-05-26 | [sprints/14-attach-existing-user.md](./sprints/14-attach-existing-user.md) |
+| 15 — Alerts (was 10/11/12/13/14) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
+| 16 — Polish (was 11/12/13/14/15) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
 
 Sprints 3–9 don't have detail files yet. Per our working style, **detail the next sprint right before starting it**, not all upfront. Each sprint file gets created when the previous one is at the checkpoint.
 
@@ -190,3 +191,38 @@ If you're a fresh agent session picking up Sprint 09:
     - (6) EOD with audio (regression): not re-smoked — code path is unchanged when audio is present (the only branch added is `audio ? processVoice : empty`). Confidence is high; FE Sprint 10 will exercise this implicitly with the old single-recording flow.
   - **Backwards-compatible.** All existing AI clients continue to work; the new action type is additive, recommendation `targetDate` is optional, day-closure with audio still behaves identically.
   - **Handoff:** FE Sprint 10 picks up the DTO updates + recommendation ADD handler + EOD modal refactor. See plan file `C:\Users\ashoka\.claude\plans\hey-calude-i-was-jiggly-torvalds.md` for the paired FE scope.
+
+### 2026-05-26
+
+- **Sprint 14 implemented — Attach existing user to team (claude-session).** Adds `POST /team/users/attach` so a manager can wire an existing same-org user into their reports without creating a duplicate account. Closes the Sprint 11 deferred item "cross-team add". Single endpoint, four small files touched, no migration. Sprint file: [sprints/14-attach-existing-user.md](./sprints/14-attach-existing-user.md). Paired with [FE Sprint 14](../../Task-List/.agents/sprints/14-add-existing-user.md).
+  - **Schema:** `attachExistingUserInputSchema` ({ email }) in [src/schemas/team.schema.ts](../src/schemas/team.schema.ts).
+  - **Service:** `attachExistingUser(creator, { email })` in [src/services/team.service.ts](../src/services/team.service.ts) — same-org lookup (404 if missing or cross-org), self-guard (400 `CANNOT_ATTACH_SELF`), admin-guard (403 `CANNOT_ATTACH_ADMIN`), idempotency surface (409 `ALREADY_A_REPORT`), then `prisma.user.update` with `reports.connect`.
+  - **Controller + route:** [src/controllers/team.controller.ts](../src/controllers/team.controller.ts) + [src/routes/team.routes.ts](../src/routes/team.routes.ts). `requireManager` middleware (Sprint 11) gates staff out as before.
+  - **Verification:** `npm run typecheck` ✅, `npm run lint` ✅, `npm run build` ✅. All 10 smoke cases passed against live dev server with `kims-hospital` seed:
+    - T1 Mehta attaches Suresh → 201 + `PublicTeamUser`.
+    - T2 Mehta re-attaches Suresh → 409 `ALREADY_A_REPORT`.
+    - T3 Mehta attaches ghost@kims.demo → 404 `USER_NOT_FOUND`.
+    - T4 Mehta attaches herself → 400 `CANNOT_ATTACH_SELF`.
+    - T5 Temp-promote deepika to admin, Mehta attaches → 403 `CANNOT_ATTACH_ADMIN`. Reverted.
+    - T6 Bad email shape → 400 `VALIDATION_ERROR`.
+    - T7 Empty body → 400 `VALIDATION_ERROR`.
+    - T8 Staff (Sneha) attempts → 403 `FORBIDDEN` (`requireManager` regression).
+    - T9 After T1, Mehta's `GET /team/reports` includes Suresh (4 rows total).
+    - T10 After T1, Mehta `GET /team/reports/<suresh-id>/tasks?date=2026-05-26` → 200.
+    - **Matrix semantics regression:** after T1, Sharma's reports still include Suresh — attach is additive, not exclusive. ✅
+  - **Cleanup:** Mehta→Suresh edge created by T1 reverted via direct SQL so the seed stays pristine. T5 admin promotion reverted.
+  - **STATE.md sprint table:** Alerts 14→15, Polish 15→16; new row 14 inserted.
+  - **NOT updated:** `BACKEND_GUIDE.md` — the `/team/*` family isn't documented there yet (Sprint 11 left this open). The endpoint is fully specified in the sprint file. Recommend a one-pass `/team/*` BACKEND_GUIDE section as a separate doc task.
+
+- **Sprint 14 addendum — Same-org user search endpoint (claude-session).** Added `GET /api/v1/users/search?q=<optional>` to support a list+search picker UX on the FE Add Existing tab (replacing the original email-only input). The endpoint is **role-gate-free** (jwtAuth only) so the future Meetings invite picker can reuse it. Same-org scoping is enforced server-side; cross-org enumeration impossible. Case-insensitive substring match against `name` OR `email`; capped at 50 results; sorted by name asc.
+  - **Files added:** [src/schemas/users.schema.ts](../src/schemas/users.schema.ts), [src/services/users.service.ts](../src/services/users.service.ts), [src/controllers/users.controller.ts](../src/controllers/users.controller.ts), [src/routes/users.routes.ts](../src/routes/users.routes.ts). Extended [src/repositories/user.repository.ts](../src/repositories/user.repository.ts) with `searchSameOrg(orgId, q, take)`. Mounted in [src/routes/v1.ts](../src/routes/v1.ts) at `/users`.
+  - **Verification:** `typecheck` ✅, `lint` ✅, `build` ✅. All 7 smoke cases passed against live dev server:
+    - T11 full list → 200 + 12 rows.
+    - T12 `?q=sneha` → 1 row.
+    - T13 `?q=SISTER` (caps) → 4 rows (case-insensitive).
+    - T14 `?q=@kims` → 12 (email substring).
+    - T15 `?q=zzz` → [].
+    - T16 staff (Sneha) calls with `?q=mehta` → 1 row (no role gate).
+    - T17 no auth → 401 UNAUTHORIZED.
+  - **FE handoff:** [Task-List/.agents/sprints/14-add-existing-user.md](../../Task-List/.agents/sprints/14-add-existing-user.md) addendum section documents the picker UX, debounce pattern, `disabledReason` helper, and 9 FE smoke cases. Endpoint contract specified there too.
+  - **Response shape:** `PublicUserSummary[]` = `{ id, email, name, role }[]`. `orgId` deliberately omitted (always caller's org). Includes admins + caller — FE handles disable/label logic for those rows.

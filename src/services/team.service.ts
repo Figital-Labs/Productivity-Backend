@@ -1,4 +1,4 @@
-import { ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
+import { AppError, ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
 import { hashPassword } from "../lib/password.js";
 import prisma from "../lib/prisma.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
@@ -9,6 +9,7 @@ import * as dayPlanRepo from "../repositories/day-plan.repository.js";
 import * as taskRepo from "../repositories/task.repository.js";
 import type { Task } from "../repositories/task.repository.js";
 import type {
+  AttachExistingUserInput,
   CreateDelegatedTaskInput,
   CreateTeamUserInput,
   ResetTeamUserPasswordInput,
@@ -212,6 +213,40 @@ export async function createUser(
   });
 
   return toPublicTeamUser(created);
+}
+
+/**
+ * Sprint 14: manager attaches an EXISTING same-org user as a report. No new
+ * account is created; only the m2m hierarchy edge is added. Idempotency
+ * surfaces as 409 — managers should know they already manage this person
+ * rather than silently no-op. Note: `creator.reportIds` on the request is
+ * computed in middleware and won't update within the same request after the
+ * attach; the next request will see the new edge.
+ */
+export async function attachExistingUser(
+  creator: AuthenticatedUser,
+  input: AttachExistingUserInput,
+): Promise<PublicTeamUser> {
+  const target = await prisma.user.findUnique({ where: { email: input.email } });
+  if (target?.orgId !== creator.orgId) {
+    throw new NotFoundError("User");
+  }
+  if (target.id === creator.id) {
+    throw new AppError("CANNOT_ATTACH_SELF", 400, "Cannot attach yourself as a report");
+  }
+  if (target.role === "admin") {
+    throw new AppError("CANNOT_ATTACH_ADMIN", 403, "Cannot attach an admin as a report");
+  }
+  if (creator.reportIds.has(target.id)) {
+    throw new ConflictError("ALREADY_A_REPORT", "This user already reports to you.");
+  }
+
+  await prisma.user.update({
+    where: { id: creator.id },
+    data: { reports: { connect: { id: target.id } } },
+  });
+
+  return toPublicTeamUser(target);
 }
 
 /**

@@ -6,6 +6,7 @@ import { submitTeamImageDelegateInputSchema } from "../schemas/team-image-delega
 import { submitTeamTextDelegateInputSchema } from "../schemas/team-text-delegate.schema.js";
 import { submitTeamVoiceDelegateInputSchema } from "../schemas/team-voice-delegate.schema.js";
 import {
+  attachExistingUserInputSchema,
   createDelegatedTaskInputSchema,
   createTeamUserInputSchema,
   getReportSubmissionsQuerySchema,
@@ -82,6 +83,12 @@ export async function delegateImage(req: Request, res: Response): Promise<void> 
 export async function createUser(req: Request, res: Response): Promise<void> {
   const input = createTeamUserInputSchema.parse((req.body as unknown) ?? {});
   const user = await teamService.createUser(req.user, input);
+  res.status(201).json(user);
+}
+
+export async function attachExistingUser(req: Request, res: Response): Promise<void> {
+  const input = attachExistingUserInputSchema.parse((req.body as unknown) ?? {});
+  const user = await teamService.attachExistingUser(req.user, input);
   res.status(201).json(user);
 }
 

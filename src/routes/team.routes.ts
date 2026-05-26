@@ -24,5 +24,9 @@ teamRouter.post("/text/delegate", teamController.delegateText);
 teamRouter.post("/image/delegate", imageUpload.single("image"), teamController.delegateImage);
 
 // User CRUD + password mgmt
+// Note: /users/attach is declared before /users so the literal path matches
+// first under any router implementation; documents intent even though
+// Express 5 statics already win over dynamic `/users/:id/*` patterns.
+teamRouter.post("/users/attach", teamController.attachExistingUser);
 teamRouter.post("/users", teamController.createUser);
 teamRouter.post("/users/:id/reset-password", teamController.resetUserPassword);

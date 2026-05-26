@@ -13,6 +13,7 @@ import { tasksRouter } from "./tasks.routes.js";
 import { teamRouter } from "./team.routes.js";
 import { textRouter } from "./text-process.routes.js";
 import { unifiedProcessRouter } from "./unified-process.routes.js";
+import { usersRouter } from "./users.routes.js";
 import { voiceRouter } from "./voice.routes.js";
 
 export const v1Router = Router();
@@ -29,4 +30,5 @@ v1Router.use("/day-plan", dayPlanRouter);
 v1Router.use("/day-closure", dayClosureRouter);
 v1Router.use("/activity", activityRouter);
 v1Router.use("/team", teamRouter);
+v1Router.use("/users", usersRouter);
 v1Router.use("/", unifiedProcessRouter);

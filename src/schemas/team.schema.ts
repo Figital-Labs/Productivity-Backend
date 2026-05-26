@@ -41,6 +41,17 @@ export const resetTeamUserPasswordInputSchema = z.object({
 export type ResetTeamUserPasswordInput = z.infer<typeof resetTeamUserPasswordInputSchema>;
 
 /**
+ * Sprint 14: body for `POST /team/users/attach` — manager attaches an existing
+ * same-org user to their reports. No user creation; only the m2m hierarchy
+ * edge is added. Used when staff already exist under another manager and a
+ * new manager also needs to supervise them (matrix authority).
+ */
+export const attachExistingUserInputSchema = z.object({
+  email: z.email("email must be a valid email").max(200),
+});
+export type AttachExistingUserInput = z.infer<typeof attachExistingUserInputSchema>;
+
+/**
  * Query for `GET /team/reports/:id/tasks?date=YYYY-MM-DD`. Date is required
  * — drilling into a report's day always asks for a specific date.
  */
