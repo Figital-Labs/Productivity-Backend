@@ -143,8 +143,10 @@ export async function kpisForUsers(
     prisma.dayPlanSubmission.count({
       where: { userId: { in: scopedUserIds }, date: targetDate },
     }),
+    // Sprint 17 Phase 5: a draft row is NOT a real closure. Filter
+    // explicitly so the KPI counts only finalized submissions.
     prisma.dayClosureSubmission.count({
-      where: { userId: { in: scopedUserIds }, date: targetDate },
+      where: { userId: { in: scopedUserIds }, date: targetDate, status: "submitted" },
     }),
     prisma.task.groupBy({
       by: ["completed"],
@@ -177,8 +179,9 @@ export async function kpisForUsersInRange(userIds: string[], days: number): Prom
   const today = dates[dates.length - 1] ?? todayInUserTz(DEFAULT_TIMEZONE);
   const [plansSubmittedToday, closuresSubmittedToday, taskCounts] = await Promise.all([
     prisma.dayPlanSubmission.count({ where: { userId: { in: scopedUserIds }, date: today } }),
+    // Sprint 17 Phase 5: only finalized closures count.
     prisma.dayClosureSubmission.count({
-      where: { userId: { in: scopedUserIds }, date: today },
+      where: { userId: { in: scopedUserIds }, date: today, status: "submitted" },
     }),
     prisma.task.groupBy({
       by: ["completed"],
@@ -230,7 +233,10 @@ export async function trendForUsers(
     if (metric === "plans") {
       return prisma.dayPlanSubmission.count({ where: { userId: { in: scopedUserIds }, date } });
     }
-    return prisma.dayClosureSubmission.count({ where: { userId: { in: scopedUserIds }, date } });
+    // Sprint 17 Phase 5: only finalized closures count on the trend chart.
+    return prisma.dayClosureSubmission.count({
+      where: { userId: { in: scopedUserIds }, date, status: "submitted" },
+    });
   }
 
   const [currentValues, previousValues] = await Promise.all([
@@ -267,8 +273,11 @@ export async function consistencyForUsers(
       where: { userId: { in: scopedUserIds }, date: { in: dates } },
       select: { userId: true, submittedAt: true, date: true },
     }),
+    // Sprint 17 Phase 5: drafts must NOT count toward consistency. A user
+    // who only "reviewed" but never submitted still missed that day's
+    // closure — which is exactly what powers People-to-Watch.
     prisma.dayClosureSubmission.findMany({
-      where: { userId: { in: scopedUserIds }, date: { in: dates } },
+      where: { userId: { in: scopedUserIds }, date: { in: dates }, status: "submitted" },
       select: { userId: true, submittedAt: true, date: true },
     }),
   ]);

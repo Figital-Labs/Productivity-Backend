@@ -97,8 +97,10 @@ export async function listReports(manager: AuthenticatedUser): Promise<ReportWit
       where: { userId: { in: reportIds }, date: today },
       select: { userId: true },
     }),
+    // Sprint 17 Phase 5: a draft must NOT flip the manager's "closure
+    // submitted ✓" badge on the reports list. Only finalized closures do.
     prisma.dayClosureSubmission.findMany({
-      where: { userId: { in: reportIds }, date: today },
+      where: { userId: { in: reportIds }, date: today, status: "submitted" },
       select: { userId: true },
     }),
   ]);
@@ -148,10 +150,14 @@ export async function getReportSubmissions(
   date: Date,
 ): Promise<{ dayPlan: DayPlanSubmission | null; dayClosure: DayClosureSubmission | null }> {
   requireManagerOf(manager, reportId);
-  const [dayPlan, dayClosure] = await Promise.all([
+  const [dayPlan, dayClosureRow] = await Promise.all([
     dayPlanRepo.findByUserAndDate(reportId, date),
     dayClosureRepo.findByUserAndDate(reportId, date),
   ]);
+  // Sprint 17 Phase 5: the manager drill-down represents what the report
+  // has "submitted." A draft is the report's private, unsubmitted state —
+  // surface it to the manager as "no closure yet" (null) until finalized.
+  const dayClosure = dayClosureRow?.status === "submitted" ? dayClosureRow : null;
   return { dayPlan, dayClosure };
 }
 

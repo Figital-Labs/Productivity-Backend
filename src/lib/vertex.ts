@@ -86,3 +86,37 @@ export async function generateStructured<S extends z.ZodType>(
   }
   return result.data;
 }
+
+export interface GenerateTextOptions {
+  model: string;
+  prompt: string;
+  media?: InlineMedia[];
+}
+
+/**
+ * Sprint 17 — plain-text generation. Mirrors `generateStructured` but
+ * without `responseJsonSchema`, so the model returns free-form text. Used
+ * today only by `POST /transcribe` for verbatim audio→text. Throws
+ * `UpstreamError("AI_EMPTY_RESPONSE")` on empty output, matching the
+ * structured helper's failure semantics.
+ */
+export async function generateText(opts: GenerateTextOptions): Promise<string> {
+  const parts: GeminiPart[] = [{ text: opts.prompt }];
+
+  for (const m of opts.media ?? []) {
+    parts.push({
+      inlineData: { mimeType: m.mimeType, data: m.buffer.toString("base64") },
+    });
+  }
+
+  const response = await ai.models.generateContent({
+    model: opts.model,
+    contents: [{ role: "user", parts }],
+  });
+
+  const text = response.text;
+  if (typeof text !== "string" || text.length === 0) {
+    throw new UpstreamError("AI_EMPTY_RESPONSE", "Vertex returned no text content.");
+  }
+  return text;
+}

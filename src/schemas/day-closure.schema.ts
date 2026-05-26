@@ -3,10 +3,21 @@ import { z } from "zod";
 import { dateStringSchema } from "./common.js";
 
 /**
- * Body fields for `POST /day-closure/submit`. Audio comes via multipart
- * (`req.file`), not in the body. `mediaIds` is intentionally NOT accepted in
- * Sprint 7 — task media + S3 storage land in a future sprint; the column
- * stays `String[]` defaulting to `[]`.
+ * Body fields for `POST /day-closure/review` (Sprint 17). The review phase
+ * generates AI feedback once and persists a `status='draft'` row. No
+ * commentary, no audio — both belong to the final submit.
+ */
+export const reviewDayClosureInputSchema = z.object({
+  date: dateStringSchema.optional(),
+});
+export type ReviewDayClosureInput = z.infer<typeof reviewDayClosureInputSchema>;
+
+/**
+ * Body fields for `POST /day-closure/submit` (Sprint 17 rewrite). The submit
+ * phase requires a prior draft from review and finalizes it. Audio is gone
+ * from this endpoint — closure voice is excuse commentary only and is
+ * transcribed to text via `POST /transcribe` before being sent here.
+ * `mediaIds` is still not accepted (S3 storage deferred).
  */
 export const submitDayClosureInputSchema = z.object({
   commentary: z.string().max(5000).optional(),

@@ -14,6 +14,8 @@ tags: [meta, state, coordination]
 
 ## Active Sprint
 
+**Sprint 17 implemented — Two-phase day closure: Review → Submit + Transcription.** Ready for review. Splits the single-shot `POST /day-closure/submit` into two endpoints: `POST /day-closure/review` (generates AI feedback once, persists a `status='draft'` row) and `POST /day-closure/submit` (finalizes the draft, no AI). Adds `POST /transcribe` as a reusable verbatim audio→text endpoint (Roman script only, no Devanagari, no DB write). Closure flow no longer mutates task state from voice — task pills are user-driven; closure voice becomes excuse commentary that the FE transcribes via `/transcribe` and sends as plain text in `commentary`. Schema: `status` + `reviewedAt` on `DayClosureSubmission` (migration `20260527120000_sprint17_closure_two_phase`). Phase 5 read-filter audit done: every `dayClosureSubmission` aggregate read (dashboard KPIs, trend, consistency, activity feed, team-reports closure badge, drill-down submissions) now filters `status: "submitted"`; only `findByUserAndDate` (used by review/submit/get) and the FE resume path remain intentionally unfiltered so drafts can rehydrate. New `generateText` helper on `vertex.ts`. Typecheck + lint + build clean. Migration applied to local dev DB. See [sprints/17-closure-review-flow.md](./sprints/17-closure-review-flow.md). Paired with Task-List FE Sprint 17.
+
 **Sprint 16A implemented - Hospital hierarchy foundation.** Ready for review. Adds the schema foundation for the management dashboard: Department, ContextGroup, temporal GroupMembership, SubmissionReview, ReminderIntent, User.level, and optional Task.groupId. Expands the KIMS seed to 18 users, 5 departments, 7 context groups, 29 active memberships, and 8 days of backdated task/submission history with deliberate consistency gaps. Adds `resolveScope()` and extends `canAccessTask()` for active group leads. See [sprints/16a-hierarchy-foundation.md](./sprints/16a-hierarchy-foundation.md). Sprint 16B can now build dashboard endpoints on top of this contract.
 
 **Sprint 16B implemented - Dashboard endpoints + AI Morning Brief.** Ready for review. Adds the `/dashboard/*` backend surface, scope-aware KPI rollups, Morning Brief cache/generation, per-manager submission reviews, scoped activity, management CRUD, reminder stub, and Personal-Directs lazy provisioner. See [sprints/16b-dashboard-endpoints.md](./sprints/16b-dashboard-endpoints.md). FE Sprint 16D can consume the dashboard contract.
@@ -60,7 +62,7 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 | 14 — Attach existing user to team | 🟢 ready for review | claude-session | 2026-05-26 | 2026-05-26 | [sprints/14-attach-existing-user.md](./sprints/14-attach-existing-user.md) |
 | 15 — Meetings v0 | 🟢 ready for review | claude-session | 2026-05-26 | 2026-05-26 | [sprints/15-meetings-v0.md](./sprints/15-meetings-v0.md) |
 | 16 — Alerts (was 10/11/12/13/14/15) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
-| 17 — Polish (was 11/12/13/14/15/16) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
+| 17 — Two-phase closure (Review → Submit) + Transcription | 🟢 ready for review | claude-session | 2026-05-27 | 2026-05-27 | [sprints/17-closure-review-flow.md](./sprints/17-closure-review-flow.md) |
 
 Sprints 3–9 don't have detail files yet. Per our working style, **detail the next sprint right before starting it**, not all upfront. Each sprint file gets created when the previous one is at the checkpoint.
 

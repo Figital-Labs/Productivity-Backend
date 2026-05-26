@@ -1,8 +1,8 @@
 /**
- * Builds the prompt for the SECOND Vertex call in `/day-closure/submit`.
- * The first call (voice-intent) already executed any task updates the user
- * spoke about. This call generates the structured `aiFeedback` comparing
- * morning plan vs end-of-day reality.
+ * Builds the prompt for the AI review in `/day-closure/review` (Sprint 17).
+ * Generates the structured `aiFeedback` comparing morning plan vs end-of-day
+ * task state. Closure voice no longer dispatches task actions — task states
+ * here are whatever the user manually set via the inline pills.
  *
  * The model returns structured JSON; shape enforced via `responseJsonSchema`
  * (see src/lib/vertex.ts). The prompt's job is to convey semantics.
@@ -33,8 +33,8 @@ You are an end-of-day reflection assistant for a multilingual Indian user (typic
 
 INPUT
 1. MORNING PLAN — tasks the user committed to at the start of the day
-2. CURRENT TASK STATES — same tasks at end of day, showing completion status (any voice-driven updates from the closure submission have already been applied here)
-3. CLOSURE NARRATIVE — the user's typed and/or spoken reflection about today
+2. CURRENT TASK STATES — same tasks at end of day, showing completion status (the user manually flipped these via inline pills during the day; this is the source of truth)
+3. CLOSURE NARRATIVE — the user's typed reflection about today (at REVIEW time this is empty; the user types excuses AFTER reading this feedback)
 
 OUTPUT LANGUAGE — IMPORTANT
 ALL output text MUST be in Hinglish or English in Roman script. Do NOT use Devanagari or any other non-Latin script, even if the narrative contains Devanagari input.
@@ -81,7 +81,7 @@ RULES (in priority order):
 MORNING PLAN:
 ${planJson}
 
-CURRENT TASK STATES (end of day, after any voice updates):
+CURRENT TASK STATES (end of day, user-driven):
 ${currentJson}
 
 CLOSURE NARRATIVE:

@@ -151,10 +151,16 @@ model DayPlanSubmission {
 }
 
 model DayClosureSubmission {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   userId      String
-  date        DateTime @db.Date
-  submittedAt DateTime @default(now())
+  date        DateTime  @db.Date
+  // Sprint 17: two-phase closure. A row is created with status='draft' on
+  // `POST /day-closure/review` (AI feedback generated once) and flipped to
+  // 'submitted' on `POST /day-closure/submit`. Existing rows default to
+  // 'submitted' so the migration is a no-op for already-shipped data.
+  status      String    @default("submitted")
+  reviewedAt  DateTime?
+  submittedAt DateTime  @default(now())
   commentary  String
   aiFeedback  Json
   mediaIds    String[]

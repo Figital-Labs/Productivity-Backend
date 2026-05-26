@@ -295,6 +295,9 @@ export async function listActivity(
     prisma.dayClosureSubmission.findMany({
       where: {
         userId: { in: scopedUserIds },
+        // Sprint 17 Phase 5: the activity feed surfaces real events. A
+        // draft is not an event — it's an in-progress UI state.
+        status: "submitted",
         ...(from !== undefined || to !== undefined
           ? {
               submittedAt: {
