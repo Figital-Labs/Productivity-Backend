@@ -1,3 +1,4 @@
+import prisma from "../lib/prisma.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 
 interface OwnedResource {
@@ -31,9 +32,28 @@ export function canAccess(user: AuthenticatedUser, resource: OwnedResource): boo
  * sees all of her tasks regardless of who assigned them — knowing how loaded
  * staff are is hospital reality.
  */
-export function canAccessTask(user: AuthenticatedUser, task: TaskResource): boolean {
+export async function canAccessTask(user: AuthenticatedUser, task: TaskResource): Promise<boolean> {
   if (user.role === "admin") return true;
   if (task.assigneeId === user.id) return true;
   if (task.creatorId === user.id) return true;
-  return user.reportIds.has(task.assigneeId);
+  if (user.reportIds.has(task.assigneeId)) return true;
+
+  const ledSharedGroup = await prisma.groupMembership.findFirst({
+    where: {
+      userId: user.id,
+      isLead: true,
+      validTo: null,
+      group: {
+        orgId: user.orgId,
+        memberships: {
+          some: {
+            userId: task.assigneeId,
+            validTo: null,
+          },
+        },
+      },
+    },
+    select: { groupId: true },
+  });
+  return ledSharedGroup !== null;
 }

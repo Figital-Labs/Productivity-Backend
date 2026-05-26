@@ -11,7 +11,7 @@ export async function getTask(user: AuthenticatedUser, id: string): Promise<task
   const task = await taskRepo.findById(id);
   if (!task) throw new NotFoundError("Task", id);
   if (task.deletedAt !== null) throw new NotFoundError("Task", id);
-  if (!canAccessTask(user, task)) throw new ForbiddenError();
+  if (!(await canAccessTask(user, task))) throw new ForbiddenError();
   return task;
 }
 
@@ -63,7 +63,7 @@ export async function updateTask(
 export async function deleteTask(user: AuthenticatedUser, id: string): Promise<taskRepo.Task> {
   const task = await taskRepo.findById(id);
   if (!task) throw new NotFoundError("Task", id);
-  if (!canAccessTask(user, task)) throw new ForbiddenError();
+  if (!(await canAccessTask(user, task))) throw new ForbiddenError();
   if (task.deletedAt !== null) {
     throw new ConflictError("TASK_ALREADY_DELETED", `Task ${id} is already deleted`);
   }
@@ -73,7 +73,7 @@ export async function deleteTask(user: AuthenticatedUser, id: string): Promise<t
 export async function restoreTask(user: AuthenticatedUser, id: string): Promise<taskRepo.Task> {
   const task = await taskRepo.findById(id);
   if (!task) throw new NotFoundError("Task", id);
-  if (!canAccessTask(user, task)) throw new ForbiddenError();
+  if (!(await canAccessTask(user, task))) throw new ForbiddenError();
   if (task.deletedAt === null) {
     throw new ConflictError("TASK_NOT_DELETED", `Task ${id} is not deleted`);
   }

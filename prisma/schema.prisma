@@ -15,6 +15,7 @@ model User {
   name         String
   passwordHash String
   role         String   @default("staff")
+  level        Int      @default(100)
   orgId        String
   timezone     String   @default("Asia/Kolkata")
   createdAt    DateTime @default(now())
@@ -32,20 +33,25 @@ model User {
   reports  User[] @relation("UserHierarchy")
   managers User[] @relation("UserHierarchy")
 
-  notes                Note[]
-  alerts               Alert[]
-  holidays             Holiday[]
-  dayPlans             DayPlanSubmission[]
-  dayClosures          DayClosureSubmission[]
-  voiceInteractions    VoiceInteraction[]
-  imageExtractions     ImageExtraction[]
-  textInteractions     TextInteraction[]
-  unifiedInteractions  UnifiedInteraction[]
+  notes               Note[]
+  alerts              Alert[]
+  holidays            Holiday[]
+  dayPlans            DayPlanSubmission[]
+  dayClosures         DayClosureSubmission[]
+  voiceInteractions   VoiceInteraction[]
+  imageExtractions    ImageExtraction[]
+  textInteractions    TextInteraction[]
+  unifiedInteractions UnifiedInteraction[]
+  memberships         GroupMembership[]
+  departmentsHeaded   Department[]           @relation("DepartmentHeads")
+  submissionReviews   SubmissionReview[]     @relation("SubmissionReviewer")
+  remindersReceived   ReminderIntent[]       @relation("ReminderTarget")
+  remindersSent       ReminderIntent[]       @relation("ReminderSender")
 
   // Sprint 15: meetings created by this user. Attendees are stored as a
   // String[] on Meeting (no FK enforcement at the schema level) since
   // attendance is loose — see Meeting.attendeeIds.
-  meetings             Meeting[]             @relation("UserMeetings")
+  meetings Meeting[] @relation("UserMeetings")
 }
 
 model Task {
@@ -65,16 +71,19 @@ model Task {
   aiFeedback String?
   sourceType String
   sourceId   String?
+  groupId    String?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   deletedAt  DateTime?
 
-  assignee User        @relation("AssignedTasks", fields: [assigneeId], references: [id])
-  creator  User        @relation("CreatedTasks", fields: [creatorId], references: [id])
+  assignee User          @relation("AssignedTasks", fields: [assigneeId], references: [id])
+  creator  User          @relation("CreatedTasks", fields: [creatorId], references: [id])
+  group    ContextGroup? @relation(fields: [groupId], references: [id])
   media    TaskMedia[]
 
   @@index([assigneeId, targetDate])
   @@index([assigneeId, deletedAt])
+  @@index([groupId, targetDate])
 }
 
 model TaskMedia {
@@ -240,4 +249,82 @@ model Meeting {
   @@index([userId, deletedAt])
   @@index([userId, scheduledAt])
   @@index([userId, processedAt])
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  orgId     String
+  name      String
+  headId    String?
+  createdAt DateTime @default(now())
+
+  head   User?          @relation("DepartmentHeads", fields: [headId], references: [id])
+  groups ContextGroup[]
+
+  @@index([orgId])
+}
+
+model ContextGroup {
+  id           String   @id @default(cuid())
+  orgId        String
+  departmentId String?
+  name         String
+  /// 'ward' | 'ot' | 'shift' | 'project' | 'personal'
+  /// 'personal' is reserved for the Personal-Directs lazy auto-provision in Sprint 16B.
+  /// Sprint 16B endpoints filter `kind: "personal"` out of the public group grid.
+  kind         String   @default("ward")
+  createdAt    DateTime @default(now())
+
+  department  Department?       @relation(fields: [departmentId], references: [id])
+  memberships GroupMembership[]
+  tasks       Task[]
+
+  @@index([orgId])
+  @@index([departmentId])
+}
+
+model GroupMembership {
+  userId    String
+  groupId   String
+  isLead    Boolean   @default(false)
+  canManage Boolean   @default(false)
+  validFrom DateTime  @default(now())
+  validTo   DateTime?
+  reason    String?
+
+  user  User         @relation(fields: [userId], references: [id])
+  group ContextGroup @relation(fields: [groupId], references: [id])
+
+  @@id([userId, groupId, validFrom])
+  @@index([groupId, validTo])
+  @@index([userId, validTo])
+}
+
+/// L2: matrix-aware submission review state. One row per (submission, manager).
+/// `submissionKind` is "plan" | "closure" - discriminator over the two submission tables.
+model SubmissionReview {
+  submissionId   String
+  submissionKind String
+  reviewerId     String
+  reviewedAt     DateTime @default(now())
+
+  reviewer User @relation("SubmissionReviewer", fields: [reviewerId], references: [id])
+
+  @@id([submissionId, submissionKind, reviewerId])
+  @@index([reviewerId, reviewedAt])
+}
+
+/// Demo stub for Sprint 16D's "Send Reminder" button. No actual delivery.
+model ReminderIntent {
+  id           String   @id @default(cuid())
+  targetUserId String
+  /// 'plan' | 'closure'
+  kind         String
+  sentAt       DateTime @default(now())
+  sentBy       String
+
+  target User @relation("ReminderTarget", fields: [targetUserId], references: [id])
+  sender User @relation("ReminderSender", fields: [sentBy], references: [id])
+
+  @@index([targetUserId, sentAt])
 }
