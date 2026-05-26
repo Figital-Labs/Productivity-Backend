@@ -96,9 +96,25 @@ const dayClosureSubmittedEventSchema = z.object({
 });
 
 // Sprint 15: meeting_processed event. Surfaces when a meeting's AI processing
-// finishes — auto-created tasks + recommendations are summarized here for the
-// meeting creator's activity feed. Detail (summary, action item titles) lives
-// on the meeting card; this event is the "this happened" announcement.
+// finishes. Carries attendee chips, the AI summary, per-action assignees, and
+// recommendation titles inline so the History card can expand without a second
+// fetch — same density as `ai_voice_batch` projection (transcript +
+// affectedTasks).
+const meetingAttendeeRefSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
+const meetingProcessedActionItemSchema = z.object({
+  title: z.string(),
+  assigneeId: z.string(),
+  assigneeName: z.string(),
+});
+
+const meetingProcessedRecommendationSchema = z.object({
+  title: z.string(),
+});
+
 const meetingProcessedEventSchema = z.object({
   type: z.literal("meeting_processed"),
   at: z.string(),
@@ -106,6 +122,10 @@ const meetingProcessedEventSchema = z.object({
   title: z.string(),
   actionItemCount: z.number().int().nonnegative(),
   recommendationCount: z.number().int().nonnegative(),
+  attendees: z.array(meetingAttendeeRefSchema),
+  summary: z.string(),
+  actionItems: z.array(meetingProcessedActionItemSchema),
+  recommendations: z.array(meetingProcessedRecommendationSchema),
 });
 
 export const activityEventSchema = z.discriminatedUnion("type", [

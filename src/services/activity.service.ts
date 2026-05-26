@@ -95,6 +95,35 @@ function persistedActions(raw: unknown): PersistedActivityAction[] {
   return raw.filter(isPersistedActivityAction);
 }
 
+interface PersistedMeetingActionLite {
+  title: string;
+  assigneeId: string;
+}
+
+function persistedMeetingActions(raw: unknown): PersistedMeetingActionLite[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PersistedMeetingActionLite[] = [];
+  for (const candidate of raw) {
+    if (typeof candidate !== "object" || candidate === null) continue;
+    const obj = candidate as Record<string, unknown>;
+    if (typeof obj["title"] === "string" && typeof obj["assigneeId"] === "string") {
+      out.push({ title: obj["title"], assigneeId: obj["assigneeId"] });
+    }
+  }
+  return out;
+}
+
+function persistedMeetingRecommendationTitles(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const candidate of raw) {
+    if (typeof candidate !== "object" || candidate === null) continue;
+    const title = (candidate as Record<string, unknown>)["title"];
+    if (typeof title === "string") out.push(title);
+  }
+  return out;
+}
+
 function actionCounts(actions: PersistedActivityAction[]): ActionCounts {
   return actions.reduce<ActionCounts>(
     (counts, action) => ({
@@ -205,6 +234,14 @@ export async function listActivity(
     if (t.creatorId !== t.assigneeId) {
       userIdsNeedingNames.add(t.creatorId);
       userIdsNeedingNames.add(t.assigneeId);
+    }
+  }
+  // Sprint 15: meeting attendees + per-action assignees both need name
+  // resolution for the rich `meeting_processed` projection.
+  for (const meeting of processedMeetings) {
+    for (const attendeeId of meeting.attendeeIds) userIdsNeedingNames.add(attendeeId);
+    for (const action of persistedMeetingActions(meeting.actions)) {
+      userIdsNeedingNames.add(action.assigneeId);
     }
   }
   const userNameRows =
@@ -324,18 +361,29 @@ export async function listActivity(
       // `processedAt` is non-null because listProcessedInRange filters by
       // processedAt != null. Narrow defensively in case the filter ever drifts.
       .filter((m): m is typeof m & { processedAt: Date } => m.processedAt !== null)
-      .map(
-        (meeting): ActivityEvent => ({
+      .map((meeting): ActivityEvent => {
+        const actions = persistedMeetingActions(meeting.actions);
+        const recoTitles = persistedMeetingRecommendationTitles(meeting.recommendations);
+        return {
           type: "meeting_processed",
           at: meeting.processedAt.toISOString(),
           meetingId: meeting.id,
           title: meeting.title,
-          actionItemCount: Array.isArray(meeting.actions) ? meeting.actions.length : 0,
-          recommendationCount: Array.isArray(meeting.recommendations)
-            ? meeting.recommendations.length
-            : 0,
-        }),
-      ),
+          actionItemCount: actions.length,
+          recommendationCount: recoTitles.length,
+          attendees: meeting.attendeeIds.flatMap((id) => {
+            const name = userNames.get(id);
+            return name === undefined ? [] : [{ id, name }];
+          }),
+          summary: meeting.summary ?? "",
+          actionItems: actions.map((action) => ({
+            title: action.title,
+            assigneeId: action.assigneeId,
+            assigneeName: userNames.get(action.assigneeId) ?? "Attendee",
+          })),
+          recommendations: recoTitles.map((title) => ({ title })),
+        };
+      }),
   ];
 
   return events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
