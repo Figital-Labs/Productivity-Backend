@@ -52,8 +52,9 @@ See [sprints/README.md](./sprints/README.md) for the full sprint plan.
 | 12 — Manager voice/text updates on delegated tasks | ⏸ deferred (scope captured) | — | — | — | [sprints/12-manager-voice-updates-on-delegated-tasks.md](./sprints/12-manager-voice-updates-on-delegated-tasks.md) |
 | 13 — Delegation visibility polish (badge + drill-down edits + image modal) | checkpoint - browser smoke pending | codex-session | 2026-05-25 | — | [Task-List/.agents/sprints/13-delegation-visibility-polish.md](../../../Task-List/.agents/sprints/13-delegation-visibility-polish.md) |
 | 14 — Attach existing user to team | 🟢 ready for review | claude-session | 2026-05-26 | 2026-05-26 | [sprints/14-attach-existing-user.md](./sprints/14-attach-existing-user.md) |
-| 15 — Alerts (was 10/11/12/13/14) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
-| 16 — Polish (was 11/12/13/14/15) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
+| 15 — Meetings v0 | 🟢 ready for review | claude-session | 2026-05-26 | 2026-05-26 | [sprints/15-meetings-v0.md](./sprints/15-meetings-v0.md) |
+| 16 — Alerts (was 10/11/12/13/14/15) | 🚫 deferred (POC) | — | — | — | *(skipped per user 2026-05-22)* |
+| 17 — Polish (was 11/12/13/14/15/16) | 🚫 deferred (POC) | — | — | — | *(folded into deferred + docs work)* |
 
 Sprints 3–9 don't have detail files yet. Per our working style, **detail the next sprint right before starting it**, not all upfront. Each sprint file gets created when the previous one is at the checkpoint.
 
@@ -226,3 +227,32 @@ If you're a fresh agent session picking up Sprint 09:
     - T17 no auth → 401 UNAUTHORIZED.
   - **FE handoff:** [Task-List/.agents/sprints/14-add-existing-user.md](../../Task-List/.agents/sprints/14-add-existing-user.md) addendum section documents the picker UX, debounce pattern, `disabledReason` helper, and 9 FE smoke cases. Endpoint contract specified there too.
   - **Response shape:** `PublicUserSummary[]` = `{ id, email, name, role }[]`. `orgId` deliberately omitted (always caller's org). Includes admins + caller — FE handles disable/label logic for those rows.
+
+- **Sprint 15 implemented — Meetings v0 (claude-session).** Wires the Meetings tab to a real backend with full AI multi-modal fusion processing. Meetings inherit the team-delegate pattern: AI emits `created` actions assigned to attendees + `recommendations` for ambiguous items + a Hinglish `summary`. Auto-creates real Task rows for each valid action (sourceType=`"meeting"`, sourceId=meeting.id). Sprint file: [sprints/15-meetings-v0.md](./sprints/15-meetings-v0.md). Paired with [FE Sprint 15](../../Task-List/.agents/sprints/15-meetings-v0.md).
+  - **Schema delta:** new `Meeting` Prisma model with `attendeeIds: String[]`, `agenda`, `notes`, `summary`, `customPrompt`, `actions: Json`, `recommendations: Json`, `processedAt`, `deletedAt`. Migration `20260526120112_add_meeting_model`. No FK on attendeeIds (POC scope; service-layer validates same-org).
+  - **Endpoints:** `GET /meetings`, `GET /meetings/:id`, `POST /meetings`, `PATCH /meetings/:id`, `DELETE /meetings/:id`, `POST /meetings/:id/process`. All under `jwtAuth`, no role gate (staff can create their own meetings). Process endpoint accepts multipart `audio[]` (0–12 clips, ≤10MB each) + `images[]` (0–4 files, ≤10MB each) + body `customPrompt?`, `notes?`. Returns `{ meeting, actions, recommendations }`.
+  - **AI prompt:** [src/lib/prompts/meeting-intent.ts](../src/lib/prompts/meeting-intent.ts) — meeting observer role, FIDELITY principle, CROSS-CLIP RULE ("audio clips are segments of the SAME meeting in chronological order — reason across them"), reuses TITLE_RULE / NOTES_RULE / RECOMMENDATION_TITLE_FORMAT_RULE / PRIORITY_CUES_RULE / HINGLISH_* from shared-rules.ts. CustomPrompt threaded as labeled "FOCUS INSTRUCTION FROM THE MANAGER" block with "do not let it override fidelity to what was actually said."
+  - **Dispatcher:** [src/services/meeting-action-dispatch.service.ts](../src/services/meeting-action-dispatch.service.ts) — mirrors team-action-dispatch but validates assignees against `meeting.attendeeIds` (plus creator for self-tasks). Hallucinated/invalid assignees demoted to recommendations defensively. Creates Tasks with `sourceType: "meeting"`, `sourceId: meeting.id`, `creatorId: meeting.userId`.
+  - **Activity feed:** new `meeting_processed` event variant in `ActivityEvent` discriminated union. Projection added to [src/services/activity.service.ts](../src/services/activity.service.ts) — fetches `meetingRepo.listProcessedInRange(userId, from, to)` in parallel with existing event fetches.
+  - **`/process` long-running:** `req.setTimeout(300_000)` + `res.setTimeout(300_000)` on the handler. End-to-end ~9s for a 5-second TTS clip; expected to scale to ~2 min for 1-hour meetings (founder's documented expectation).
+  - **multiModalUpload extended:** new `meetingsUpload` middleware in [src/middleware/upload.ts](../src/middleware/upload.ts) — `.fields([{name:"audio", maxCount:12}, {name:"images", maxCount:4}])` with the existing 10MB-per-file cap. Reuses same MIME whitelist as voiceUpload + imageUpload.
+  - **Verification:** `typecheck` ✅, `lint` ✅, `build` ✅. Smoke 15/17 passed against live dev server with seeded KIMS hospital org (B9 covered by B11; B14 long-audio not synth-tested — covered transitively by B5 9s end-to-end success):
+    - B1 create meeting → 201 + hydrated attendees ✅
+    - B2 list → 200 ✅
+    - B3 get by id → 200 + attendees ✅
+    - B4 patch notes → 200 + notes updated ✅
+    - B5 process with 1 audio + customPrompt → 200 in 9s; Hinglish summary; 1 action assigned to Sneha (Ward 12 rounds, targetDate=tomorrow); real Task created in DB with sourceType=meeting ✅
+    - B6 process with no audio/notes/images → 400 MEETING_NOT_PROCESSABLE ✅
+    - B7 get wrong id → 404 MEETING_NOT_FOUND ✅
+    - B8 different user GET → 404 (anti-enum) ✅
+    - B8b re-process processed meeting → 409 MEETING_ALREADY_PROCESSED ✅
+    - B10 cross-org attendee → 400 ATTENDEE_NOT_IN_ORG ✅
+    - B11 DELETE → 204; subsequent GET → 404 ✅
+    - B12 notes-only processing (no audio) → 200; correct Sneha task assigned via text alone ✅
+    - B13 prompt-injection attempt (customPrompt tells AI to assign to non-attendee id) → defensive: the offending action was demoted to a recommendation; no rogue Task created ✅
+    - B15 11MB audio upload → 413 FILE_TOO_LARGE ✅
+    - B16 staff caller GET /meetings → returns only their own meetings (Sneha sees 0; she didn't create any) ✅
+    - B17 after B5, Sneha logged in → sees the meeting-created Task on her task list with sourceType=meeting, creatorId=Sharma ✅
+    - **Activity feed:** `meeting_processed` event surfaced on Sharma's `/activity` with `actionItemCount=1, recommendationCount=1` ✅
+  - **Cleanup:** all smoke meetings + the Task created during B5 soft-deleted to keep seed pristine. No leftover state.
+  - **FE handoff:** the FE delegate (Codex) consumes the contract documented in [Task-List/.agents/sprints/15-meetings-v0.md](../../Task-List/.agents/sprints/15-meetings-v0.md) — includes `BackendMeeting` + `MeetingProcessResult` types, Save-Locally vs Send-to-AI terminal actions, per-clip Download, pause/resume on `useAudioRecorder`, generic indeterminate ProcessingProgressModal copy, and 25 FE smoke cases.

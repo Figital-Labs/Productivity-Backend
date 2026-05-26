@@ -84,3 +84,32 @@ export const multiModalUpload = multer({
   { name: "audio", maxCount: 1 },
   { name: "image", maxCount: 1 },
 ]);
+
+// Sprint 15: meetings `/process` endpoint accepts multiple audio clips + images
+// in one multipart request. Same 10MB per-file cap as everything else; field
+// names are `audio` (plural in practice, sent N times) and `images`. Reuses
+// the same MIME whitelists; the fileFilter discriminates by fieldname.
+const MEETINGS_AUDIO_MAX_COUNT = 12;
+const MEETINGS_IMAGES_MAX_COUNT = 4;
+export const meetingsUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: TEN_MB },
+  fileFilter: (_req, file, cb) => {
+    const allowed =
+      file.fieldname === "audio"
+        ? (AUDIO_MIME_TYPES as readonly string[])
+        : (IMAGE_MIME_TYPES as readonly string[]);
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+      return;
+    }
+    cb(
+      new ValidationError(
+        `Unsupported file type "${file.mimetype}" for field "${file.fieldname}".`,
+      ),
+    );
+  },
+}).fields([
+  { name: "audio", maxCount: MEETINGS_AUDIO_MAX_COUNT },
+  { name: "images", maxCount: MEETINGS_IMAGES_MAX_COUNT },
+]);

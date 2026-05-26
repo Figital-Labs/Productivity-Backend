@@ -20,6 +20,7 @@ import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as dayClosureRepo from "../repositories/day-closure.repository.js";
 import * as dayPlanRepo from "../repositories/day-plan.repository.js";
 import * as imageRepo from "../repositories/image.repository.js";
+import * as meetingRepo from "../repositories/meeting.repository.js";
 import * as taskRepo from "../repositories/task.repository.js";
 import * as textRepo from "../repositories/text-interaction.repository.js";
 import * as unifiedRepo from "../repositories/unified-interaction.repository.js";
@@ -157,6 +158,7 @@ export async function listActivity(
     completedTasks,
     dayPlans,
     dayClosures,
+    processedMeetings,
   ] = await Promise.all([
     voiceRepo.listInRange(user.id, from, to),
     textRepo.listInRange(user.id, from, to),
@@ -166,6 +168,7 @@ export async function listActivity(
     taskRepo.listCompletedInRange(user.id, from, to),
     dayPlanRepo.listSubmittedInRange(user.id, from, to),
     dayClosureRepo.listSubmittedInRange(user.id, from, to),
+    meetingRepo.listProcessedInRange(user.id, from, to),
   ]);
 
   const allActions = [
@@ -317,6 +320,22 @@ export async function listActivity(
         hasAiFeedback: hasAiFeedback(submission.aiFeedback),
       }),
     ),
+    ...processedMeetings
+      // `processedAt` is non-null because listProcessedInRange filters by
+      // processedAt != null. Narrow defensively in case the filter ever drifts.
+      .filter((m): m is typeof m & { processedAt: Date } => m.processedAt !== null)
+      .map(
+        (meeting): ActivityEvent => ({
+          type: "meeting_processed",
+          at: meeting.processedAt.toISOString(),
+          meetingId: meeting.id,
+          title: meeting.title,
+          actionItemCount: Array.isArray(meeting.actions) ? meeting.actions.length : 0,
+          recommendationCount: Array.isArray(meeting.recommendations)
+            ? meeting.recommendations.length
+            : 0,
+        }),
+      ),
   ];
 
   return events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));

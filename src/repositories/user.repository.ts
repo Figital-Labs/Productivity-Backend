@@ -20,6 +20,21 @@ export function findById(id: string): Promise<User | null> {
   return prisma.user.findUnique({ where: { id } });
 }
 
+/**
+ * Sprint 15: batch lookup by id. Used by meeting.service.ts to (a) validate
+ * same-org membership of attendees at create time, and (b) hydrate the
+ * attendees array on read. Returns only the public-summary projection.
+ */
+export function findByIds(
+  ids: string[],
+): Promise<Pick<User, "id" | "email" | "name" | "role" | "orgId">[]> {
+  if (ids.length === 0) return Promise.resolve([]);
+  return prisma.user.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, email: true, name: true, role: true, orgId: true },
+  });
+}
+
 export function create(data: CreateUserData): Promise<User> {
   return prisma.user.create({ data: omitUndefined(data) });
 }

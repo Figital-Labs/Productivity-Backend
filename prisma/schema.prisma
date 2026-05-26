@@ -41,6 +41,11 @@ model User {
   imageExtractions     ImageExtraction[]
   textInteractions     TextInteraction[]
   unifiedInteractions  UnifiedInteraction[]
+
+  // Sprint 15: meetings created by this user. Attendees are stored as a
+  // String[] on Meeting (no FK enforcement at the schema level) since
+  // attendance is loose — see Meeting.attendeeIds.
+  meetings             Meeting[]             @relation("UserMeetings")
 }
 
 model Task {
@@ -203,4 +208,36 @@ model UnifiedInteraction {
   user User @relation(fields: [userId], references: [id])
 
   @@index([userId, createdAt])
+}
+
+// Sprint 15: meetings. The meeting creator is `userId`. `attendeeIds` is a
+// loose String[] of User.ids (no FK enforcement at schema level — POC scope;
+// service-layer validates same-org membership at create time). Audio bytes
+// are never persisted; they live client-side until the user clicks Send-to-AI,
+// then flow through Vertex inline. The model stores agenda, typed notes, AI
+// summary, dispatched actions (PersistedMeetingAction[]), and recommendations
+// — same JSON pattern as VoiceInteraction.actions etc.
+model Meeting {
+  id              String    @id @default(cuid())
+  userId          String // creator
+  title           String
+  scheduledAt     DateTime
+  type            String // 'hurdle' | '1-on-1' (free-form to allow future types)
+  attendeeIds     String[]
+  agenda          String?
+  notes           String?
+  summary         String?
+  customPrompt    String?
+  actions         Json      @default("[]") // PersistedMeetingAction[] post-process
+  recommendations Json      @default("[]") // MeetingRecommendation[] post-process
+  processedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  user User @relation("UserMeetings", fields: [userId], references: [id])
+
+  @@index([userId, deletedAt])
+  @@index([userId, scheduledAt])
+  @@index([userId, processedAt])
 }
