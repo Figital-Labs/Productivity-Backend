@@ -7,9 +7,15 @@ export const submitDayPlanInputSchema = z.object({
 });
 export type SubmitDayPlanInput = z.infer<typeof submitDayPlanInputSchema>;
 
-export const getDayPlanQuerySchema = z.object({
-  date: dateStringSchema,
-});
+export const getDayPlanQuerySchema = z
+  .object({
+    date: dateStringSchema.optional(),
+    unreviewed: z.enum(["true"]).optional(),
+  })
+  .refine((query) => query.unreviewed === "true" || query.date !== undefined, {
+    message: "`date` is required unless `unreviewed=true`",
+    path: ["date"],
+  });
 export type GetDayPlanQuery = z.infer<typeof getDayPlanQuerySchema>;
 
 /**

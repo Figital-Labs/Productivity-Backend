@@ -14,7 +14,13 @@ export const submitDayClosureInputSchema = z.object({
 });
 export type SubmitDayClosureInput = z.infer<typeof submitDayClosureInputSchema>;
 
-export const getDayClosureQuerySchema = z.object({
-  date: dateStringSchema,
-});
+export const getDayClosureQuerySchema = z
+  .object({
+    date: dateStringSchema.optional(),
+    unreviewed: z.enum(["true"]).optional(),
+  })
+  .refine((query) => query.unreviewed === "true" || query.date !== undefined, {
+    message: "`date` is required unless `unreviewed=true`",
+    path: ["date"],
+  });
 export type GetDayClosureQuery = z.infer<typeof getDayClosureQuerySchema>;

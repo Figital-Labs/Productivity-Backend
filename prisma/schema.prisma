@@ -47,6 +47,7 @@ model User {
   submissionReviews   SubmissionReview[]     @relation("SubmissionReviewer")
   remindersReceived   ReminderIntent[]       @relation("ReminderTarget")
   remindersSent       ReminderIntent[]       @relation("ReminderSender")
+  briefCaches         MorningBriefCache[]    @relation("MorningBriefManager")
 
   // Sprint 15: meetings created by this user. Attendees are stored as a
   // String[] on Meeting (no FK enforcement at the schema level) since
@@ -327,4 +328,16 @@ model ReminderIntent {
   sender User @relation("ReminderSender", fields: [sentBy], references: [id])
 
   @@index([targetUserId, sentAt])
+}
+
+model MorningBriefCache {
+  managerId   String
+  date        DateTime @db.Date
+  payload     Json
+  generatedAt DateTime @default(now())
+
+  manager User @relation("MorningBriefManager", fields: [managerId], references: [id])
+
+  @@id([managerId, date])
+  @@index([managerId, generatedAt])
 }

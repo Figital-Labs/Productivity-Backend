@@ -40,3 +40,19 @@ export function listSubmittedInRange(
     orderBy: [{ submittedAt: "desc" }],
   });
 }
+
+export function findById(id: string): Promise<DayPlanSubmission | null> {
+  return prisma.dayPlanSubmission.findUnique({ where: { id } });
+}
+
+export function listForUsersInDateRange(
+  userIds: string[],
+  from: Date,
+  to: Date,
+): Promise<DayPlanSubmission[]> {
+  if (userIds.length === 0) return Promise.resolve([]);
+  return prisma.dayPlanSubmission.findMany({
+    where: { userId: { in: userIds }, date: { gte: from, lte: to } },
+    orderBy: [{ submittedAt: "desc" }],
+  });
+}

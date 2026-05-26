@@ -255,6 +255,9 @@ async function cleanSprint16ASeedData(historyDates: Date[]): Promise<void> {
   await prisma.reminderIntent.deleteMany({
     where: { target: { orgId: ORG_ID } },
   });
+  await prisma.morningBriefCache.deleteMany({
+    where: { manager: { orgId: ORG_ID } },
+  });
   await prisma.task.deleteMany({
     where: {
       assignee: { orgId: ORG_ID },

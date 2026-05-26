@@ -16,15 +16,8 @@
  */
 
 import prisma from "../lib/prisma.js";
+import { resolveScope } from "../lib/resolve-scope.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
-import * as dayClosureRepo from "../repositories/day-closure.repository.js";
-import * as dayPlanRepo from "../repositories/day-plan.repository.js";
-import * as imageRepo from "../repositories/image.repository.js";
-import * as meetingRepo from "../repositories/meeting.repository.js";
-import * as taskRepo from "../repositories/task.repository.js";
-import * as textRepo from "../repositories/text-interaction.repository.js";
-import * as unifiedRepo from "../repositories/unified-interaction.repository.js";
-import * as voiceRepo from "../repositories/voice.repository.js";
 import type {
   ActionCounts,
   ActivityActionType,
@@ -34,6 +27,8 @@ import type {
 } from "../schemas/activity.schema.js";
 import type { Priority } from "../schemas/common.js";
 import { formatDateYmd } from "../utils/date.js";
+
+import { userIdsInScope } from "./dashboard-rollup.service.js";
 
 interface DelegationFields {
   delegatedBy?: { id: string; name: string };
@@ -177,6 +172,10 @@ export async function listActivity(
   query: ListActivityQuery,
 ): Promise<ActivityEvent[]> {
   const { from, to } = activityBounds(query);
+  const scopedUserIds =
+    query.scope === "team" || query.scope === "org"
+      ? await userIdsInScope(await resolveScope(user))
+      : [user.id];
 
   const [
     voiceInteractions,
@@ -189,15 +188,136 @@ export async function listActivity(
     dayClosures,
     processedMeetings,
   ] = await Promise.all([
-    voiceRepo.listInRange(user.id, from, to),
-    textRepo.listInRange(user.id, from, to),
-    imageRepo.listInRange(user.id, from, to),
-    unifiedRepo.listInRange(user.id, from, to),
-    taskRepo.listManualCreatedInRange(user.id, from, to),
-    taskRepo.listCompletedInRange(user.id, from, to),
-    dayPlanRepo.listSubmittedInRange(user.id, from, to),
-    dayClosureRepo.listSubmittedInRange(user.id, from, to),
-    meetingRepo.listProcessedInRange(user.id, from, to),
+    prisma.voiceInteraction.findMany({
+      where: {
+        userId: { in: scopedUserIds },
+        ...(from !== undefined || to !== undefined
+          ? {
+              createdAt: {
+                ...(from !== undefined ? { gte: from } : {}),
+                ...(to !== undefined ? { lte: to } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.textInteraction.findMany({
+      where: {
+        userId: { in: scopedUserIds },
+        ...(from !== undefined || to !== undefined
+          ? {
+              createdAt: {
+                ...(from !== undefined ? { gte: from } : {}),
+                ...(to !== undefined ? { lte: to } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.imageExtraction.findMany({
+      where: {
+        userId: { in: scopedUserIds },
+        ...(from !== undefined || to !== undefined
+          ? {
+              createdAt: {
+                ...(from !== undefined ? { gte: from } : {}),
+                ...(to !== undefined ? { lte: to } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.unifiedInteraction.findMany({
+      where: {
+        userId: { in: scopedUserIds },
+        ...(from !== undefined || to !== undefined
+          ? {
+              createdAt: {
+                ...(from !== undefined ? { gte: from } : {}),
+                ...(to !== undefined ? { lte: to } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.task.findMany({
+      include: { creator: { select: { id: true, name: true } } },
+      where: {
+        sourceType: "manual",
+        deletedAt: null,
+        OR: [{ assigneeId: { in: scopedUserIds } }, { creatorId: { in: scopedUserIds } }],
+        ...(from !== undefined || to !== undefined
+          ? {
+              createdAt: {
+                ...(from !== undefined ? { gte: from } : {}),
+                ...(to !== undefined ? { lte: to } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.task.findMany({
+      include: { creator: { select: { id: true, name: true } } },
+      where: {
+        completed: true,
+        deletedAt: null,
+        OR: [{ assigneeId: { in: scopedUserIds } }, { creatorId: { in: scopedUserIds } }],
+        ...(from !== undefined || to !== undefined
+          ? {
+              updatedAt: {
+                ...(from !== undefined ? { gte: from } : {}),
+                ...(to !== undefined ? { lte: to } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: { updatedAt: "desc" },
+    }),
+    prisma.dayPlanSubmission.findMany({
+      where: {
+        userId: { in: scopedUserIds },
+        ...(from !== undefined || to !== undefined
+          ? {
+              submittedAt: {
+                ...(from !== undefined ? { gte: from } : {}),
+                ...(to !== undefined ? { lte: to } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: { submittedAt: "desc" },
+    }),
+    prisma.dayClosureSubmission.findMany({
+      where: {
+        userId: { in: scopedUserIds },
+        ...(from !== undefined || to !== undefined
+          ? {
+              submittedAt: {
+                ...(from !== undefined ? { gte: from } : {}),
+                ...(to !== undefined ? { lte: to } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: { submittedAt: "desc" },
+    }),
+    prisma.meeting.findMany({
+      where: {
+        deletedAt: null,
+        processedAt: {
+          not: null,
+          ...(from !== undefined ? { gte: from } : {}),
+          ...(to !== undefined ? { lte: to } : {}),
+        },
+        OR: [{ userId: { in: scopedUserIds } }, { attendeeIds: { hasSome: scopedUserIds } }],
+      },
+      orderBy: { processedAt: "desc" },
+    }),
   ]);
 
   const allActions = [
@@ -211,7 +331,13 @@ export async function listActivity(
       allActions.map((action) => action.taskId).filter((id): id is string => id !== undefined),
     ),
   );
-  const titleRows = await taskRepo.listByIds(user.id, taskIds);
+  const titleRows =
+    taskIds.length > 0
+      ? await prisma.task.findMany({
+          where: { id: { in: taskIds }, deletedAt: null },
+          select: { id: true, title: true },
+        })
+      : [];
   const taskTitles = new Map(titleRows.map((task) => [task.id, task.title]));
 
   // Sprint 11: build a delegation lookup for task_created_manual and

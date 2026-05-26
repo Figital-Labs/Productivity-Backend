@@ -1,12 +1,14 @@
-import { ConflictError } from "../lib/errors.js";
+import { ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
 import {
   buildDayClosureFeedbackPrompt,
   type CurrentTaskState,
 } from "../lib/prompts/day-closure-feedback.js";
+import { resolveScope } from "../lib/resolve-scope.js";
 import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as dayClosureRepo from "../repositories/day-closure.repository.js";
 import * as dayPlanRepo from "../repositories/day-plan.repository.js";
+import * as reviewRepo from "../repositories/submission-review.repository.js";
 import * as taskRepo from "../repositories/task.repository.js";
 import {
   dayClosureFeedbackSchema,
@@ -18,6 +20,7 @@ import type { VoiceRecommendation } from "../schemas/voice-intent.schema.js";
 import { parseDateString, todayInUserTz } from "../utils/date.js";
 
 import type { PersistedAiAction } from "./action-dispatch.service.js";
+import { userIdsInScope } from "./dashboard-rollup.service.js";
 import * as voiceIntentService from "./voice-intent.service.js";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata";
@@ -127,5 +130,47 @@ export function getDayClosure(
   user: AuthenticatedUser,
   query: GetDayClosureQuery,
 ): Promise<dayClosureRepo.DayClosureSubmission | null> {
+  if (query.date === undefined) return Promise.resolve(null);
   return dayClosureRepo.findByUserAndDate(user.id, parseDateString(query.date));
+}
+
+function dateDaysAgo(days: number): Date {
+  const date = todayInUserTz(DEFAULT_TIMEZONE);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date;
+}
+
+export async function listUnreviewedClosures(
+  reviewer: AuthenticatedUser,
+): Promise<dayClosureRepo.DayClosureSubmission[]> {
+  const scope = await resolveScope(reviewer);
+  const userIds = await userIdsInScope(scope);
+  const submissions = await dayClosureRepo.listForUsersInDateRange(
+    userIds,
+    dateDaysAgo(7),
+    todayInUserTz(DEFAULT_TIMEZONE),
+  );
+  const reviews = await reviewRepo.listForReviewer(
+    submissions.map((submission) => submission.id),
+    "closure",
+    reviewer.id,
+  );
+  const reviewedIds = new Set(reviews.map((review) => review.submissionId));
+  return submissions.filter((submission) => !reviewedIds.has(submission.id));
+}
+
+export async function markClosureReviewed(
+  reviewer: AuthenticatedUser,
+  submissionId: string,
+): Promise<reviewRepo.SubmissionReview> {
+  const submission = await dayClosureRepo.findById(submissionId);
+  if (!submission) throw new NotFoundError("DayClosure", submissionId);
+  const scope = await resolveScope(reviewer);
+  const userIds = await userIdsInScope(scope);
+  if (!userIds.includes(submission.userId)) throw new ForbiddenError();
+  const existing = await reviewRepo.findReview(submissionId, "closure", reviewer.id);
+  if (existing) {
+    throw new ConflictError("SUBMISSION_ALREADY_REVIEWED", "You already reviewed this submission.");
+  }
+  return reviewRepo.createReview(submissionId, "closure", reviewer.id);
 }

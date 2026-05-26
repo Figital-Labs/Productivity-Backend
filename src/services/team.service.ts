@@ -16,6 +16,8 @@ import type {
 } from "../schemas/team.schema.js";
 import { parseDateString, todayInUserTz } from "../utils/date.js";
 
+import { addUserToPersonalDirects } from "./personal-directs.service.js";
+
 const DEFAULT_TIMEZONE = "Asia/Kolkata";
 
 export interface PublicTeamUser {
@@ -245,6 +247,7 @@ export async function attachExistingUser(
     where: { id: creator.id },
     data: { reports: { connect: { id: target.id } } },
   });
+  await addUserToPersonalDirects(creator, target.id);
 
   return toPublicTeamUser(target);
 }

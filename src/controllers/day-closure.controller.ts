@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 
 import { AppError, ValidationError } from "../lib/errors.js";
+import { idParamSchema } from "../schemas/common.js";
 import {
   getDayClosureQuerySchema,
   submitDayClosureInputSchema,
@@ -23,9 +24,22 @@ export async function submit(req: Request, res: Response): Promise<void> {
 
 export async function get(req: Request, res: Response): Promise<void> {
   const query = getDayClosureQuerySchema.parse(req.query);
+  if (query.unreviewed === "true") {
+    res.json(await dayClosureService.listUnreviewedClosures(req.user));
+    return;
+  }
   const closure = await dayClosureService.getDayClosure(req.user, query);
   if (!closure) {
-    throw new AppError("DAY_CLOSURE_NOT_FOUND", 404, `No day closure submitted for ${query.date}.`);
+    throw new AppError(
+      "DAY_CLOSURE_NOT_FOUND",
+      404,
+      `No day closure submitted for ${query.date ?? ""}.`,
+    );
   }
   res.json(closure);
+}
+
+export async function markReviewed(req: Request, res: Response): Promise<void> {
+  const { id } = idParamSchema.parse(req.params);
+  res.json(await dayClosureService.markClosureReviewed(req.user, id));
 }

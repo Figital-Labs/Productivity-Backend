@@ -6,6 +6,7 @@ export const listActivityQuerySchema = z
   .object({
     from: dateStringSchema.optional(),
     to: dateStringSchema.optional(),
+    scope: z.enum(["personal", "team", "org"]).optional(),
   })
   .refine((value) => value.from === undefined || value.to === undefined || value.from <= value.to, {
     message: "`from` must be on or before `to`",

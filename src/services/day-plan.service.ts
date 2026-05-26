@@ -1,6 +1,8 @@
-import { ConflictError } from "../lib/errors.js";
+import { ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
+import { resolveScope } from "../lib/resolve-scope.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as dayPlanRepo from "../repositories/day-plan.repository.js";
+import * as reviewRepo from "../repositories/submission-review.repository.js";
 import * as taskRepo from "../repositories/task.repository.js";
 import type {
   GetDayPlanQuery,
@@ -8,6 +10,8 @@ import type {
   TaskSnapshotEntry,
 } from "../schemas/day-plan.schema.js";
 import { parseDateString, todayInUserTz } from "../utils/date.js";
+
+import { userIdsInScope } from "./dashboard-rollup.service.js";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata";
 
@@ -55,5 +59,47 @@ export function getDayPlan(
   user: AuthenticatedUser,
   query: GetDayPlanQuery,
 ): Promise<dayPlanRepo.DayPlanSubmission | null> {
+  if (query.date === undefined) return Promise.resolve(null);
   return dayPlanRepo.findByUserAndDate(user.id, parseDateString(query.date));
+}
+
+function dateDaysAgo(days: number): Date {
+  const date = todayInUserTz(DEFAULT_TIMEZONE);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date;
+}
+
+export async function listUnreviewedPlans(
+  reviewer: AuthenticatedUser,
+): Promise<dayPlanRepo.DayPlanSubmission[]> {
+  const scope = await resolveScope(reviewer);
+  const userIds = await userIdsInScope(scope);
+  const submissions = await dayPlanRepo.listForUsersInDateRange(
+    userIds,
+    dateDaysAgo(7),
+    todayInUserTz(DEFAULT_TIMEZONE),
+  );
+  const reviews = await reviewRepo.listForReviewer(
+    submissions.map((submission) => submission.id),
+    "plan",
+    reviewer.id,
+  );
+  const reviewedIds = new Set(reviews.map((review) => review.submissionId));
+  return submissions.filter((submission) => !reviewedIds.has(submission.id));
+}
+
+export async function markPlanReviewed(
+  reviewer: AuthenticatedUser,
+  submissionId: string,
+): Promise<reviewRepo.SubmissionReview> {
+  const submission = await dayPlanRepo.findById(submissionId);
+  if (!submission) throw new NotFoundError("DayPlan", submissionId);
+  const scope = await resolveScope(reviewer);
+  const userIds = await userIdsInScope(scope);
+  if (!userIds.includes(submission.userId)) throw new ForbiddenError();
+  const existing = await reviewRepo.findReview(submissionId, "plan", reviewer.id);
+  if (existing) {
+    throw new ConflictError("SUBMISSION_ALREADY_REVIEWED", "You already reviewed this submission.");
+  }
+  return reviewRepo.createReview(submissionId, "plan", reviewer.id);
 }
