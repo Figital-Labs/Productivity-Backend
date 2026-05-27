@@ -22,12 +22,33 @@ export type CreateDelegatedTaskInput = z.infer<typeof createDelegatedTaskInputSc
  * Body for `POST /team/users` — manager creates a staff user or sub-manager
  * under them. The creator is auto-wired as a manager of the new user via the
  * m2m hierarchy.
+ *
+ * Sprint 18 (L3+L7+L8): added optional hierarchy fields. When `roleType` is
+ * provided, `role`/`level`/`canManageUsers` are derived from it; the legacy
+ * `{ name, email, password, role }` shape still works for backward compat
+ * with FE flows that haven't been updated yet.
  */
 export const createTeamUserInputSchema = z.object({
   name: z.string().min(1, "name is required").max(120),
   email: z.email("email must be a valid email").max(200),
   password: z.string().min(6, "password must be at least 6 characters").max(200),
-  role: z.enum(["staff", "manager"]),
+  role: z.enum(["staff", "manager"]).optional(),
+  roleType: z.enum(["director", "dept_head", "group_lead", "staff", "custom"]).optional(),
+  /** Explicit level override (used in `custom` mode or to refine a typed role). */
+  level: z.number().int().min(1).max(1000).optional(),
+  /** Dept Head (sets Department.headId) or general association. */
+  departmentId: z.string().optional(),
+  /** Group Lead / Staff: optionally join a group at creation time. */
+  groupId: z.string().optional(),
+  /** Membership flag if `groupId` is set. Group Lead defaults this to true. */
+  isLead: z.boolean().optional(),
+  /** Override the default canManageUsers flag for the type. */
+  canManageUsers: z.boolean().optional(),
+  /**
+   * Explicit manager edges. Defaults to `[creator.id]`. Useful when an admin
+   * onboards a dept head whose manager is the director, not the admin.
+   */
+  managerIds: z.array(z.string()).max(20).optional(),
 });
 export type CreateTeamUserInput = z.infer<typeof createTeamUserInputSchema>;
 

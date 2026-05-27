@@ -625,6 +625,49 @@ export async function removeGroupMember(
   });
 }
 
+/**
+ * Sprint 18: flip a group membership's lead/canManage flags in place.
+ * Replaces the old "remove + re-add" workaround so the membership row
+ * (and its `validFrom` history) stays continuous. Uses the active row
+ * (`validTo: null`) so closed memberships aren't reopened.
+ */
+export async function patchGroupMember(
+  actor: AuthenticatedUser,
+  groupId: string,
+  userId: string,
+  input: { isLead?: boolean | undefined; canManage?: boolean | undefined },
+): Promise<unknown> {
+  if (!(await canManageGroup(actor, groupId))) throw new ForbiddenError();
+  const existing = await prisma.groupMembership.findFirst({
+    where: { groupId, userId, validTo: null },
+  });
+  if (!existing) throw new NotFoundError("GroupMembership");
+
+  // If we're promoting this user to lead, demote any other current lead so
+  // the group has exactly one. Demotion of the active lead is allowed by
+  // setting isLead=false explicitly on that user.
+  if (input.isLead === true) {
+    await prisma.groupMembership.updateMany({
+      where: { groupId, validTo: null, isLead: true, NOT: { userId } },
+      data: { isLead: false },
+    });
+  }
+
+  return prisma.groupMembership.update({
+    where: {
+      userId_groupId_validFrom: {
+        userId: existing.userId,
+        groupId: existing.groupId,
+        validFrom: existing.validFrom,
+      },
+    },
+    data: {
+      ...(input.isLead !== undefined && { isLead: input.isLead }),
+      ...(input.canManage !== undefined && { canManage: input.canManage }),
+    },
+  });
+}
+
 export async function createReminder(
   actor: AuthenticatedUser,
   scope: Scope,

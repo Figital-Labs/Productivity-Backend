@@ -38,22 +38,99 @@ export async function canAccessTask(user: AuthenticatedUser, task: TaskResource)
   if (task.creatorId === user.id) return true;
   if (user.reportIds.has(task.assigneeId)) return true;
 
-  const ledSharedGroup = await prisma.groupMembership.findFirst({
+  // The assignee is reachable if they're in a group that the actor either
+  // LEADS (group-lead authority, since 16A) or whose DEPARTMENT the actor
+  // HEADS (dept-head authority, Sprint 18). One query covers both so a dept
+  // head can drill into any member of their department's groups without a
+  // direct reports-edge.
+  const scopedGroup = await prisma.groupMembership.findFirst({
     where: {
-      userId: user.id,
-      isLead: true,
+      userId: task.assigneeId,
       validTo: null,
       group: {
         orgId: user.orgId,
-        memberships: {
-          some: {
-            userId: task.assigneeId,
-            validTo: null,
-          },
-        },
+        OR: [
+          { memberships: { some: { userId: user.id, isLead: true, validTo: null } } },
+          { department: { headId: user.id } },
+        ],
       },
     },
     select: { groupId: true },
   });
-  return ledSharedGroup !== null;
+  return scopedGroup !== null;
+}
+
+/**
+ * Sprint 18 (L7): recursive reporting subtree. Returns the set of every user
+ * id reachable from `actorId` by walking the `_UserHierarchy` reports edges
+ * downward (direct reports → their reports → grandchildren …). The actor
+ * themselves is NOT included. Matrix-safe: a node reachable by multiple paths
+ * is returned once. BFS with a `seen` set to avoid cycles (defensive — the
+ * model shouldn't have any, but the matrix doesn't formally rule them out).
+ */
+export async function reportSubtreeIds(actorId: string): Promise<Set<string>> {
+  const seen = new Set<string>();
+  let frontier: string[] = [actorId];
+  while (frontier.length > 0) {
+    const rows = await prisma.user.findMany({
+      where: { id: { in: frontier } },
+      select: { reports: { select: { id: true } } },
+    });
+    const next: string[] = [];
+    for (const row of rows) {
+      for (const r of row.reports) {
+        if (!seen.has(r.id) && r.id !== actorId) {
+          seen.add(r.id);
+          next.push(r.id);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return seen;
+}
+
+/**
+ * Sprint 18 (L7+L8): the central "may I act on this user?" authority.
+ *
+ *   true iff
+ *     actor is root super-admin (cross-org), OR
+ *     actor is same-org admin, OR
+ *     (actor.canManageUsers AND target is in actor's reporting subtree
+ *      AND target.level < actor.level)
+ *
+ * Returns false if actor and target are in different orgs (root excepted).
+ * Use this everywhere a user-mutation is gated: create-user, edit, delegate,
+ * password reset, group lead change. Returns false (not throws) so callers
+ * can decide between 403 and silently hiding a UI affordance.
+ */
+export async function canManageUser(actor: AuthenticatedUser, targetId: string): Promise<boolean> {
+  if (actor.id === targetId) return false; // never edit yourself via these flows
+  if (actor.isSuperAdmin) return true;
+
+  const target = await prisma.user.findUnique({
+    where: { id: targetId },
+    select: { orgId: true, level: true },
+  });
+  if (target?.orgId !== actor.orgId) return false;
+
+  if (actor.role === "admin") return true;
+  if (!actor.canManageUsers) return false;
+  if (target.level >= actor.level) return false;
+
+  const subtree = await reportSubtreeIds(actor.id);
+  return subtree.has(targetId);
+}
+
+/**
+ * Like `canManageUser` but for the create-user case where the target doesn't
+ * exist yet. Checks the level ceiling + the actor's `canManageUsers` flag.
+ * The subtree check doesn't apply at creation time (the new user will be
+ * wired to the actor as a manager).
+ */
+export function canCreateUserAtLevel(actor: AuthenticatedUser, targetLevel: number): boolean {
+  if (actor.isSuperAdmin) return true;
+  if (actor.role === "admin") return true;
+  if (!actor.canManageUsers) return false;
+  return targetLevel < actor.level;
 }

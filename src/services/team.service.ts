@@ -14,6 +14,7 @@ import type {
   CreateTeamUserInput,
   ResetTeamUserPasswordInput,
 } from "../schemas/team.schema.js";
+import { canCreateUserAtLevel } from "../utils/auth.js";
 import { parseDateString, todayInUserTz } from "../utils/date.js";
 
 import { addUserToPersonalDirects } from "./personal-directs.service.js";
@@ -189,17 +190,89 @@ export async function createDelegatedTask(
  * wired as a manager of the new user via the m2m hierarchy. Org is
  * inherited from the creator. Password is hashed before persisting.
  */
+/**
+ * Sprint 18 (L3): map a hierarchy `roleType` to its default
+ * (role, level, canManageUsers). The caller may still override any of these
+ * via explicit fields on the input.
+ */
+function resolveHierarchyDefaults(input: CreateTeamUserInput): {
+  role: "staff" | "manager" | "admin";
+  level: number;
+  canManageUsers: boolean;
+} {
+  switch (input.roleType) {
+    case "director":
+      return { role: "admin", level: 800, canManageUsers: true };
+    case "dept_head":
+      return { role: "manager", level: 400, canManageUsers: true };
+    case "group_lead":
+      // Group leads coordinate a single group; they manage downward within it
+      // but sit below dept heads in the chain.
+      return { role: "manager", level: 300, canManageUsers: true };
+    case "staff":
+      return { role: "staff", level: 100, canManageUsers: false };
+    case "custom":
+      // Custom requires explicit role + level from the caller.
+      if (!input.role || input.level === undefined) {
+        throw new AppError(
+          "VALIDATION_ERROR",
+          400,
+          "roleType=custom requires explicit role and level.",
+        );
+      }
+      return { role: input.role, level: input.level, canManageUsers: false };
+    case undefined: {
+      // Legacy path: no `roleType` provided. Use input.role and a default
+      // level so existing FE flows keep working. The legacy schema only
+      // accepts staff/manager; admin can only come through `roleType=director`.
+      const role: "staff" | "manager" = input.role ?? "staff";
+      const level = input.level ?? (role === "manager" ? 400 : 100);
+      const canManageUsers = role === "manager";
+      return { role, level, canManageUsers };
+    }
+  }
+}
+
 export async function createUser(
   creator: AuthenticatedUser,
   input: CreateTeamUserInput,
 ): Promise<PublicTeamUser> {
+  // L8 guardrail: only users with the create-users permission may proceed.
+  if (!creator.isSuperAdmin && creator.role !== "admin" && !creator.canManageUsers) {
+    throw new ForbiddenError("You do not have permission to create users.");
+  }
+
+  const defaults = resolveHierarchyDefaults(input);
+  const resolvedRole = defaults.role;
+  const resolvedLevel = input.level ?? defaults.level;
+  const resolvedCanManageUsers = input.canManageUsers ?? defaults.canManageUsers;
+
+  // L7 ceiling: never mint a user at level >= your own (root + admin excepted).
+  if (!canCreateUserAtLevel(creator, resolvedLevel)) {
+    throw new ForbiddenError(
+      `You cannot create a user at level ${resolvedLevel.toString()} — your level is ${creator.level.toString()}.`,
+    );
+  }
+
   // Email uniqueness check before transaction — fail fast.
   const existing = await prisma.user.findUnique({ where: { email: input.email } });
   if (existing) {
     throw new ConflictError("USER_ALREADY_EXISTS", "A user with this email already exists.");
   }
 
+  // Sanity-check that any referenced dept/group exist and are in-org.
+  if (input.departmentId) {
+    const dept = await prisma.department.findUnique({ where: { id: input.departmentId } });
+    if (dept?.orgId !== creator.orgId) throw new NotFoundError("Department", input.departmentId);
+  }
+  if (input.groupId) {
+    const group = await prisma.contextGroup.findUnique({ where: { id: input.groupId } });
+    if (group?.orgId !== creator.orgId) throw new NotFoundError("Group", input.groupId);
+  }
+
   const passwordHash = await hashPassword(input.password);
+  const managerIds =
+    input.managerIds && input.managerIds.length > 0 ? input.managerIds : [creator.id];
 
   const created = await prisma.$transaction(async (tx) => {
     const newUser = await tx.user.create({
@@ -207,16 +280,49 @@ export async function createUser(
         email: input.email,
         name: input.name,
         passwordHash,
-        role: input.role,
+        role: resolvedRole,
+        level: resolvedLevel,
+        canManageUsers: resolvedCanManageUsers,
         orgId: creator.orgId,
       },
     });
-    // Wire creator → newUser in the hierarchy m2m. `reports` field on the
-    // creator picks up the new user.
+
+    // Wire manager edges. Always include the creator so they can drill into
+    // the new user immediately (unless explicitly excluded by `managerIds`).
     await tx.user.update({
-      where: { id: creator.id },
-      data: { reports: { connect: { id: newUser.id } } },
+      where: { id: newUser.id },
+      data: { managers: { connect: managerIds.map((id) => ({ id })) } },
     });
+
+    // dept_head → set Department.headId on the chosen department.
+    if (input.roleType === "dept_head" && input.departmentId) {
+      await tx.department.update({
+        where: { id: input.departmentId },
+        data: { headId: newUser.id },
+      });
+    }
+
+    // If a groupId is provided, add membership. group_lead implies isLead=true
+    // by default; other types default to a regular member.
+    if (input.groupId) {
+      const wantsLead = input.isLead ?? input.roleType === "group_lead";
+      // Demote any currently-active lead in this group if we're becoming lead.
+      if (wantsLead) {
+        await tx.groupMembership.updateMany({
+          where: { groupId: input.groupId, validTo: null, isLead: true },
+          data: { isLead: false },
+        });
+      }
+      await tx.groupMembership.create({
+        data: {
+          userId: newUser.id,
+          groupId: input.groupId,
+          isLead: wantsLead,
+          canManage: wantsLead,
+        },
+      });
+    }
+
     return newUser;
   });
 

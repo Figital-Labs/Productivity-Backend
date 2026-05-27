@@ -16,7 +16,12 @@ model User {
   passwordHash String
   role         String   @default("staff")
   level        Int      @default(100)
-  orgId        String
+  // Sprint 18: org becomes an FK; isSuperAdmin is the cross-org root flag;
+  // canManageUsers is the grantable L8 permission for the hierarchy guardrail.
+  orgId          String
+  isSuperAdmin   Boolean  @default(false)
+  canManageUsers Boolean  @default(false)
+  org            Organization @relation(fields: [orgId], references: [id])
   timezone     String   @default("Asia/Kolkata")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -265,6 +270,7 @@ model Department {
   headId    String?
   createdAt DateTime @default(now())
 
+  org    Organization   @relation(fields: [orgId], references: [id])
   head   User?          @relation("DepartmentHeads", fields: [headId], references: [id])
   groups ContextGroup[]
 
@@ -282,6 +288,7 @@ model ContextGroup {
   kind         String   @default("ward")
   createdAt    DateTime @default(now())
 
+  org         Organization      @relation(fields: [orgId], references: [id])
   department  Department?       @relation(fields: [departmentId], references: [id])
   memberships GroupMembership[]
   tasks       Task[]
@@ -346,4 +353,17 @@ model MorningBriefCache {
 
   @@id([managerId, date])
   @@index([managerId, generatedAt])
+}
+
+/// Sprint 18: tenant boundary. Every User / Department / ContextGroup carries
+/// an `orgId` FK to this row. Root super-admins (`User.isSuperAdmin`) can
+/// create new orgs via `POST /orgs`; everyone else is scoped to their own.
+model Organization {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  users       User[]
+  departments Department[]
+  groups      ContextGroup[]
 }

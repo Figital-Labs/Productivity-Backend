@@ -78,6 +78,41 @@ export const createReminderSchema = z.object({
 });
 export type CreateReminderInput = z.infer<typeof createReminderSchema>;
 
+// ───────────────────────────────────────────────────────────────────────────
+// Sprint 18 — Phase 2 endpoints
+// ───────────────────────────────────────────────────────────────────────────
+
+/** `GET /dashboard/performers` — top + bottom over scoped users. */
+export const performersQuerySchema = z.object({
+  metric: z.enum(["tasks", "consistency"]).default("tasks"),
+  days: z.coerce.number().int().min(1).max(30).default(7),
+  limit: z.coerce.number().int().min(1).max(10).default(3),
+});
+export type PerformersQuery = z.infer<typeof performersQuerySchema>;
+
+/** `GET /dashboard/analytics/plan-vs-closure` — per-day series. */
+export const planVsClosureQuerySchema = z.object({
+  range: z.enum(["7d", "30d"]).default("7d"),
+});
+export type PlanVsClosureQuery = z.infer<typeof planVsClosureQuerySchema>;
+
+/** `GET /dashboard/people/:id/day?date=` — scope-aware person day. */
+export const personDayQuerySchema = z.object({
+  date: dateStringSchema.optional(),
+});
+export type PersonDayQuery = z.infer<typeof personDayQuerySchema>;
+
+/** `PATCH /dashboard/groups/:id/members/:userId` — flip lead / canManage. */
+export const patchGroupMemberSchema = z
+  .object({
+    isLead: z.boolean().optional(),
+    canManage: z.boolean().optional(),
+  })
+  .refine((v) => v.isLead !== undefined || v.canManage !== undefined, {
+    message: "At least one of isLead or canManage is required.",
+  });
+export type PatchGroupMemberInput = z.infer<typeof patchGroupMemberSchema>;
+
 export const kpisSchema = z.object({
   activeStaffToday: z.number().int().nonnegative(),
   plansSubmittedToday: z.number().int().nonnegative(),
@@ -105,7 +140,9 @@ export const consistencyRowSchema = z.object({
 export type ConsistencyRow = z.infer<typeof consistencyRowSchema>;
 
 export const morningBriefResponseSchema = z.object({
-  summaryHinglish: z.string().min(20).max(800),
+  // Sprint 18 (L5): manager-facing executive brief, English only. Renamed from
+  // `summaryHinglish`. Personal-task AI flows still output Hinglish — untouched.
+  summary: z.string().min(20).max(800),
   highlights: z.array(z.string().max(120)).min(0).max(4),
   concerns: z.array(z.string().max(120)).min(0).max(4),
   topPerformers: z.array(z.object({ userId: z.string(), name: z.string() })).max(3),
