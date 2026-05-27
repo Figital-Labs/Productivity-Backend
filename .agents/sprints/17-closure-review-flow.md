@@ -44,10 +44,10 @@ This is also a **behavior change**, called out loudly so nobody trips on it:
 | D1 | **Two-phase flow.** `POST /day-closure/review` (AI once → draft) + `POST /day-closure/submit` (finalize). | Founder's review-then-submit loop. |
 | D2 | **Data model: `status` column on `DayClosureSubmission`.** Add `status: 'draft' \| 'submitted'` (default `'submitted'`) + `reviewedAt DateTime?`. One additive migration; existing rows become `status='submitted'`, which is correct. | Respects existing `@@unique([userId, date])`; one row per (user, date) transitions draft→submitted. |
 | D3 | **Tasks stay editable until final submit.** The AI review is a point-in-time snapshot and **may be stale** at submit time (user edits a task after reviewing). Accepted for POC. | User chose "tasks editable until submit." |
-| D4 | **Closure voice = excuse/justification only.** No task-state mutation in the closure flow. | User chose "pure justifications." |
+| D4 | **AI-driven task mutation via `taskActions`.** The AI reads the user's narrative at review time and emits `taskActions` to auto-mark tasks done/partial. Ad-hoc items mentioned in the narrative that don't match any task are created as completed tasks (`additions`). The old `/voice/process` path is NOT called — mutation happens through structured AI output only. | PA mode: AI is the assistant, user tells it what happened, AI updates the task list. |
 | D5 | **New `POST /transcribe`** (multipart audio → `{ transcript }`). No side effects, no `VoiceInteraction` row, no task dispatch. | Audio-as-proof gets transcribed to text (S3 still deferred — we don't store the audio). |
 | D6 | **AI runs ONCE.** Calling Review again on an existing draft returns the **stored** review without regenerating. Explicit "re-run review" is deferred — leave a clean seam (a documented `force` path you don't wire yet). | User: "it runs once, and it should run once." |
-| D7 | **Closure still requires a prior day-plan** (keep `409 NO_DAY_PLAN_FOR_DATE`). | Unchanged Sprint 7 rule. |
+| D7 | ~~**Closure still requires a prior day-plan.**~~ **Removed in PA-mode sprint.** The `hasDayPlan` flag is still fetched and passed internally (reserved for future prompt use) but no longer throws. | PA flow: the AI is the user's PA regardless of whether a formal plan was submitted. |
 | D8 | **Personal-flow prompts untouched.** `voice-intent.ts` / `text-intent.ts` / `image-extraction.ts` / `unified-intent.ts` and `/voice/process` are byte-identical. Only the closure flow stops calling `processVoice`. | Standing scope guarantee. |
 
 ---
@@ -100,20 +100,22 @@ One migration: `ALTER TABLE` add `status` (default `'submitted'`) + `reviewedAt`
 ### Phase 2 — Review endpoint
 Files: [src/services/day-closure.service.ts](../../src/services/day-closure.service.ts), controller, route, schema.
 
-`POST /day-closure/review` — body `{ date? }` (defaults to today IST).
+`POST /day-closure/review` — body `{ date?, commentary? }` (defaults to today IST). `commentary` is the user's end-of-day narrative — text typed or transcribed from voice via `/transcribe`.
 
-Service `reviewDayClosure(user, { date })`:
-1. Validate plan exists for the date → else `409 NO_DAY_PLAN_FOR_DATE`.
-2. `findByUserAndDate(user.id, date)` (returns any row — draft or submitted):
+Service `reviewDayClosure(user, { date, commentary })`:
+1. `findByUserAndDate(user.id, date)` (returns any row — draft or submitted):
    - `status === 'submitted'` → `409 DAY_CLOSURE_ALREADY_SUBMITTED`.
    - `status === 'draft'` (has `reviewedAt`) → **return the stored review unchanged** (D6 — runs once). Do NOT call Vertex again.
    - none → run AI:
-     - load current task states (`taskRepo.listByDate`), build prompt via `buildDayClosureFeedbackPrompt` (closureNarrative = `""` at review time — no commentary yet).
-     - `generateStructured` → `aiFeedback`.
-     - create row: `status='draft'`, `aiFeedback`, `reviewedAt=now`, `commentary=''`, `mediaIds=[]`.
-3. Return `{ dayClosureId, status, reviewedAt, aiFeedback }`.
+     - Fetch `dayPlanRepo.findByUserAndDate` (no throw if null — `hasDayPlan` passed to prompt for future use).
+     - Load current task states (`taskRepo.listByDate`), build prompt via `buildDayClosureFeedbackPrompt` with `closureNarrative: input.commentary ?? ""`.
+     - `generateStructured` → `aiFeedback` (includes `taskActions` and `additions`).
+     - Dispatch `taskActions`: for each action, validate taskId belongs to today, then `taskRepo.update({ completed, isPartial })`.
+     - Create tasks for `additions`: for each title, `taskRepo.create({ sourceType: "manual", notes: "Ad-hoc work noted during AI day closure review." })` then `taskRepo.update(id, { completed: true })`.
+     - Create row: `status='draft'`, `aiFeedback`, `reviewedAt=now`, `commentary=input.commentary ?? ""`, `mediaIds=[]`.
+2. Return `{ dayClosureId, status, reviewedAt, aiFeedback }`.
 
-Repo: add `createDraft(...)` (or reuse `create` with the new fields) and keep `findByUserAndDate` finding *any* status (Review/Submit need to see drafts).
+Repo: `createDraft(data: { userId, date, aiFeedback, narrative })` stores `narrative` as `commentary`. `findByUserAndDate` finds *any* status (Review/Submit need to see drafts).
 
 ### Phase 3 — Submit endpoint (rewrite)
 `POST /day-closure/submit` — body `{ date?, commentary? }`. **No multipart, no `req.file`.**
@@ -122,7 +124,7 @@ Service `submitDayClosure(user, { date, commentary })`:
 1. `findByUserAndDate(user.id, date)`:
    - none → `400 DAY_CLOSURE_REVIEW_REQUIRED` ("Run review before submitting.").
    - `status === 'submitted'` → `409 DAY_CLOSURE_ALREADY_SUBMITTED`.
-   - `status === 'draft'` → update row: `status='submitted'`, `commentary=commentary ?? ''`, `submittedAt=now`. Leave `aiFeedback` as-is (the review from Phase 2).
+   - `status === 'draft'` → update row: `status='submitted'`, `commentary=input.commentary ?? existing.commentary` (preserves the review-time narrative if no extra note provided), `submittedAt=now`. Leave `aiFeedback` as-is (the review from Phase 2).
 2. Return the finalized closure.
 
 **Delete** from the service: the `audio` param, `voiceIntentService.processVoice` call, the `DayClosureAudioInput`/`DayClosureSubmitResult` voice fields. Controller drops `req.file` handling and the multer middleware on the route. The submit response shape changes — coordinate with the FE sprint (it expects the finalized `DayClosureSubmission`, not the old `{ transcript, taskUpdates, ... }`).
@@ -166,30 +168,32 @@ Every hit must be classified: either it carries `status: "submitted"` (a "real c
 ---
 
 ## Acceptance criteria
-- `POST /day-closure/review` on a date with a plan → `201`, `status:'draft'`, populated Hinglish `aiFeedback`.
+- `POST /day-closure/review` (with or without a day plan) → `201`, `status:'draft'`, populated English `aiFeedback`.
+- Review with `commentary` narrative → `taskActions` dispatched (matching tasks auto-marked); `additions` created as completed tasks; `commentary` persisted on the draft row.
 - Re-calling review on the same date returns the **same** `aiFeedback` and **unchanged** `reviewedAt` (no second Vertex call — verify via timestamp).
-- `POST /day-closure/submit` after a review → `200`, `status:'submitted'`, `commentary` persisted.
+- `POST /day-closure/submit` after a review → `200`, `status:'submitted'`, `commentary` persisted (extra note if provided, otherwise the review-time narrative).
 - Submit without a prior draft → `400 DAY_CLOSURE_REVIEW_REQUIRED`.
 - Submit/Review on an already-submitted date → `409 DAY_CLOSURE_ALREADY_SUBMITTED`.
-- Review with no plan → `409 NO_DAY_PLAN_FOR_DATE`.
 - `POST /transcribe` with audio → `200 { transcript }` in Roman script (no Devanagari); no `VoiceInteraction` row created; no task mutated.
-- `GET /day-closure?date=` returns a draft row (so the FE can resume) including `status` + `reviewedAt`.
-- **Regression:** closure flow never flips a task state. A task left `pending` stays `pending` through review+submit.
+- `GET /day-closure?date=` returns a draft row (so the FE can resume) including `status`, `reviewedAt`, and `commentary` (the narrative, for rehydrating the commentary box).
+- **AI task mutation:** review with `commentary: "I finished ward rounds"` → the matching task is auto-marked done via `taskActions`; task list reflects this after review.
 - **Dashboard regression:** a draft closure does NOT increment "closures submitted" on `/dashboard/overview` or `/dashboard/consistency`; only a finalized one does.
 - `npm run typecheck && npm run lint && npm run build` clean.
 
 ## Smoke matrix (curl against live dev server, kims-hospital seed)
-1. Login sneha → submit a plan for today (if not seeded) → `POST /day-closure/review` → 201 draft + feedback.
-2. Re-POST review → same payload, same `reviewedAt`.
-3. `GET /day-closure?date=today` → row with `status:'draft'`.
-4. `POST /day-closure/submit { commentary:"Ward round late tha staff shortage ki wajah se" }` → 200 submitted.
-5. `POST /day-closure/submit` again → 409 ALREADY_SUBMITTED.
-6. Fresh date, `POST /day-closure/submit` with no prior review → 400 REVIEW_REQUIRED.
-7. Date with no plan → review → 409 NO_DAY_PLAN_FOR_DATE.
-8. `POST /transcribe` with a TTS wav ("kal report submit kar dunga") → 200, transcript in Roman, no Devanagari.
-9. `POST /transcribe` with a non-audio file → 400.
-10. As sharma, `GET /dashboard/overview` before submit (sneha draft exists) → closuresSubmittedToday does NOT include sneha; after submit → it does.
-11. `GET /dashboard/consistency?days=7` — a draft day still shows as a missed closure for that day.
+1. Login sneha → `POST /day-closure/review { commentary: "I finished ward rounds and submitted the OT report" }` → 201 draft; tasks matching "ward rounds" and "OT report" auto-marked done; `aiFeedback.taskActions` non-empty.
+2. Review with narrative "also had a quick call with vendor — not on my list" → a new completed task created with notes "Ad-hoc work noted during AI day closure review."
+3. Review WITHOUT a day plan → 201 (no error — plan no longer required).
+4. Re-POST review → same payload, same `reviewedAt` (idempotent, no second Vertex call).
+5. `GET /day-closure?date=today` → row with `status:'draft'`, `commentary` = the narrative sent at review.
+6. `POST /day-closure/submit { commentary:"Ward round late tha staff shortage ki wajah se" }` → 200 submitted, `commentary` = the extra note.
+7. `POST /day-closure/submit` with no extra commentary → 200 submitted, `commentary` = review-time narrative (not wiped).
+8. `POST /day-closure/submit` again → 409 ALREADY_SUBMITTED.
+9. Fresh date, `POST /day-closure/submit` with no prior review → 400 REVIEW_REQUIRED.
+10. `POST /transcribe` with a TTS wav ("kal report submit kar dunga") → 200, transcript in Roman, no Devanagari.
+11. `POST /transcribe` with a non-audio file → 400.
+12. As sharma, `GET /dashboard/overview` before submit (sneha draft exists) → closuresSubmittedToday does NOT include sneha; after submit → it does.
+13. `GET /dashboard/consistency?days=7` — a draft day still shows as a missed closure for that day.
 
 ## Failure modes to guard
 - **FM1 — Draft counted as submitted.** The whole point of Phase 5. If skipped, the dashboard lies. Grep for every `dayClosureSubmission` read before declaring done.
@@ -201,8 +205,8 @@ Every hit must be classified: either it carries `status: "submitted"` (a "real c
 ## Handoff state (fill on completion)
 - [x] Migration name + applied — `prisma/migrations/20260527120000_sprint17_closure_two_phase/migration.sql` applied to local Postgres `tasklist` via `npx prisma migrate deploy`. Adds `status TEXT NOT NULL DEFAULT 'submitted'` and `reviewedAt TIMESTAMP(3)` to `DayClosureSubmission`. Existing rows default to `'submitted'` (correct: they were created by the pre-Sprint-17 single-shot flow).
 - [x] Endpoints live:
-  - `POST /api/v1/day-closure/review` — body `{ date? }` → `201 { dayClosureId, status:'draft', reviewedAt, aiFeedback }`. Idempotent on existing draft (D6).
-  - `POST /api/v1/day-closure/submit` — body `{ date?, commentary? }` → `200 DayClosureSubmission` with `status:'submitted'`. **No multipart, no audio param.** Requires a prior draft → `400 DAY_CLOSURE_REVIEW_REQUIRED` otherwise.
+  - `POST /api/v1/day-closure/review` — body `{ date?, commentary? }` where `commentary` = the user's end-of-day narrative (text or pre-transcribed from voice). → `201 { dayClosureId, status:'draft', reviewedAt, aiFeedback }`. On receipt: dispatches `taskActions` (auto-marks tasks done/partial), creates completed tasks for `additions`. Narrative persisted in `commentary` on the draft row for FE rehydration. Idempotent on existing draft (D6).
+  - `POST /api/v1/day-closure/submit` — body `{ date?, commentary? }` where `commentary` is an **optional extra note to management** (not the AI narrative). → `200 DayClosureSubmission` with `status:'submitted'`. Commentary behavior: `input.commentary ?? existing.commentary` — if the user adds an extra note it overwrites; otherwise the review-time narrative is preserved. **No multipart, no audio param.** Requires a prior draft → `400 DAY_CLOSURE_REVIEW_REQUIRED` otherwise.
   - `POST /api/v1/transcribe` — multipart `audio` field (10 MB cap, same MIME whitelist as `/voice/process`) → `200 { transcript }`. Roman-script only. `jwtAuth` only, no role gate. No DB write.
 - [x] Phase 5 read-filter audit — `Select-String src\**\*.ts dayClosureSubmission` (PowerShell equivalent of the grep) classification:
   - **Filtered (status='submitted')**:
@@ -228,6 +232,6 @@ Every hit must be classified: either it carries `status: "submitted"` (a "real c
   - **New (Sprint 17 `/submit`)**: the bare `DayClosureSubmission` row → `{ id, userId, date, status:'submitted', reviewedAt, submittedAt, commentary, aiFeedback, mediaIds }`. The AI payload is already on screen from the Review phase; submit only confirms persistence.
   - **New (Sprint 17 `/review`)**: `{ dayClosureId, status:'draft', reviewedAt, aiFeedback }` — the minimal shape the FE needs to render the review screen.
   - **`GET /day-closure?date=`** still returns the full `DayClosureSubmission` row, now including `status` + `reviewedAt`, and will return a draft if one exists (Phase 5 intentional-unfiltered) so the FE can resume.
-  - **Error codes**: `DAY_CLOSURE_REVIEW_REQUIRED` (400, new), `DAY_CLOSURE_ALREADY_SUBMITTED` (409, existing), `NO_DAY_PLAN_FOR_DATE` (409, existing on `/review`).
+  - **Error codes**: `DAY_CLOSURE_REVIEW_REQUIRED` (400, new), `DAY_CLOSURE_ALREADY_SUBMITTED` (409, existing). `NO_DAY_PLAN_FOR_DATE` removed — plan is no longer required.
 - [ ] Smoke matrix results — **pending live curl run by user**. Postman collection updated with three new requests: "Review Day Closure", "Submit Day Closure" (rewritten, JSON body), "Transcribe Audio". The old "Submit Day Closure With Audio" request was replaced — drop it from any saved environments.
 - [x] STATE.md changelog entry — Sprint 17 row added to status table; "Active Sprint" section now leads with Sprint 17.

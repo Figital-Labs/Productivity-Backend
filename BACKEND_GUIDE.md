@@ -285,48 +285,70 @@ curl -X POST http://localhost:3000/api/v1/tasks/cmpg.../restore -H "Authorizatio
 
 ### 4.5 Evening: close the day
 
+Day closure is **two-phase**: Review (AI generates feedback, auto-updates tasks) then Submit (finalizes the record).
+
+**Step 1 — Review** (send the user's end-of-day narrative):
+
 ```bash
-curl -X POST http://localhost:3000/api/v1/day-closure/submit \
+# Text narrative
+curl -X POST http://localhost:3000/api/v1/day-closure/review \
   -H "Authorization: Bearer $TOKEN" \
-  -F "audio=@closure.wav;type=audio/wav" \
-  -F "commentary=Busy day overall"
+  -H "Content-Type: application/json" \
+  -d '{"commentary":"I finished ward rounds and submitted the OT report. Also had a quick call with the vendor — that wasn'\''t planned."}'
+
+# Voice narrative: transcribe first, then review
+TRANSCRIPT=$(curl -s -X POST http://localhost:3000/api/v1/transcribe \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "audio=@closure.wav;type=audio/wav" | jq -r .transcript)
+curl -X POST http://localhost:3000/api/v1/day-closure/review \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"commentary\":\"$TRANSCRIPT\"}"
 ```
 
-**Response (truncated):**
+**Review response:**
 
 ```json
 {
   "dayClosureId": "cmpg...",
-  "transcript": "I finished patient rounds. The lab call is partial — they were busy. Also did an emergency triage at 3pm.",
-  "taskUpdates": [
-    { "type": "completed", "taskId": "...", "reasoning": "User said 'I finished patient rounds'." },
-    { "type": "partial", "taskId": "...", "reasoning": "User said 'partial — they were busy'." }
-  ],
-  "recommendedNewTasks": [
-    {
-      "title": "Emergency triage at 3pm",
-      "completed": true,
-      "reasoning": "Mentioned doing ad-hoc work not on the plan."
-    }
-  ],
+  "status": "draft",
+  "reviewedAt": "2026-05-28T14:30:00.000Z",
   "aiFeedback": {
-    "achievements": ["Patient rounds at 8am"],
-    "missed": [],
-    "partial": ["Call lab for reports"],
-    "additions": ["Emergency triage at 3pm"],
-    "tips": ["Tomorrow ke liye lab call ko first half mein schedule karo."],
-    "summary": "Busy din tha. Rounds done, lab partial raha. Emergency triage achhe se manage ki."
+    "achievements": ["Ward rounds", "OT report submission"],
+    "missed": ["Call lab for results"],
+    "partial": [],
+    "additions": ["Vendor call"],
+    "tips": [],
+    "summary": "Good day — ward rounds and the OT report are done. The lab call is still open.",
+    "taskActions": [
+      { "taskId": "cmpg...", "status": "completed" },
+      { "taskId": "cmpg...", "status": "completed" }
+    ]
   }
 }
 ```
 
+The AI auto-marks tasks via `taskActions` and creates a completed task for the vendor call (`additions`). The FE should reload the task list after review to reflect these changes.
+
+**Step 2 — Submit** (optionally add a note to management, then finalize):
+
+```bash
+curl -X POST http://localhost:3000/api/v1/day-closure/submit \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"commentary":"Lab call pushed due to staff shortage."}'
+```
+
+If no `commentary` is passed at submit, the review-time narrative is preserved. Submit returns the full `DayClosureSubmission` row with `status: "submitted"`.
+
 **Important:**
 
-- Day-closure **requires a prior day-plan for the same date**. Without it: `409 NO_DAY_PLAN_FOR_DATE`.
+- Day plan is **not required** — closure works even if no plan was submitted for the date.
 - One closure per (user, date). Duplicate: `409 DAY_CLOSURE_ALREADY_SUBMITTED`.
-- Audio is required; typed `commentary` is optional.
-- The AI feedback is structured into 6 fields. **All output is in Hinglish.**
-- Closure makes **two AI calls** internally (one for task updates, one for feedback), so expect ~10–20s response time.
+- Review is idempotent — re-calling returns the stored draft without re-invoking AI.
+- Submit requires a prior review → `400 DAY_CLOSURE_REVIEW_REQUIRED` otherwise.
+- The AI feedback is structured into 7 fields. **All output text is in English.**
+- `tips` is always an empty array (reserved, not currently used).
 
 ### 4.6 Notes (standalone sticky notes)
 
@@ -664,16 +686,22 @@ See use case 4.9 for a full example and cross-modal grounding behavior.
 
 ### Day closure
 
-| Method | Path                                  | Purpose                                                                                                                         |
-| ------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/v1/day-closure/submit`          | Multipart audio + typed commentary → voice flow + AI feedback. 409 if no plan exists for the date or closure already submitted. |
-| GET    | `/api/v1/day-closure?date=YYYY-MM-DD` | Retrieve submitted closure. 404 if none.                                                                                        |
+| Method | Path                                  | Purpose                                                                                                                                                   |
+| ------ | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/v1/day-closure/review`          | Send end-of-day narrative → AI generates feedback, auto-marks tasks, creates ad-hoc tasks. Persists a `status='draft'` row. Idempotent. No plan required. |
+| POST   | `/api/v1/day-closure/submit`          | Finalize the draft → `status='submitted'`. Optional extra note in `commentary`. 400 if no draft exists; 409 if already submitted.                         |
+| GET    | `/api/v1/day-closure?date=YYYY-MM-DD` | Returns the closure row for that date (draft OR submitted). Used by FE to rehydrate the review screen on page refresh.                                    |
+| GET    | `/api/v1/day-closure?unreviewed=true` | Manager: list submitted closures from the past 7 days that the caller hasn't reviewed yet.                                                                |
 
-**Multipart fields for submit:**
+**JSON body for `/review`:**
 
-- `audio` (file, required): same MIME whitelist as voice (WebM, WAV, MP3, OGG, MP4, M4A; max 25 MB)
-- `commentary` (text, optional): up to 5000 chars
-- `date` (text, optional): defaults to today
+- `commentary` (string, optional, max 5000): the user's end-of-day narrative — text or transcribed voice
+- `date` (string, optional): YYYY-MM-DD, defaults to today IST
+
+**JSON body for `/submit`:**
+
+- `commentary` (string, optional, max 5000): extra note to management; if omitted, the review-time narrative is preserved
+- `date` (string, optional): YYYY-MM-DD, defaults to today IST
 
 ---
 
