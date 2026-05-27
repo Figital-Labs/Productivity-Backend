@@ -4,8 +4,7 @@
  * task state. Closure voice no longer dispatches task actions — task states
  * here are whatever the user manually set via the inline pills.
  *
- * The model returns structured JSON; shape enforced via `responseJsonSchema`
- * (see src/lib/vertex.ts). The prompt's job is to convey semantics.
+ * Language policy: all output fields must be in English regardless of input.
  */
 
 import type { TaskSnapshotEntry } from "../../schemas/day-plan.schema.js";
@@ -36,19 +35,20 @@ INPUT
 2. CURRENT TASK STATES — same tasks at end of day, showing completion status (the user manually flipped these via inline pills during the day; this is the source of truth)
 3. CLOSURE NARRATIVE — the user's typed reflection about today (at REVIEW time this is empty; the user types excuses AFTER reading this feedback)
 
-OUTPUT LANGUAGE — IMPORTANT
-ALL output text MUST be in Hinglish or English in Roman script. Do NOT use Devanagari or any other non-Latin script, even if the narrative contains Devanagari input.
-  ✓ "Report ka draft complete kar liya"
+OUTPUT LANGUAGE — ALWAYS ENGLISH
+ALL output text MUST be in clear, simple English. Never use Devanagari, Hinglish, or Hindi Roman script, even if the narrative or task titles contain non-English input.
   ✓ "Finished patient rounds on time"
+  ✓ "Report draft completed"
+  ✗ "Patient ke rounds complete kar liye"      (Hinglish — never output)
   ✗ "रिपोर्ट का ड्राफ्ट कम्प्लीट कर लिया"     (Devanagari — never output)
 
 OUTPUT FIELDS:
-- achievements   — string[] of planned tasks the user completed today (use the task title as the string, in Hinglish)
+- achievements   — string[] of planned tasks the user completed today (use the task title as the string, in English)
 - missed         — string[] of planned tasks NOT completed and NOT partial
 - partial        — string[] of planned tasks the user started but didn't fully finish
 - additions      — string[] of work the user mentioned doing today that wasn't in the morning plan
-- tips           — string[] of 0-3 actionable suggestions for tomorrow (Hinglish, supportive tone, brief)
-- summary        — string, 1-2 sentence overall wrap-up of the day (Hinglish, encouraging but honest)
+- tips           — string[] of 0-3 actionable suggestions for tomorrow (English, supportive tone, brief)
+- summary        — string, 1-2 sentence overall wrap-up of the day (English, encouraging but honest)
 
 RULES (in priority order):
 
@@ -65,15 +65,15 @@ RULES (in priority order):
    Tasks the user started but didn't finish.
 
 5. ADDITIONS come from the NARRATIVE, not the task state
-   Look at what the user mentioned doing that wasn't on the morning plan. These weren't auto-created (per ADR-0005, recommendation pattern). Surface them as plain titles in "additions" — the user can choose to add them via the frontend later if relevant.
+   Look at what the user mentioned doing that wasn't on the morning plan. These weren't auto-created (per ADR-0005, recommendation pattern). Surface them as plain English titles in "additions" — the user can choose to add them via the frontend later if relevant.
 
 6. TIPS should be SPECIFIC, not generic
    Bad:  "Try to finish all your tasks tomorrow"
-   Good: "Mornings se admin work block kar lo — pichle 3 din se admin tasks slip ho rahe hain"
+   Good: "Block mornings for admin work — admin tasks have slipped the last 3 days"
    If you don't have enough signal for a meaningful tip, leave the array empty rather than padding.
 
 7. SUMMARY is 1-2 sentences MAX
-   Honest about misses, supportive in tone. Don't be preachy. Don't be robotic. Hinglish welcome.
+   Honest about misses, supportive in tone. Don't be preachy. Don't be robotic. English only.
 
 8. EMPTY-PLAN EDGE CASE
    If the morning plan was empty (no tasks committed to), achievements/missed/partial are all empty arrays. Additions come from the narrative. Tips and summary still apply.

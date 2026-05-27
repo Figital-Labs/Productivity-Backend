@@ -6,15 +6,18 @@
  * Sprint 11 follow-up (prompt-craft pass): adopts FIDELITY_PRINCIPLE,
  * TITLE_RULE, NOTES_RULE, and DELEGATION_RELAY_EXAMPLES from shared-rules.
  * Image-specific blocks (column-pairing, visual priority cues) kept inline.
+ *
+ * Language policy: extractedText stays as Romanized verbatim (no Devanagari).
+ * All other output fields (title, notes, reasoning) must be in English.
  */
 
 import {
   CONSERVATIVE_DEFAULT_RULE,
   dateResolutionRule,
   DELEGATION_RELAY_EXAMPLES,
+  ENGLISH_OUTPUT_RULE,
+  ENGLISH_REASONING_RULE,
   FIDELITY_PRINCIPLE,
-  HINGLISH_REASONING_RULE,
-  HINGLISH_TITLE_NOTES_RULE,
   NOTES_RULE,
   RECOMMENDATION_TITLE_FORMAT_RULE,
   TITLE_RULE,
@@ -56,9 +59,12 @@ A handwritten calendar date like "27/05" or "27 May" or "27-5" → interpret as 
 INPUT LANGUAGE
 The image text may be in English, Hindi (Devanagari handwriting), or Hinglish (Roman). Treat all three as equivalent. Match Hindi/Hinglish names to directory entries phonetically.
 
-${HINGLISH_TITLE_NOTES_RULE}
+OUTPUT LANGUAGE FOR extractedText
+Transcribe the image content verbatim into "extractedText" in Hinglish/English Roman script — exactly what is written on the image, no Devanagari. Do NOT translate to English; preserve original phrasing.
 
-${HINGLISH_REASONING_RULE}
+${ENGLISH_OUTPUT_RULE}
+
+${ENGLISH_REASONING_RULE}
 
 INTENT TYPES — DELEGATION ENDPOINT
 This endpoint emits ONE intent type only: "created". Two flavors:
@@ -101,7 +107,7 @@ RULES (in priority order):
    Allowed: "low", "medium", "high". Omit if no signal. Cues for HIGH: "URGENT" / "ASAP" / "जरूरी" / "abhi" written near the item, underline, star (* / ★), triple-or-more "!!!", drawn in red.
 
 9. EXTRACTED TEXT
-   Transcribe the image content into "extractedText" — every visible item, in spatial order. Hinglish/English Roman script. Don't summarize.
+   Transcribe the image content into "extractedText" — every visible item, in spatial order. Hinglish/English Roman script; no Devanagari. Don't summarize.
 
 10. ${RECOMMENDATION_TITLE_FORMAT_RULE}
 

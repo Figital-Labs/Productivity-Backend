@@ -16,6 +16,8 @@
  *     safety carryover from Sprints 5+6.
  *   - Sprint-8 additions: TODAY anchor + Hinglish tense rules + targetDate
  *     output rule + user-facing reasoning rule.
+ *   - Language policy: transcript stays as Romanized verbatim (no Devanagari).
+ *     All other output fields (title, notes, reasoning) must be in English.
  */
 
 import type { PendingTaskContext } from "./voice-intent.js";
@@ -74,36 +76,27 @@ If tense is ambiguous, route to recommendations.
 INPUT LANGUAGE
 Any modality may contain English, Hindi (Devanagari/Roman), or Hinglish (code-switched). Treat all equivalently. Match across modalities semantically — e.g., Hindi audio saying "report khatm kar di" can match an English task titled "Finish quarterly report".
 
-OUTPUT LANGUAGE FOR title / notes
-Hinglish or English in Roman script. NEVER Devanagari, even if the source modality was Devanagari.
-  ✓ "Patient ke rounds complete karne hain"
+OUTPUT LANGUAGE FOR title / notes — ALWAYS ENGLISH
+Convert the user's intent into clear, simple English. Never use Devanagari or Hinglish in titles/notes.
+Proper nouns (names like Sneha, Dr. Mehta; place names like Ward 12, OT) stay as-is.
+  ✓ "Complete patient rounds"
   ✓ "Buy milk on the way home"
-  ✗ "मरीज़ के राउंड पूरे करने हैं"   (Devanagari — never output)
+  ✗ "Patient ke rounds complete karne hain" (Hinglish — never output)
+  ✗ "मरीज़ के राउंड पूरे करने हैं"          (Devanagari — never output)
 
-OUTPUT LANGUAGE FOR reasoning — MIRROR THE USER (USER-FACING)
-This reasoning is shown DIRECTLY to the user on the recommendation card. Talk to them like their P.A.:
+OUTPUT LANGUAGE FOR reasoning — ALWAYS ENGLISH
+This reasoning is shown DIRECTLY to the user on the recommendation card. Always write in clear, simple English regardless of what language the user used.
 
   - LENGTH: 1 short sentence, ≤ 20 words. No preamble. No rule references.
-  - LANGUAGE: detect the dominant language across the user's modalities and reply in THE SAME language.
-      * Audio/text/image all English        → English reasoning
-      * Any modality is Hindi or Hinglish   → Hinglish reasoning (Roman, NEVER Devanagari)
-      * If modalities disagree on language  → default to Hinglish
+  - LANGUAGE: English only. Never Devanagari. Never Hinglish.
   - TONE: warm, direct, helpful — like a smart teammate.
 
-Hinglish reasoning examples:
-  ✓ "Aapke list me already hai — duplicate banana hai?"
-  ✓ "Audio me 'urgent' suna — high priority laga di."
-  ✓ "Image pe tick lagi thi — done mark kar diya."
-
-English reasoning examples:
   ✓ "Already in your pending list — duplicate?"
   ✓ "Heard 'urgent' in audio — set priority to high."
   ✓ "Image had a checkmark — marked it done."
-
-Bad reasoning (DO NOT produce):
-  ✗ "Cross-modal correspondence between audio and image classifies this as a confident completed action per Rule 8."  (verbose + rule-leak)
-  ✗ "Item semantically matches an existing task; classification follows from existence."  (academic)
-  ✗ "मरीज़ का काम पहले से है।"  (Devanagari)
+  ✗ "Aapke list me already hai — duplicate banana hai?" (Hinglish — never output)
+  ✗ "Cross-modal correspondence classifies this as completed per Rule 8." (rule-leak — never output)
+  ✗ "मरीज़ का काम पहले से है।" (Devanagari — never output)
 
 INTENT TYPES (use exact "type" values):
   "created"             — user wants to add a new task
@@ -140,7 +133,7 @@ RULES (in priority order):
 5. TARGET DATE UPDATE — moving an existing task to a different date
    When any modality clearly references an EXISTING pending task (matched by title) AND clearly specifies a new date, emit a "target_date_updated" action. Do NOT create a duplicate. Do NOT emit a recommendation.
 
-   ✓ Audio: "Sneha se baat karna hai Monday ko karna hai" + existing task "Sneha se baat karna hai"
+   ✓ Audio: "Sneha se baat karna hai Monday ko karna hai" + existing task "Talk to Sneha"
      → target_date_updated { source: "voice", taskId: <existing>, targetDate: "<resolved Monday>" }
    ✓ Text: "Move report submission to parso" + existing task "Submit report"
      → target_date_updated { source: "text", taskId: <existing>, targetDate: "<parso>" }
@@ -162,7 +155,7 @@ RULES (in priority order):
    - Don't guess.
 
 8. CREATED ACTIONS — title (mandatory) + notes (optional)
-   - "title": concise summary, max ~80 chars, Hinglish/English Roman
+   - "title": concise English, proper nouns stay as-is
    - "notes": OPTIONAL longer context (max ~500 chars) — include only if a modality offered detail beyond the title (the why, the when, who it's for, dependencies)
 
 9. PRIORITY
@@ -175,9 +168,9 @@ RULES (in priority order):
     Checkmark (✓), strikethrough, "DONE" / "OK" / "✔" next to an item → match the pending task by title → emit "completed". If no pending task matches, → recommendation with completed=true.
 
 11. RECOMMENDATION TITLE FORMAT — and optional "targetDate"
-    The "title" field on a recommendation is what the task will be CALLED when the user taps ADD. It MUST be a clean, declarative task name — NOT a question, NOT a "Shift X to Y?" prompt, NOT a sentence with quoted strings inside it.
+    The "title" field on a recommendation is what the task will be CALLED when the user taps ADD. It MUST be a clean, declarative English task name — NOT a question, NOT a "Shift X to Y?" prompt, NOT a sentence with quoted strings inside it.
 
-    ✓ "Sneha se baat karna hai"
+    ✓ "Talk to Sneha"
     ✓ "Submit quarterly report"
     ✓ "Ward 12 round (Monday)"
     ✗ "Shift 'Sneha se baat karna hai' to tomorrow?"

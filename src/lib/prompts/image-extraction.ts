@@ -5,9 +5,9 @@
  * guidance for photos of paper task sheets, whiteboards, sticky notes, and
  * printed lists.
  *
- * The model returns structured JSON; the shape is constrained at the API
- * layer via `responseJsonSchema` (see src/lib/vertex.ts). The prompt's job
- * is to convey intent semantics, not output structure.
+ * Language policy: extractedText stays as Romanized verbatim (no Devanagari)
+ * since it is a verbatim record of what is on the image. All other output
+ * fields (title, notes, reasoning) must be in English.
  */
 
 import type { PendingTaskContext } from "./voice-intent.js";
@@ -48,38 +48,32 @@ Hindi uses the same word for past and future of the same word — disambiguate v
 INPUT LANGUAGE
 The image text may be in English, Hindi (Devanagari handwriting), or Hinglish (Roman script mixed). Treat all three as equivalent. Match Hindi/Hinglish items to English task titles semantically — e.g., "रिपोर्ट खत्म करनी है" should match a pending task titled "Finish quarterly report".
 
-OUTPUT LANGUAGE FOR extractedText / title / notes
-Hinglish or English in Roman script. NEVER use Devanagari in output, even if the source image is in Devanagari — transliterate naturally to Roman (the way an Indian English speaker would type it in WhatsApp).
-  ✓ "Patient ke rounds complete karne hain"
-  ✓ "Buy milk on the way home"
-  ✗ "मरीज़ के राउंड पूरे करने हैं"   (Devanagari — never output)
-  ✗ "Patient rounds need to be completed"  (formal-English translation — preserve original flavor)
+OUTPUT LANGUAGE FOR extractedText
+Transcribe the image content verbatim into "extractedText" in Hinglish/English Roman script — exactly what is written on the image, with no Devanagari. Do NOT translate to English; preserve original phrasing.
+  ✓ "Patient ke rounds complete karne hain"   (verbatim Romanized — correct)
+  ✗ "Complete patient rounds"                 (translated — not verbatim)
+  ✗ "मरीज़ के राउंड पूरे करने हैं"            (Devanagari — never output)
 
-OUTPUT LANGUAGE FOR reasoning — MIRROR THE IMAGE TEXT (USER-FACING)
-This reasoning is shown DIRECTLY to the user on the recommendation card. Talk to them like their P.A.:
+OUTPUT LANGUAGE FOR title / notes — ALWAYS ENGLISH
+Convert the image item's intent into clear, simple English. Never use Devanagari or Hinglish in titles/notes.
+Proper nouns (names like Sneha, Dr. Mehta; place names like Ward 12, OT) stay as-is.
+  ✓ "Complete patient rounds"
+  ✓ "Buy milk on the way home"
+  ✗ "Patient ke rounds complete karne hain" (Hinglish — never output)
+  ✗ "मरीज़ के राउंड पूरे करने हैं"          (Devanagari — never output)
+
+OUTPUT LANGUAGE FOR reasoning — ALWAYS ENGLISH
+This reasoning is shown DIRECTLY to the user on the recommendation card. Always write in clear, simple English regardless of the image's language.
 
   - LENGTH: 1 short sentence, ≤ 20 words. No preamble. No rule references.
-  - LANGUAGE: detect the dominant language of the image's text content and reply in THE SAME language.
-      * Image is pure English text       → English reasoning
-      * Image is Hindi / Hinglish / mixed → Hinglish reasoning (Roman script, NEVER Devanagari)
-      * Image has no text (only marks/check)→ Hinglish (product default)
+  - LANGUAGE: English only. Never Devanagari. Never Hinglish.
   - TONE: warm, direct, helpful — like a smart teammate.
 
-Hinglish reasoning examples (good):
-  ✓ "Aapke list me already hai — duplicate banana hai?"
-  ✓ "Star bana tha — high priority laga di."
-  ✓ "Tick lagaya tha — task done mark kiya."
-
-English reasoning examples (good):
   ✓ "Already in your list — duplicate?"
   ✓ "Starred on the page — set priority to high."
   ✓ "Checkmarked — marked it done."
-
-Bad reasoning (DO NOT produce):
-  ✗ "Item semantically matches an existing task in the pending list per Rule 2 (existing-task actions require exact ID match), so flagging for review rather than creating a duplicate."  (verbose + rule-leak)
-  ✗ "Visual cue: strikethrough indicates completion classification."  (academic)
-  ✗ "मरीज़ का काम पहले से है।"  (Devanagari)
-  ✗ "This task already exists in the user's pending task list, which suggests duplication."  (English when image was Hinglish)
+  ✗ "Aapke list me already hai — duplicate banana hai?" (Hinglish — never output)
+  ✗ "Item semantically matches an existing task per Rule 2..."  (rule-leak — never output)
 
 INTENT TYPES (use exact "type" values):
   "created"             — a new task the user wants to add (most items on a fresh handwritten list)
@@ -114,7 +108,7 @@ RULES (in priority order):
    - Don't guess from layout alone (e.g., column position) unless a date label is clearly visible.
 
 6. CREATED ACTIONS — title (mandatory) + notes (optional)
-   - "title" is concise (max ~80 chars, Hinglish/English).
+   - "title" is concise English (clear intent). Proper nouns stay as-is.
    - "notes" is OPTIONAL longer context (max ~500 chars) — only if the image item has detail beyond the title (sub-bullets, dates, names, dependencies). Don't pad with restated title.
 
 7. VISUAL PRIORITY CUES
@@ -130,12 +124,12 @@ RULES (in priority order):
      - Word "DONE", "OK", "✔" near the item
 
 8. EXTRACTED TEXT
-   Transcribe the image content into "extractedText" — every visible task item, in the spatial order they appear (top to bottom, left to right when multi-column). Hinglish/English Roman script. Don't summarize. Don't invent items that aren't in the image.
+   Transcribe the image content into "extractedText" — every visible task item, in the spatial order they appear (top to bottom, left to right when multi-column). Use Hinglish/English Roman script; no Devanagari. Don't summarize. Don't invent items that aren't in the image.
 
 9. RECOMMENDATION TITLE FORMAT — and optional "targetDate"
-   The "title" field on a recommendation is what the task will be CALLED when the user taps ADD. It MUST be a clean, declarative task name — NOT a question, NOT a "Shift X to Y?" prompt, NOT a sentence with quoted strings inside it.
+   The "title" field on a recommendation is what the task will be CALLED when the user taps ADD. It MUST be a clean, declarative English task name — NOT a question, NOT a "Shift X to Y?" prompt, NOT a sentence with quoted strings inside it.
 
-   ✓ "Sneha se baat karna hai"
+   ✓ "Talk to Sneha"
    ✓ "Submit quarterly report"
    ✓ "Ward 12 round (Monday)"
    ✗ "Shift 'Sneha se baat karna hai' to tomorrow?"
