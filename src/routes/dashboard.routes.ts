@@ -15,6 +15,7 @@ dashboardRouter.get("/groups", dashboardController.groups);
 dashboardRouter.post("/groups", dashboardController.createGroup);
 dashboardRouter.patch("/groups/:id", dashboardController.updateGroup);
 dashboardRouter.post("/groups/:id/members", dashboardController.addGroupMember);
+dashboardRouter.patch("/groups/:id/members/:userId", dashboardController.patchGroupMember);
 dashboardRouter.delete("/groups/:id/members/:userId", dashboardController.removeGroupMember);
 dashboardRouter.get("/people", dashboardController.people);
 dashboardRouter.get("/consistency", dashboardController.consistency);
@@ -24,3 +25,14 @@ dashboardRouter.get("/activity", dashboardController.activity);
 dashboardRouter.get("/morning-brief", dashboardController.morningBrief);
 dashboardRouter.post("/morning-brief/refresh", dashboardController.refreshMorningBrief);
 dashboardRouter.post("/reminders", dashboardController.createReminder);
+
+// Sprint 18 — Phase 2 endpoints.
+dashboardRouter.get("/summary-cards", dashboardController.summaryCards);
+dashboardRouter.get("/performers", dashboardController.performers);
+dashboardRouter.get("/analytics/plan-vs-closure", dashboardController.planVsClosure);
+dashboardRouter.get("/analytics/groups", dashboardController.groupAnalytics);
+dashboardRouter.get("/team/tree", dashboardController.teamTree);
+dashboardRouter.get("/directory", dashboardController.directory);
+// :id-tail routes must come AFTER any literal /people segments above.
+dashboardRouter.get("/people/:id", dashboardController.personProfile);
+dashboardRouter.get("/people/:id/day", dashboardController.personDay);

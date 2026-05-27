@@ -1,4 +1,4 @@
-import { ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
+import { AppError, ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
 import {
   buildDayClosureFeedbackPrompt,
   type CurrentTaskState,
@@ -14,27 +14,27 @@ import {
   dayClosureFeedbackSchema,
   type DayClosureFeedback,
 } from "../schemas/day-closure-feedback.schema.js";
-import type { GetDayClosureQuery, SubmitDayClosureInput } from "../schemas/day-closure.schema.js";
+import type {
+  GetDayClosureQuery,
+  ReviewDayClosureInput,
+  SubmitDayClosureInput,
+} from "../schemas/day-closure.schema.js";
 import type { TaskSnapshotEntry } from "../schemas/day-plan.schema.js";
-import type { VoiceRecommendation } from "../schemas/voice-intent.schema.js";
 import { parseDateString, todayInUserTz } from "../utils/date.js";
 
-import type { PersistedAiAction } from "./action-dispatch.service.js";
 import { userIdsInScope } from "./dashboard-rollup.service.js";
-import * as voiceIntentService from "./voice-intent.service.js";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata";
 
-export interface DayClosureAudioInput {
-  buffer: Buffer;
-  mimeType: string;
-}
-
-export interface DayClosureSubmitResult {
+/**
+ * Sprint 17 review response. The FE rehydrates the review screen from this
+ * shape — keep it stable; the same shape is also what `findByUserAndDate`
+ * returns when called from the resume path (`GET /day-closure?date=`).
+ */
+export interface DayClosureReviewResult {
   dayClosureId: string;
-  transcript: string;
-  taskUpdates: PersistedAiAction[];
-  recommendedNewTasks: VoiceRecommendation[];
+  status: "draft" | "submitted";
+  reviewedAt: Date | null;
   aiFeedback: DayClosureFeedback;
 }
 
@@ -58,72 +58,97 @@ function currentTaskStateFrom(
   }));
 }
 
-export async function submitDayClosure(
+/**
+ * Sprint 17 — Phase 2. Generate AI feedback ONCE for the user's day and
+ * persist it as a `status='draft'` row. Idempotent: re-calling on an
+ * existing draft returns the stored payload without re-invoking Vertex (D6).
+ */
+export async function reviewDayClosure(
   user: AuthenticatedUser,
-  audio: DayClosureAudioInput | undefined,
-  input: SubmitDayClosureInput,
-): Promise<DayClosureSubmitResult> {
+  input: ReviewDayClosureInput,
+): Promise<DayClosureReviewResult> {
   const date = input.date ? parseDateString(input.date) : todayInUserTz(DEFAULT_TIMEZONE);
   const dateLabel = formatDateYMD(date);
 
-  // Closure is meaningless without a baseline plan to compare against.
+  // A closure is meaningless without a baseline plan to compare against.
   const plan = await dayPlanRepo.findByUserAndDate(user.id, date);
   if (!plan) {
     throw new ConflictError(
       "NO_DAY_PLAN_FOR_DATE",
-      `No day plan exists for ${dateLabel}. Submit a plan before closing the day.`,
+      `No day plan exists for ${dateLabel}. Submit a plan before reviewing the day.`,
     );
   }
 
   const existing = await dayClosureRepo.findByUserAndDate(user.id, date);
   if (existing) {
+    if (existing.status === "submitted") {
+      throw new ConflictError(
+        "DAY_CLOSURE_ALREADY_SUBMITTED",
+        `Day closure for ${dateLabel} is already submitted.`,
+      );
+    }
+    // status === 'draft' → AI already ran; return the stored review verbatim.
+    // Explicit re-run is deferred per D6; the seam exists (re-running review
+    // would mean deleting the draft first), but we don't expose it yet.
+    return {
+      dayClosureId: existing.id,
+      status: "draft",
+      reviewedAt: existing.reviewedAt,
+      aiFeedback: existing.aiFeedback as DayClosureFeedback,
+    };
+  }
+
+  const currentTasks = await taskRepo.listByDate(user.id, date);
+  const aiFeedback = await generateStructured({
+    model: GEMINI_FLASH_MODEL,
+    prompt: buildDayClosureFeedbackPrompt({
+      planSnapshot: snapshotJsonToTyped(plan.taskSnapshot),
+      currentTaskStates: currentTaskStateFrom(currentTasks),
+      // No narrative at review time — the user types their excuses
+      // AFTER reading the AI's feedback, and they get persisted on submit.
+      closureNarrative: "",
+    }),
+    schema: dayClosureFeedbackSchema,
+  });
+
+  const draft = await dayClosureRepo.createDraft({ userId: user.id, date, aiFeedback });
+  return {
+    dayClosureId: draft.id,
+    status: "draft",
+    reviewedAt: draft.reviewedAt,
+    aiFeedback,
+  };
+}
+
+/**
+ * Sprint 17 — Phase 3. Finalize an existing draft. Refuses if no draft
+ * exists (the FE must call Review first) or if the date is already
+ * submitted. Does NOT regenerate `aiFeedback` — that snapshot was taken at
+ * review time and is intentionally point-in-time (D3).
+ */
+export async function submitDayClosure(
+  user: AuthenticatedUser,
+  input: SubmitDayClosureInput,
+): Promise<dayClosureRepo.DayClosureSubmission> {
+  const date = input.date ? parseDateString(input.date) : todayInUserTz(DEFAULT_TIMEZONE);
+  const dateLabel = formatDateYMD(date);
+
+  const existing = await dayClosureRepo.findByUserAndDate(user.id, date);
+  if (!existing) {
+    throw new AppError(
+      "DAY_CLOSURE_REVIEW_REQUIRED",
+      400,
+      `Run review before submitting closure for ${dateLabel}.`,
+    );
+  }
+  if (existing.status === "submitted") {
     throw new ConflictError(
       "DAY_CLOSURE_ALREADY_SUBMITTED",
       `Day closure for ${dateLabel} is already submitted.`,
     );
   }
 
-  // Sprint 10: audio is optional. When the user submits an EOD with text-only
-  // commentary (the FE multi-recording flow already ran each clip through
-  // `/voice/process`, so all task updates have already landed), skip voice
-  // intent entirely — there's nothing left to transcribe or dispatch.
-  const voiceResult: Pick<
-    voiceIntentService.VoiceProcessResult,
-    "transcript" | "actions" | "recommendations"
-  > = audio
-    ? await voiceIntentService.processVoice(user, audio)
-    : { transcript: "", actions: [], recommendations: [] };
-
-  const currentTasks = await taskRepo.listByDate(user.id, date);
-  const closureNarrative = [input.commentary, voiceResult.transcript]
-    .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
-    .join("\n\n");
-
-  const aiFeedback = await generateStructured({
-    model: GEMINI_FLASH_MODEL,
-    prompt: buildDayClosureFeedbackPrompt({
-      planSnapshot: snapshotJsonToTyped(plan.taskSnapshot),
-      currentTaskStates: currentTaskStateFrom(currentTasks),
-      closureNarrative,
-    }),
-    schema: dayClosureFeedbackSchema,
-  });
-
-  const persisted = await dayClosureRepo.create({
-    userId: user.id,
-    date,
-    commentary: input.commentary ?? "",
-    aiFeedback,
-    mediaIds: [],
-  });
-
-  return {
-    dayClosureId: persisted.id,
-    transcript: voiceResult.transcript,
-    taskUpdates: voiceResult.actions,
-    recommendedNewTasks: voiceResult.recommendations,
-    aiFeedback,
-  };
+  return dayClosureRepo.markSubmitted(existing.id, { commentary: input.commentary ?? "" });
 }
 
 export function getDayClosure(
@@ -131,6 +156,8 @@ export function getDayClosure(
   query: GetDayClosureQuery,
 ): Promise<dayClosureRepo.DayClosureSubmission | null> {
   if (query.date === undefined) return Promise.resolve(null);
+  // Sprint 17 Phase 5 intentional unfiltered read: the FE needs to be able
+  // to resume an in-progress review, so a draft row must come back here.
   return dayClosureRepo.findByUserAndDate(user.id, parseDateString(query.date));
 }
 
@@ -145,6 +172,8 @@ export async function listUnreviewedClosures(
 ): Promise<dayClosureRepo.DayClosureSubmission[]> {
   const scope = await resolveScope(reviewer);
   const userIds = await userIdsInScope(scope);
+  // `listForUsersInDateRange` filters to status='submitted' (Sprint 17
+  // Phase 5), so drafts can never appear on a manager's unreviewed list.
   const submissions = await dayClosureRepo.listForUsersInDateRange(
     userIds,
     dateDaysAgo(7),

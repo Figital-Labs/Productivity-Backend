@@ -1,16 +1,35 @@
 /**
- * Sprint 16A demo seed. Creates/updates the KIMS Hospital demo org with:
- * - 18 users (1 admin, 6 managers, 11 staff)
- * - matrix manager/report edges from Sprint 11 plus Ops/GRE additions
- * - departments, context groups, active memberships
- * - 8 days of backdated task/submission history with deliberate gaps
+ * Sprint 18 demo seed. Clean three-tier hierarchy + a second blank org + a
+ * root super-admin. Replaces the older flat-ish KIMS seed.
  *
- * Run idempotently:
+ *   KIMS Hospital
+ *   └─ Dr. Iyer (Director / admin, level 800)
+ *       ├─ Dr. Sharma — Medicine HOD
+ *       │   ├─ Sneha — Ward 12 Lead
+ *       │   │   ├─ Amit
+ *       │   │   └─ Suresh
+ *       │   └─ Anita — ICU-A Lead
+ *       │       └─ Kavita
+ *       ├─ Dr. Mehta — Surgery HOD
+ *       │   └─ Vikram — OT-2 Lead
+ *       │       └─ Manoj
+ *       └─ Rahul — Nursing HOD
+ *           └─ Deepika — Night Shift Lead
+ *               ├─ Priya
+ *               └─ Pooja
  *
- *   npx tsx prisma/seed-hierarchy.ts
+ *   Demo Clinic (blank — bootstrapped via root for prospect tests)
  *
- * Login credentials for every seeded user: password = "kims2026"
- * Emails follow the pattern `<firstname>@kims.demo` (lowercase, no dot).
+ *   + one cross-org root (`root@platform.demo`, isSuperAdmin=true)
+ *
+ * Backdated history covers the last 7 days AND fills today so the dashboard's
+ * "today" KPIs aren't zero. Performers/laggards are intentional:
+ *   - top performers: Anita, Manoj (8/8 perfect, high task throughput)
+ *   - laggards: Suresh (missed plans), Pooja (missed closures)
+ *
+ * Login credentials: every KIMS user's password is "kims2026". Root is "root2026".
+ *
+ * Run:  npx tsx prisma/seed-hierarchy.ts
  */
 
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -20,9 +39,11 @@ import { hashPassword } from "../src/lib/password.js";
 
 const DATABASE_URL =
   process.env["DATABASE_URL"] ?? "postgresql://postgres:postgres@localhost:5432/tasklist";
-const ORG_ID = "kims-hospital";
-const PASSWORD_PLAIN = "kims2026";
-const SEED_SOURCE_PREFIX = "sprint16a-seed";
+const KIMS_ORG_ID = "kims-hospital";
+const DEMO_CLINIC_ORG_ID = "demo-clinic";
+const SEED_SOURCE_PREFIX = "sprint18-seed";
+const KIMS_PASSWORD = "kims2026";
+const ROOT_PASSWORD = "root2026";
 const MEMBERSHIP_VALID_FROM = new Date("2026-05-15T00:00:00.000Z");
 
 const adapter = new PrismaPg({ connectionString: DATABASE_URL });
@@ -34,197 +55,261 @@ interface SeedUser {
   email: string;
   name: string;
   role: SeedRole;
+  level: number;
+  canManageUsers: boolean;
+  isSuperAdmin?: boolean;
+  orgId: string;
+  password: string;
 }
+
+const USERS: SeedUser[] = [
+  // Root (cross-org)
+  {
+    email: "root@platform.demo",
+    name: "Platform Root",
+    role: "admin",
+    level: 900,
+    canManageUsers: true,
+    isSuperAdmin: true,
+    orgId: KIMS_ORG_ID,
+    password: ROOT_PASSWORD,
+  },
+  // KIMS — Director
+  {
+    email: "iyer@kims.demo",
+    name: "Dr. Iyer (Medical Director)",
+    role: "admin",
+    level: 800,
+    canManageUsers: true,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+  // KIMS — Department Heads
+  {
+    email: "sharma@kims.demo",
+    name: "Dr. Sharma (Medicine HOD)",
+    role: "manager",
+    level: 400,
+    canManageUsers: true,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+  {
+    email: "mehta@kims.demo",
+    name: "Dr. Mehta (Surgery HOD)",
+    role: "manager",
+    level: 400,
+    canManageUsers: true,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+  {
+    email: "rahul@kims.demo",
+    name: "Rahul (Nursing HOD)",
+    role: "manager",
+    level: 400,
+    canManageUsers: true,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+  // KIMS — Group Leads
+  {
+    email: "sneha@kims.demo",
+    name: "Sister Sneha (Ward 12 Lead)",
+    role: "manager",
+    level: 300,
+    canManageUsers: true,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+  {
+    email: "anita@kims.demo",
+    name: "Sister Anita (ICU-A Lead)",
+    role: "manager",
+    level: 300,
+    canManageUsers: true,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+  {
+    email: "vikram@kims.demo",
+    name: "Vikram (OT-2 Lead)",
+    role: "manager",
+    level: 300,
+    canManageUsers: true,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+  {
+    email: "deepika@kims.demo",
+    name: "Sister Deepika (Night Shift Lead)",
+    role: "manager",
+    level: 300,
+    canManageUsers: true,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+  // KIMS — Staff
+  {
+    email: "amit@kims.demo",
+    name: "Ward Boy Amit",
+    role: "staff",
+    level: 100,
+    canManageUsers: false,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+  {
+    email: "suresh@kims.demo",
+    name: "Compounder Suresh",
+    role: "staff",
+    level: 100,
+    canManageUsers: false,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+  {
+    email: "kavita@kims.demo",
+    name: "Sister Kavita",
+    role: "staff",
+    level: 100,
+    canManageUsers: false,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+  {
+    email: "manoj@kims.demo",
+    name: "Ward Boy Manoj",
+    role: "staff",
+    level: 100,
+    canManageUsers: false,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+  {
+    email: "priya@kims.demo",
+    name: "Sister Priya",
+    role: "staff",
+    level: 100,
+    canManageUsers: false,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+  {
+    email: "pooja@kims.demo",
+    name: "Pooja (IPD Coordinator)",
+    role: "staff",
+    level: 100,
+    canManageUsers: false,
+    orgId: KIMS_ORG_ID,
+    password: KIMS_PASSWORD,
+  },
+];
+
+// Reporting chain: report -> [its direct manager]. Single-line so the Manage
+// tree reads as a clean hierarchy (director -> dept head -> group lead -> staff,
+// recursive). Dept-head access to staff tasks does NOT depend on a direct edge:
+// `canAccessTask` grants a dept head access to anyone in their department's
+// groups (see src/utils/auth.ts), so the scoped drill-down still works.
+const HIERARCHY: Record<string, string[]> = {
+  "sharma@kims.demo": ["iyer@kims.demo"],
+  "mehta@kims.demo": ["iyer@kims.demo"],
+  "rahul@kims.demo": ["iyer@kims.demo"],
+  "sneha@kims.demo": ["sharma@kims.demo"],
+  "anita@kims.demo": ["sharma@kims.demo"],
+  "vikram@kims.demo": ["mehta@kims.demo"],
+  "deepika@kims.demo": ["rahul@kims.demo"],
+  "amit@kims.demo": ["sneha@kims.demo"],
+  "suresh@kims.demo": ["sneha@kims.demo"],
+  "kavita@kims.demo": ["anita@kims.demo"],
+  "manoj@kims.demo": ["vikram@kims.demo"],
+  "priya@kims.demo": ["deepika@kims.demo"],
+  "pooja@kims.demo": ["deepika@kims.demo"],
+};
 
 interface DepartmentSeed {
   name: string;
   headEmail: string;
 }
+const DEPARTMENTS: DepartmentSeed[] = [
+  { name: "Medicine", headEmail: "sharma@kims.demo" },
+  { name: "Surgery", headEmail: "mehta@kims.demo" },
+  { name: "Nursing", headEmail: "rahul@kims.demo" },
+];
 
 interface GroupSeed {
   key: string;
   name: string;
   kind: string;
   departmentName: string;
+  leadEmail: string;
+  memberEmails: string[];
 }
-
-interface MembershipSeed {
-  email: string;
-  groupKey: string;
-  isLead?: boolean;
-  canManage?: boolean;
-  reason?: string;
-}
-
-const USERS: SeedUser[] = [
-  { email: "iyer@kims.demo", name: "Dr. Iyer (Medical Director)", role: "admin" },
-  { email: "sharma@kims.demo", name: "Dr. Sharma (Consultant, Medicine)", role: "manager" },
-  { email: "mehta@kims.demo", name: "Dr. Mehta (Consultant, Surgery)", role: "manager" },
-  { email: "rahul@kims.demo", name: "Rahul (Head Nurse, Ward 12)", role: "manager" },
-  { email: "priya@kims.demo", name: "Priya (Head Nurse, OT)", role: "manager" },
-  { email: "krishnan@kims.demo", name: "Dr. Krishnan (Operations HOD)", role: "manager" },
-  { email: "reddy@kims.demo", name: "Ms. Reddy (GRE Head)", role: "manager" },
-  { email: "sneha@kims.demo", name: "Sister Sneha", role: "staff" },
-  { email: "amit@kims.demo", name: "Ward Boy Amit", role: "staff" },
-  { email: "anita@kims.demo", name: "Sister Anita", role: "staff" },
-  { email: "vikram@kims.demo", name: "Ward Boy Vikram", role: "staff" },
-  { email: "deepika@kims.demo", name: "Sister Deepika", role: "staff" },
-  { email: "kavita@kims.demo", name: "Sister Kavita", role: "staff" },
-  { email: "suresh@kims.demo", name: "Compounder Suresh", role: "staff" },
-  { email: "manoj@kims.demo", name: "Ward Boy Manoj", role: "staff" },
-  { email: "ravi@kims.demo", name: "Ravi (Operations Attendant)", role: "staff" },
-  { email: "anjali@kims.demo", name: "Anjali (GRE Front Desk)", role: "staff" },
-  { email: "pooja@kims.demo", name: "Pooja (IPD Coordinator)", role: "staff" },
-];
-
-// Matrix relationships: assignee -> list of manager emails.
-// Existing Sprint 11 edges stay intact; new Ops/GRE edges are appended.
-const HIERARCHY: Record<string, string[]> = {
-  "sneha@kims.demo": ["sharma@kims.demo", "rahul@kims.demo"],
-  "amit@kims.demo": ["sharma@kims.demo", "rahul@kims.demo"],
-  "anita@kims.demo": ["mehta@kims.demo", "priya@kims.demo"],
-  "vikram@kims.demo": ["mehta@kims.demo", "priya@kims.demo"],
-  "deepika@kims.demo": ["rahul@kims.demo"],
-  "kavita@kims.demo": ["priya@kims.demo"],
-  "suresh@kims.demo": ["sharma@kims.demo"],
-  "manoj@kims.demo": ["mehta@kims.demo"],
-  "ravi@kims.demo": ["krishnan@kims.demo"],
-  "anjali@kims.demo": ["reddy@kims.demo"],
-  "pooja@kims.demo": ["reddy@kims.demo"],
-};
-
-const DEPARTMENTS: DepartmentSeed[] = [
-  { name: "Medicine", headEmail: "sharma@kims.demo" },
-  { name: "Surgery", headEmail: "mehta@kims.demo" },
-  { name: "Nursing", headEmail: "rahul@kims.demo" },
-  { name: "Operations", headEmail: "krishnan@kims.demo" },
-  { name: "GRE", headEmail: "reddy@kims.demo" },
-];
-
 const GROUPS: GroupSeed[] = [
   {
     key: "ward-12",
     name: "Ward 12 - General Medicine",
     kind: "ward",
     departmentName: "Medicine",
+    leadEmail: "sneha@kims.demo",
+    memberEmails: ["amit@kims.demo", "suresh@kims.demo"],
   },
-  { key: "icu-a", name: "ICU-A - Critical Care", kind: "ward", departmentName: "Medicine" },
-  { key: "ot-2", name: "OT-2 - Ortho", kind: "ot", departmentName: "Surgery" },
   {
-    key: "night-shift-ward-12",
+    key: "icu-a",
+    name: "ICU-A - Critical Care",
+    kind: "ward",
+    departmentName: "Medicine",
+    leadEmail: "anita@kims.demo",
+    memberEmails: ["kavita@kims.demo"],
+  },
+  {
+    key: "ot-2",
+    name: "OT-2 - Orthopedic Theatre",
+    kind: "ot",
+    departmentName: "Surgery",
+    leadEmail: "vikram@kims.demo",
+    memberEmails: ["manoj@kims.demo"],
+  },
+  {
+    key: "night-shift",
     name: "Night Shift - Ward 12",
     kind: "shift",
     departmentName: "Nursing",
+    leadEmail: "deepika@kims.demo",
+    memberEmails: ["priya@kims.demo", "pooja@kims.demo"],
   },
-  { key: "ot-nursing-pool", name: "OT Nursing Pool", kind: "ot", departmentName: "Nursing" },
-  { key: "gre-front-desk", name: "GRE Front Desk", kind: "project", departmentName: "GRE" },
-  {
-    key: "ops-maintenance",
-    name: "Ops Maintenance",
-    kind: "project",
-    departmentName: "Operations",
-  },
-];
-
-const MEMBERSHIPS: MembershipSeed[] = [
-  { email: "iyer@kims.demo", groupKey: "ward-12", canManage: true, reason: "executive oversight" },
-  { email: "iyer@kims.demo", groupKey: "icu-a", canManage: true, reason: "executive oversight" },
-  { email: "iyer@kims.demo", groupKey: "ot-2", canManage: true, reason: "executive oversight" },
-  {
-    email: "iyer@kims.demo",
-    groupKey: "night-shift-ward-12",
-    canManage: true,
-    reason: "executive oversight",
-  },
-  {
-    email: "iyer@kims.demo",
-    groupKey: "ot-nursing-pool",
-    canManage: true,
-    reason: "executive oversight",
-  },
-  {
-    email: "iyer@kims.demo",
-    groupKey: "gre-front-desk",
-    canManage: true,
-    reason: "executive oversight",
-  },
-  {
-    email: "iyer@kims.demo",
-    groupKey: "ops-maintenance",
-    canManage: true,
-    reason: "executive oversight",
-  },
-  { email: "sharma@kims.demo", groupKey: "icu-a", isLead: true, canManage: true },
-  { email: "sharma@kims.demo", groupKey: "ward-12" },
-  { email: "mehta@kims.demo", groupKey: "ot-2", canManage: true },
-  { email: "rahul@kims.demo", groupKey: "ward-12", isLead: true, canManage: true },
-  { email: "rahul@kims.demo", groupKey: "night-shift-ward-12", isLead: true, canManage: true },
-  { email: "priya@kims.demo", groupKey: "ot-2", isLead: true, canManage: true },
-  { email: "priya@kims.demo", groupKey: "ot-nursing-pool", isLead: true, canManage: true },
-  { email: "krishnan@kims.demo", groupKey: "ops-maintenance", isLead: true, canManage: true },
-  { email: "reddy@kims.demo", groupKey: "gre-front-desk", isLead: true, canManage: true },
-  { email: "sneha@kims.demo", groupKey: "ward-12" },
-  { email: "sneha@kims.demo", groupKey: "night-shift-ward-12" },
-  { email: "amit@kims.demo", groupKey: "ward-12" },
-  { email: "anita@kims.demo", groupKey: "ot-2" },
-  { email: "anita@kims.demo", groupKey: "ot-nursing-pool" },
-  { email: "vikram@kims.demo", groupKey: "ot-2" },
-  { email: "deepika@kims.demo", groupKey: "ward-12" },
-  { email: "kavita@kims.demo", groupKey: "ot-nursing-pool" },
-  { email: "suresh@kims.demo", groupKey: "icu-a" },
-  { email: "manoj@kims.demo", groupKey: "ot-2" },
-  { email: "ravi@kims.demo", groupKey: "ops-maintenance" },
-  { email: "anjali@kims.demo", groupKey: "gre-front-desk" },
-  { email: "pooja@kims.demo", groupKey: "gre-front-desk" },
 ];
 
 const TASK_TITLES = [
-  "Review morning patient chart",
-  "Coordinate discharge paperwork",
-  "Follow up on lab report",
-  "Medication round verification",
-  "Prepare shift handover notes",
-  "Update family counselling status",
-  "Check equipment readiness",
-  "Confirm consultant callback",
+  "Morning patient round",
+  "Update vitals chart",
+  "Coordinate discharge",
+  "Lab report follow-up",
+  "Medication round",
+  "Shift handover notes",
+  "Family counselling",
+  "Equipment readiness check",
 ];
 
-const PLAN_GAPS: Record<string, number[]> = {
-  "sneha@kims.demo": [2, 4],
-  "amit@kims.demo": [3],
-  "suresh@kims.demo": [5],
+/**
+ * Per-user completion archetype over the 7-day history window. Drives both
+ * task completion rates and submission-gap patterns so Top/Worst panels and
+ * People-to-Watch have non-trivial differentiation.
+ */
+type Archetype = "top" | "steady" | "middle" | "laggard-plans" | "laggard-closures";
+
+const ARCHETYPES: Record<string, Archetype> = {
+  "anita@kims.demo": "top",
+  "manoj@kims.demo": "top",
+  "sneha@kims.demo": "steady",
+  "vikram@kims.demo": "steady",
+  "deepika@kims.demo": "steady",
+  "kavita@kims.demo": "steady",
+  "priya@kims.demo": "steady",
+  "amit@kims.demo": "middle",
+  "suresh@kims.demo": "laggard-plans",
+  "pooja@kims.demo": "laggard-closures",
 };
-
-const CLOSURE_GAPS: Record<string, number[]> = {
-  "amit@kims.demo": [3, 6],
-  "vikram@kims.demo": [1, 3],
-  "manoj@kims.demo": [4],
-  "pooja@kims.demo": [2],
-};
-
-const MEETING_TITLES = ["Daily bed-flow huddle", "OT turnaround review", "GRE escalation sync"];
-
-function roleToLevel(role: SeedRole): number {
-  if (role === "admin") return 800;
-  if (role === "manager") return 400;
-  return 100;
-}
-
-function userId(email: string, byEmail: Map<string, string>): string {
-  const id = byEmail.get(email);
-  if (!id) {
-    throw new Error(`Missing seeded user ${email}`);
-  }
-  return id;
-}
-
-function groupId(key: string, byKey: Map<string, string>): string {
-  const id = byKey.get(key);
-  if (!id) {
-    throw new Error(`Missing seeded group ${key}`);
-  }
-  return id;
-}
 
 function dateOnlyUtc(source: Date): Date {
   return new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth(), source.getUTCDate()));
@@ -240,93 +325,125 @@ function dateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function shouldSkip(
-  gaps: Record<string, number[]>,
-  email: string,
+/**
+ * For a given archetype + day offset (0=today, 1=yesterday, ...), decide
+ * whether the user submitted plan/closure that day, and the task-completion
+ * rate for tasks targeted at that day. Deterministic so re-runs produce the
+ * same demo.
+ */
+function dayBehavior(
+  archetype: Archetype,
   offsetFromToday: number,
-): boolean {
-  return gaps[email]?.includes(offsetFromToday) ?? false;
+): { submittedPlan: boolean; submittedClosure: boolean; completionRate: number } {
+  switch (archetype) {
+    case "top":
+      return { submittedPlan: true, submittedClosure: true, completionRate: 0.95 };
+    case "steady":
+      return {
+        submittedPlan: offsetFromToday !== 4,
+        submittedClosure: offsetFromToday !== 5,
+        completionRate: 0.8,
+      };
+    case "middle":
+      return {
+        submittedPlan: offsetFromToday !== 3 && offsetFromToday !== 6,
+        submittedClosure: offsetFromToday !== 2,
+        completionRate: 0.65,
+      };
+    case "laggard-plans":
+      // Missed plans on offsets 1, 3 — clear signal in 5-day Watch panel.
+      return {
+        submittedPlan: offsetFromToday !== 1 && offsetFromToday !== 3,
+        submittedClosure: offsetFromToday !== 6,
+        completionRate: 0.55,
+      };
+    case "laggard-closures":
+      return {
+        submittedPlan: offsetFromToday !== 5,
+        submittedClosure: offsetFromToday !== 1 && offsetFromToday !== 2 && offsetFromToday !== 4,
+        completionRate: 0.5,
+      };
+  }
 }
 
-async function cleanSprint16ASeedData(historyDates: Date[]): Promise<void> {
-  await prisma.submissionReview.deleteMany({
-    where: { reviewer: { orgId: ORG_ID } },
+async function ensureOrgs(): Promise<void> {
+  await prisma.organization.upsert({
+    where: { id: KIMS_ORG_ID },
+    create: { id: KIMS_ORG_ID, name: "KIMS Hospital" },
+    update: { name: "KIMS Hospital" },
   });
-  await prisma.reminderIntent.deleteMany({
-    where: { target: { orgId: ORG_ID } },
+  await prisma.organization.upsert({
+    where: { id: DEMO_CLINIC_ORG_ID },
+    create: { id: DEMO_CLINIC_ORG_ID, name: "Demo Clinic" },
+    update: { name: "Demo Clinic" },
   });
-  await prisma.morningBriefCache.deleteMany({
-    where: { manager: { orgId: ORG_ID } },
-  });
-  await prisma.task.deleteMany({
-    where: {
-      assignee: { orgId: ORG_ID },
-      sourceId: { startsWith: SEED_SOURCE_PREFIX },
-    },
-  });
-  await prisma.voiceInteraction.deleteMany({
-    where: {
-      user: { orgId: ORG_ID },
-      transcript: { startsWith: "[Sprint16A seed]" },
-    },
-  });
-  await prisma.textInteraction.deleteMany({
-    where: {
-      user: { orgId: ORG_ID },
-      inputText: { startsWith: "[Sprint16A seed]" },
-    },
-  });
-  await prisma.imageExtraction.deleteMany({
-    where: {
-      user: { orgId: ORG_ID },
-      extractedText: { startsWith: "[Sprint16A seed]" },
-    },
-  });
-  await prisma.meeting.deleteMany({
-    where: {
-      user: { orgId: ORG_ID },
-      title: { in: MEETING_TITLES },
-    },
-  });
-  await prisma.dayPlanSubmission.deleteMany({
-    where: {
-      user: { orgId: ORG_ID },
-      date: { in: historyDates },
-    },
-  });
-  await prisma.dayClosureSubmission.deleteMany({
-    where: {
-      user: { orgId: ORG_ID },
-      date: { in: historyDates },
-    },
-  });
-  await prisma.groupMembership.deleteMany({
-    where: { group: { orgId: ORG_ID } },
-  });
-  await prisma.contextGroup.deleteMany({ where: { orgId: ORG_ID } });
-  await prisma.department.deleteMany({ where: { orgId: ORG_ID } });
 }
 
-async function upsertUsers(passwordHash: string): Promise<Map<string, string>> {
+async function clearPriorSeedState(): Promise<void> {
+  // Full reset of the KIMS demo org so the seed is deterministic regardless of
+  // what prior seeds (sprint16a etc.) left behind. KIMS is a demo org — a
+  // clean slate is correct; we are not preserving any real user data here.
+  // Order matters: child rows before parents (FK constraints).
+  const orgFilter = { orgId: KIMS_ORG_ID };
+  await prisma.submissionReview.deleteMany({ where: { reviewer: orgFilter } });
+  await prisma.reminderIntent.deleteMany({ where: { target: orgFilter } });
+  await prisma.morningBriefCache.deleteMany({ where: { manager: orgFilter } });
+  await prisma.task.deleteMany({ where: { assignee: orgFilter } });
+  await prisma.taskMedia.deleteMany({ where: { task: { assignee: orgFilter } } });
+  await prisma.dayPlanSubmission.deleteMany({ where: { user: orgFilter } });
+  await prisma.dayClosureSubmission.deleteMany({ where: { user: orgFilter } });
+  await prisma.voiceInteraction.deleteMany({ where: { user: orgFilter } });
+  await prisma.textInteraction.deleteMany({ where: { user: orgFilter } });
+  await prisma.imageExtraction.deleteMany({ where: { user: orgFilter } });
+  await prisma.unifiedInteraction.deleteMany({ where: { user: orgFilter } });
+  await prisma.note.deleteMany({ where: { user: orgFilter } });
+  await prisma.alert.deleteMany({ where: { user: orgFilter } });
+  await prisma.holiday.deleteMany({ where: { user: orgFilter } });
+  await prisma.meeting.deleteMany({ where: { user: orgFilter } });
+  await prisma.groupMembership.deleteMany({ where: { group: orgFilter } });
+  await prisma.contextGroup.deleteMany({ where: orgFilter });
+  // Drop department head pointers before deleting departments isn't needed
+  // (headId is SET NULL on user delete), but departments must go before any
+  // user delete that they reference via headId.
+  await prisma.department.deleteMany({ where: orgFilter });
+  // Detach all hierarchy edges between KIMS users so re-runs are clean.
+  await prisma.$executeRaw`
+    DELETE FROM "_UserHierarchy"
+    WHERE "A" IN (SELECT id FROM "User" WHERE "orgId" = ${KIMS_ORG_ID})
+       OR "B" IN (SELECT id FROM "User" WHERE "orgId" = ${KIMS_ORG_ID})
+  `;
+  // Remove legacy/orphan KIMS users that aren't part of the new seed roster
+  // (e.g. Krishnan/Reddy from the old sprint16 seed), so the directory is clean.
+  const keepEmails = USERS.map((u) => u.email);
+  await prisma.user.deleteMany({
+    where: { orgId: KIMS_ORG_ID, email: { notIn: keepEmails } },
+  });
+}
+
+async function upsertUsers(): Promise<Map<string, string>> {
+  // Cache hashes so we don't call bcrypt 15× during a single seed run.
+  const hashByPassword = new Map<string, string>();
   const byEmail = new Map<string, string>();
   for (const user of USERS) {
+    let passwordHash = hashByPassword.get(user.password);
+    if (!passwordHash) {
+      passwordHash = await hashPassword(user.password);
+      hashByPassword.set(user.password, passwordHash);
+    }
+    const data = {
+      email: user.email,
+      name: user.name,
+      passwordHash,
+      role: user.role,
+      level: user.level,
+      canManageUsers: user.canManageUsers,
+      isSuperAdmin: user.isSuperAdmin ?? false,
+      orgId: user.orgId,
+    };
     const row = await prisma.user.upsert({
       where: { email: user.email },
-      create: {
-        email: user.email,
-        name: user.name,
-        passwordHash,
-        role: user.role,
-        level: roleToLevel(user.role),
-        orgId: ORG_ID,
-      },
-      update: {
-        name: user.name,
-        passwordHash,
-        role: user.role,
-        level: roleToLevel(user.role),
-        orgId: ORG_ID,
-      },
+      create: data,
+      update: data,
     });
     byEmail.set(user.email, row.id);
   }
@@ -334,134 +451,154 @@ async function upsertUsers(passwordHash: string): Promise<Map<string, string>> {
 }
 
 async function wireHierarchy(byEmail: Map<string, string>): Promise<void> {
-  for (const [staffEmail, managerEmails] of Object.entries(HIERARCHY)) {
-    const staffId = userId(staffEmail, byEmail);
+  // Use Prisma's `reports: { connect }` rather than a raw `_UserHierarchy`
+  // INSERT so the implicit-m2m column orientation is handled by Prisma. This
+  // guarantees `manager.reports` returns the manager's reports (the raw INSERT
+  // approach is easy to get backwards on a self-relation).
+  for (const [reportEmail, managerEmails] of Object.entries(HIERARCHY)) {
+    const reportId = byEmail.get(reportEmail);
+    if (!reportId) throw new Error(`Missing seeded user ${reportEmail}`);
     for (const managerEmail of managerEmails) {
-      const managerId = userId(managerEmail, byEmail);
-      await prisma.$executeRaw`
-        INSERT INTO "_UserHierarchy" ("A", "B")
-        VALUES (${managerId}, ${staffId})
-        ON CONFLICT DO NOTHING
-      `;
+      const managerId = byEmail.get(managerEmail);
+      if (!managerId) throw new Error(`Missing seeded manager ${managerEmail}`);
+      await prisma.user.update({
+        where: { id: managerId },
+        data: { reports: { connect: { id: reportId } } },
+      });
     }
   }
 }
 
 async function createDepartments(byEmail: Map<string, string>): Promise<Map<string, string>> {
   const byName = new Map<string, string>();
-  for (const department of DEPARTMENTS) {
+  for (const dept of DEPARTMENTS) {
+    const headId = byEmail.get(dept.headEmail);
+    if (!headId) throw new Error(`Missing head ${dept.headEmail}`);
     const row = await prisma.department.create({
-      data: {
-        orgId: ORG_ID,
-        name: department.name,
-        headId: userId(department.headEmail, byEmail),
-      },
+      data: { orgId: KIMS_ORG_ID, name: dept.name, headId },
     });
-    byName.set(department.name, row.id);
+    byName.set(dept.name, row.id);
   }
   return byName;
 }
 
-async function createGroups(departmentByName: Map<string, string>): Promise<Map<string, string>> {
-  const byKey = new Map<string, string>();
+async function createGroupsAndMemberships(
+  byEmail: Map<string, string>,
+  departmentByName: Map<string, string>,
+): Promise<void> {
   for (const group of GROUPS) {
     const departmentId = departmentByName.get(group.departmentName);
-    if (!departmentId) {
-      throw new Error(`Missing department ${group.departmentName}`);
-    }
-    const row = await prisma.contextGroup.create({
-      data: {
-        orgId: ORG_ID,
-        departmentId,
-        name: group.name,
-        kind: group.kind,
-      },
+    if (!departmentId) throw new Error(`Missing department ${group.departmentName}`);
+    const groupRow = await prisma.contextGroup.create({
+      data: { orgId: KIMS_ORG_ID, departmentId, name: group.name, kind: group.kind },
     });
-    byKey.set(group.key, row.id);
-  }
-  return byKey;
-}
-
-async function createMemberships(
-  byEmail: Map<string, string>,
-  groupByKey: Map<string, string>,
-): Promise<void> {
-  for (const membership of MEMBERSHIPS) {
+    const leadId = byEmail.get(group.leadEmail);
+    if (!leadId) throw new Error(`Missing lead ${group.leadEmail}`);
     await prisma.groupMembership.create({
       data: {
-        userId: userId(membership.email, byEmail),
-        groupId: groupId(membership.groupKey, groupByKey),
+        userId: leadId,
+        groupId: groupRow.id,
+        isLead: true,
+        canManage: true,
         validFrom: MEMBERSHIP_VALID_FROM,
         validTo: null,
-        isLead: membership.isLead ?? false,
-        canManage: membership.canManage ?? false,
-        reason: membership.reason,
       },
     });
+    for (const memberEmail of group.memberEmails) {
+      const memberId = byEmail.get(memberEmail);
+      if (!memberId) throw new Error(`Missing member ${memberEmail}`);
+      await prisma.groupMembership.create({
+        data: {
+          userId: memberId,
+          groupId: groupRow.id,
+          isLead: false,
+          canManage: false,
+          validFrom: MEMBERSHIP_VALID_FROM,
+          validTo: null,
+        },
+      });
+    }
   }
 }
 
-async function createHistoricalTasksAndSubmissions(
-  byEmail: Map<string, string>,
-  historyDates: Date[],
-): Promise<void> {
-  const activeUsers = USERS.filter((user) => user.role !== "admin");
+async function createHistory(byEmail: Map<string, string>, historyDates: Date[]): Promise<void> {
+  // historyDates is 8 entries: 7 backdated + today (last entry).
+  const kimsActiveUsers = USERS.filter(
+    (u) => u.orgId === KIMS_ORG_ID && !u.isSuperAdmin && u.email !== "iyer@kims.demo",
+  );
 
-  for (const [userIndex, user] of activeUsers.entries()) {
-    const assigneeId = userId(user.email, byEmail);
+  for (const [userIndex, user] of kimsActiveUsers.entries()) {
+    const userId = byEmail.get(user.email);
+    if (!userId) throw new Error(`Missing user ${user.email}`);
+    const archetype = ARCHETYPES[user.email] ?? "middle";
+
     for (const [dayIndex, date] of historyDates.entries()) {
-      const offsetFromToday = historyDates.length - dayIndex;
-      const plannedTitles: string[] = [];
-      const taskCount = 3 + ((userIndex + dayIndex) % 4);
+      const offsetFromToday = historyDates.length - 1 - dayIndex;
+      const behavior = dayBehavior(archetype, offsetFromToday);
+      const taskCount = 3 + ((userIndex + dayIndex) % 3); // 3-5 tasks
 
+      const plannedTitles: string[] = [];
       for (let taskIndex = 0; taskIndex < taskCount; taskIndex += 1) {
-        const stateIndex = (userIndex + dayIndex + taskIndex) % 20;
-        const isPartial = stateIndex >= 14 && stateIndex <= 16;
-        const completed = stateIndex < 14;
-        const title = `${TASK_TITLES[(userIndex + taskIndex) % TASK_TITLES.length]} - ${user.name}`;
+        const firstName = user.name.split(" ")[1] ?? user.email;
+        const title = `${TASK_TITLES[(userIndex + taskIndex) % TASK_TITLES.length] ?? "Task"} - ${firstName}`;
         plannedTitles.push(title);
+
+        // Deterministic per-task completion: hash of indices vs the
+        // archetype's completion rate. For today we attenuate so some tasks
+        // remain open and KPIs show meaningful "in progress" numbers.
+        const completionRate =
+          offsetFromToday === 0 ? behavior.completionRate * 0.65 : behavior.completionRate;
+        const seed = (userIndex * 31 + dayIndex * 17 + taskIndex * 7) % 100;
+        const isCompleted = seed < Math.round(completionRate * 100);
+        const isPartial = !isCompleted && seed % 7 === 3;
 
         await prisma.task.create({
           data: {
-            assigneeId,
-            creatorId: assigneeId,
+            assigneeId: userId,
+            creatorId: userId,
             title,
             targetDate: date,
             priority: taskIndex === 0 && dayIndex % 3 === 0 ? "high" : null,
-            completed,
+            completed: isCompleted,
             isPartial,
-            notes: isPartial ? "Partial progress logged during closure." : null,
+            notes: isPartial ? "Partial progress logged." : null,
             sourceType: ["manual", "voice", "text"][(userIndex + taskIndex) % 3] ?? "manual",
-            sourceId: `${SEED_SOURCE_PREFIX}:${dateKey(date)}:${user.email}:${taskIndex}`,
-            createdAt: addUtcDays(date, 0),
-            updatedAt: addUtcDays(date, 0),
+            sourceId: `${SEED_SOURCE_PREFIX}:${dateKey(date)}:${user.email}:${taskIndex.toString()}`,
+            createdAt: date,
+            updatedAt: date,
           },
         });
       }
 
-      if (!shouldSkip(PLAN_GAPS, user.email, offsetFromToday)) {
+      // Day plan submission. For today: ~70% of users submit (drives the
+      // hero "9/14 plans" reading). For past days: follow archetype.
+      const submitPlan = offsetFromToday === 0 ? userIndex % 10 < 7 : behavior.submittedPlan;
+      if (submitPlan) {
         await prisma.dayPlanSubmission.create({
           data: {
-            userId: assigneeId,
+            userId,
             date,
-            submittedAt: addUtcDays(date, 0),
+            submittedAt: date,
             taskSnapshot: plannedTitles.map((title) => ({ title, targetDate: dateKey(date) })),
           },
         });
       }
 
-      if (!shouldSkip(CLOSURE_GAPS, user.email, offsetFromToday)) {
+      // Day closure submission. For today: ~50% submit. For past days: archetype.
+      const submitClosure = offsetFromToday === 0 ? userIndex % 10 < 5 : behavior.submittedClosure;
+      if (submitClosure) {
         await prisma.dayClosureSubmission.create({
           data: {
-            userId: assigneeId,
+            userId,
             date,
-            submittedAt: addUtcDays(date, 0),
-            commentary: "Routine closure submitted for dashboard seed.",
+            status: "submitted",
+            submittedAt: date,
+            commentary: "Routine closure submitted.",
             aiFeedback: {
-              summary: "Aaj ka kaam mostly track par raha.",
+              summary: "Today's work tracked well overall.",
               achievements: plannedTitles.slice(0, 2),
               missed: plannedTitles.slice(-1),
-              tips: ["Kal ke liye handover thoda earlier close karo."],
+              tips: ["Tomorrow: confirm shift handover earlier."],
             },
             mediaIds: [],
           },
@@ -471,94 +608,47 @@ async function createHistoricalTasksAndSubmissions(
   }
 }
 
-async function createSeedInteractions(
-  byEmail: Map<string, string>,
-  historyDates: Date[],
-): Promise<void> {
-  const rows = [
-    { email: "sharma@kims.demo", date: historyDates[0], kind: "voice" },
-    { email: "rahul@kims.demo", date: historyDates[1], kind: "text" },
-    { email: "priya@kims.demo", date: historyDates[2], kind: "image" },
-    { email: "mehta@kims.demo", date: historyDates[3], kind: "voice" },
-    { email: "krishnan@kims.demo", date: historyDates[4], kind: "text" },
-    { email: "reddy@kims.demo", date: historyDates[5], kind: "image" },
-    { email: "rahul@kims.demo", date: historyDates[6], kind: "voice" },
-    { email: "sharma@kims.demo", date: historyDates[7], kind: "text" },
-  ] as const;
-
-  for (const row of rows) {
-    const user = userId(row.email, byEmail);
-    if (row.kind === "voice") {
-      await prisma.voiceInteraction.create({
-        data: {
-          userId: user,
-          transcript: `[Sprint16A seed] ${row.email} delegated morning follow-ups.`,
-          actions: [],
-          recommendations: [],
-          createdAt: row.date,
-        },
-      });
-    } else if (row.kind === "text") {
-      await prisma.textInteraction.create({
-        data: {
-          userId: user,
-          inputText: `[Sprint16A seed] Summarise pending ward priorities.`,
-          actions: [],
-          recommendations: [],
-          createdAt: row.date,
-        },
-      });
-    } else {
-      await prisma.imageExtraction.create({
-        data: {
-          userId: user,
-          extractedText: `[Sprint16A seed] Uploaded handwritten shift list.`,
-          actions: [],
-          recommendations: [],
-          createdAt: row.date,
-        },
-      });
-    }
-  }
-}
-
-async function createSeedMeetings(byEmail: Map<string, string>, today: Date): Promise<void> {
+async function createDemoMeetings(byEmail: Map<string, string>, today: Date): Promise<void> {
   const meetings = [
     {
-      title: MEETING_TITLES[0] ?? "Daily bed-flow huddle",
-      owner: "iyer@kims.demo",
-      offset: -1,
-      attendees: ["sharma@kims.demo", "rahul@kims.demo", "krishnan@kims.demo"],
-      summary: "Bed flow reviewed, Medicine and Nursing handover aligned.",
+      title: `${SEED_SOURCE_PREFIX} - Daily bed-flow huddle`,
+      ownerEmail: "iyer@kims.demo",
+      offset: 0,
+      attendeeEmails: ["sharma@kims.demo", "rahul@kims.demo", "mehta@kims.demo"],
+      summary: "Bed flow reviewed; Medicine and Surgery handover aligned for the day.",
     },
     {
-      title: MEETING_TITLES[1] ?? "OT turnaround review",
-      owner: "mehta@kims.demo",
-      offset: -2,
-      attendees: ["priya@kims.demo", "anita@kims.demo", "manoj@kims.demo"],
+      title: `${SEED_SOURCE_PREFIX} - OT turnaround review`,
+      ownerEmail: "mehta@kims.demo",
+      offset: -1,
+      attendeeEmails: ["vikram@kims.demo", "manoj@kims.demo"],
       summary: "OT-2 turnaround blockers identified and assigned.",
     },
     {
-      title: MEETING_TITLES[2] ?? "GRE escalation sync",
-      owner: "reddy@kims.demo",
-      offset: -3,
-      attendees: ["anjali@kims.demo", "pooja@kims.demo"],
-      summary: "Front desk escalations grouped by discharge and billing queues.",
+      title: `${SEED_SOURCE_PREFIX} - Night shift handover`,
+      ownerEmail: "rahul@kims.demo",
+      offset: -2,
+      attendeeEmails: ["deepika@kims.demo", "priya@kims.demo", "pooja@kims.demo"],
+      summary: "Night-to-day handover, two patient escalations flagged.",
     },
   ];
-
-  for (const meeting of meetings) {
-    const scheduledAt = addUtcDays(today, meeting.offset);
+  for (const m of meetings) {
+    const ownerId = byEmail.get(m.ownerEmail);
+    if (!ownerId) continue;
+    const scheduledAt = addUtcDays(today, m.offset);
+    const attendeeIds = m.attendeeEmails
+      .map((email) => byEmail.get(email))
+      .filter((id): id is string => id !== undefined);
     await prisma.meeting.create({
       data: {
-        userId: userId(meeting.owner, byEmail),
-        title: meeting.title,
+        userId: ownerId,
+        title: m.title,
         scheduledAt,
         type: "huddle",
-        attendeeIds: meeting.attendees.map((email) => userId(email, byEmail)),
-        agenda: "Dashboard seed meeting for management rollup.",
-        notes: "Seeded notes for processed meeting activity.",
-        summary: meeting.summary,
+        attendeeIds,
+        agenda: "Sprint 18 seeded demo meeting.",
+        notes: "Seeded notes.",
+        summary: m.summary,
         actions: [],
         recommendations: [],
         processedAt: scheduledAt,
@@ -569,40 +659,46 @@ async function createSeedMeetings(byEmail: Map<string, string>, today: Date): Pr
 
 async function main(): Promise<void> {
   const today = dateOnlyUtc(new Date());
-  const historyDates = Array.from({ length: 8 }, (_, index) => addUtcDays(today, -(8 - index)));
-  const passwordHash = await hashPassword(PASSWORD_PLAIN);
+  // 8 dates: 7 backdated + today (inclusive, today as last entry).
+  const historyDates = Array.from({ length: 8 }, (_, i) => addUtcDays(today, -(7 - i)));
 
-  await cleanSprint16ASeedData(historyDates);
+  await ensureOrgs();
+  await clearPriorSeedState();
 
-  const byEmail = await upsertUsers(passwordHash);
+  const byEmail = await upsertUsers();
   await wireHierarchy(byEmail);
-  const departmentByName = await createDepartments(byEmail);
-  const groupByKey = await createGroups(departmentByName);
-  await createMemberships(byEmail, groupByKey);
-  await createHistoricalTasksAndSubmissions(byEmail, historyDates);
-  await createSeedInteractions(byEmail, historyDates);
-  await createSeedMeetings(byEmail, today);
+  const deptByName = await createDepartments(byEmail);
+  await createGroupsAndMemberships(byEmail, deptByName);
+  await createHistory(byEmail, historyDates);
+  await createDemoMeetings(byEmail, today);
 
-  const [userCount, departmentCount, groupCount, membershipCount, taskCount] = await Promise.all([
-    prisma.user.count({ where: { orgId: ORG_ID } }),
-    prisma.department.count({ where: { orgId: ORG_ID } }),
-    prisma.contextGroup.count({ where: { orgId: ORG_ID } }),
-    prisma.groupMembership.count({ where: { group: { orgId: ORG_ID }, validTo: null } }),
-    prisma.task.count({
-      where: { assignee: { orgId: ORG_ID }, sourceId: { startsWith: SEED_SOURCE_PREFIX } },
-    }),
-  ]);
+  const [userCount, deptCount, groupCount, memCount, taskCount, planToday, closureToday] =
+    await Promise.all([
+      prisma.user.count({ where: { orgId: KIMS_ORG_ID } }),
+      prisma.department.count({ where: { orgId: KIMS_ORG_ID } }),
+      prisma.contextGroup.count({ where: { orgId: KIMS_ORG_ID } }),
+      prisma.groupMembership.count({ where: { group: { orgId: KIMS_ORG_ID }, validTo: null } }),
+      prisma.task.count({
+        where: { assignee: { orgId: KIMS_ORG_ID }, sourceId: { startsWith: SEED_SOURCE_PREFIX } },
+      }),
+      prisma.dayPlanSubmission.count({ where: { user: { orgId: KIMS_ORG_ID }, date: today } }),
+      prisma.dayClosureSubmission.count({
+        where: { user: { orgId: KIMS_ORG_ID }, date: today, status: "submitted" },
+      }),
+    ]);
 
-  console.log(`Seeded org "${ORG_ID}"`);
-  console.log(`  Users: ${userCount} (password for every seeded user: ${PASSWORD_PLAIN})`);
-  console.log(`  Departments: ${departmentCount}`);
-  console.log(`  Context groups: ${groupCount}`);
-  console.log(`  Active group memberships: ${membershipCount}`);
-  console.log(`  Sprint 16A historical tasks: ${taskCount}`);
-  console.log("  Matrix examples:");
-  console.log("    sharma@kims.demo manages: Sneha, Amit, Suresh");
-  console.log("    rahul@kims.demo manages: Sneha, Amit, Deepika");
-  console.log("    reddy@kims.demo manages: Anjali, Pooja");
+  console.log("Sprint 18 seed complete.");
+  console.log(`  KIMS users:           ${userCount.toString()}  (password: ${KIMS_PASSWORD})`);
+  console.log(`  Departments:          ${deptCount.toString()}`);
+  console.log(`  Context groups:       ${groupCount.toString()}`);
+  console.log(`  Active memberships:   ${memCount.toString()}`);
+  console.log(`  Historical tasks:     ${taskCount.toString()}  (8d incl. today)`);
+  console.log(`  Plans submitted today:    ${planToday.toString()}/${(userCount - 1).toString()}`);
+  console.log(
+    `  Closures submitted today: ${closureToday.toString()}/${(userCount - 1).toString()}`,
+  );
+  console.log(`  Second org "demo-clinic" seeded blank.`);
+  console.log(`  Root: root@platform.demo  (password: ${ROOT_PASSWORD})`);
 }
 
 main()

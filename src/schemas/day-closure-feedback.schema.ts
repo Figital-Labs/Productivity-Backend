@@ -1,10 +1,10 @@
 import { z } from "zod";
 
 /**
- * The structured AI feedback shape for `POST /day-closure/submit`. Persisted
- * as JSON into `DayClosureSubmission.aiFeedback`. Enforced at decode time via
- * Vertex's `responseJsonSchema` AND re-validated on receipt (per the same
- * UpstreamError contract used by voice + image flows).
+ * The structured AI feedback shape for `POST /day-closure/review` (Sprint 17).
+ * Persisted as JSON into `DayClosureSubmission.aiFeedback`. Enforced at decode
+ * time via Vertex's `responseJsonSchema` AND re-validated on receipt (per the
+ * same UpstreamError contract used by voice + image flows).
  *
  * Output language is Hinglish/English Roman script everywhere — the prompt
  * carries the rule.

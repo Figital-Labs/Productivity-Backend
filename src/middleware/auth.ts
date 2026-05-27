@@ -14,6 +14,12 @@ export interface AuthenticatedUser {
    * and by the team-directory builder for AI delegation prompts.
    */
   reportIds: Set<string>;
+  /** Sprint 18: cross-org root. Bypasses org-boundary checks. */
+  isSuperAdmin: boolean;
+  /** Sprint 18 (L8): grantable permission to create/manage other users. */
+  canManageUsers: boolean;
+  /** Sprint 18 (L7): the actor's level — primary input to the hierarchy ceiling check. */
+  level: number;
 }
 
 declare global {
@@ -40,23 +46,31 @@ export async function jwtAuth(req: Request, _res: Response, next: NextFunction):
 
   const payload = verifyAuthToken(token);
 
-  // Sprint 11: managers + admins get a precomputed reportIds set. Staff get
-  // an empty set so canAccessTask's `user.reportIds.has(...)` check is
-  // type-stable and trivially false for them.
-  let reportIds = new Set<string>();
-  if (payload.role === "manager" || payload.role === "admin") {
-    const row = await prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: { reports: { select: { id: true } } },
-    });
-    reportIds = new Set((row?.reports ?? []).map((r) => r.id));
+  // Sprint 11 + 18: one DB read fetches reportIds (for matrix access checks)
+  // plus the L7/L8 flags (level, isSuperAdmin, canManageUsers) — middleware-
+  // resolved so downstream code never re-queries them. Staff still get an
+  // empty reportIds set for type-stable use in canAccessTask.
+  const userRow = await prisma.user.findUnique({
+    where: { id: payload.sub },
+    select: {
+      level: true,
+      isSuperAdmin: true,
+      canManageUsers: true,
+      reports: { select: { id: true } },
+    },
+  });
+  if (!userRow) {
+    throw new UnauthorizedError("User no longer exists");
   }
 
   req.user = {
     id: payload.sub,
     orgId: payload.orgId,
     role: payload.role,
-    reportIds,
+    reportIds: new Set(userRow.reports.map((r) => r.id)),
+    isSuperAdmin: userRow.isSuperAdmin,
+    canManageUsers: userRow.canManageUsers,
+    level: userRow.level,
   };
   next();
 }

@@ -14,11 +14,17 @@ import {
   dashboardMeetingsQuerySchema,
   dashboardPeopleQuerySchema,
   dashboardTrendsQuerySchema,
+  patchGroupMemberSchema,
+  performersQuerySchema,
+  personDayQuerySchema,
+  planVsClosureQuerySchema,
   updateDepartmentSchema,
   updateGroupSchema,
 } from "../schemas/dashboard.schema.js";
 import * as activityService from "../services/activity.service.js";
+import * as analyticsService from "../services/dashboard-analytics.service.js";
 import * as dashboardService from "../services/dashboard-rollup.service.js";
+import * as treeService from "../services/dashboard-tree.service.js";
 import * as morningBriefService from "../services/morning-brief.service.js";
 
 async function requireResolvedScope(req: Request) {
@@ -132,4 +138,53 @@ export async function removeGroupMember(req: Request, res: Response): Promise<vo
 export async function createReminder(req: Request, res: Response): Promise<void> {
   const input = createReminderSchema.parse(req.body);
   res.json(await dashboardService.createReminder(req.user, await requireResolvedScope(req), input));
+}
+
+// ─── Sprint 18 — Phase 2 handlers ──────────────────────────────────────────
+
+export async function teamTree(req: Request, res: Response): Promise<void> {
+  res.json({ nodes: await treeService.getTeamTree(req.user) });
+}
+
+export async function directory(req: Request, res: Response): Promise<void> {
+  res.json(await treeService.getDirectory(req.user));
+}
+
+export async function personProfile(req: Request, res: Response): Promise<void> {
+  const { id } = idParamSchema.parse(req.params);
+  res.json(await treeService.getPersonProfile(req.user, id));
+}
+
+export async function personDay(req: Request, res: Response): Promise<void> {
+  const { id } = idParamSchema.parse(req.params);
+  const query = personDayQuerySchema.parse(req.query);
+  res.json(await treeService.getPersonDay(req.user, id, query.date));
+}
+
+export async function performers(req: Request, res: Response): Promise<void> {
+  const query = performersQuerySchema.parse(req.query);
+  const scope = await requireResolvedScope(req);
+  res.json(await analyticsService.getPerformers(scope, query.metric, query.days, query.limit));
+}
+
+export async function planVsClosure(req: Request, res: Response): Promise<void> {
+  const query = planVsClosureQuerySchema.parse(req.query);
+  const scope = await requireResolvedScope(req);
+  const days = query.range === "30d" ? 30 : 7;
+  res.json(await analyticsService.getPlanVsClosure(scope, days));
+}
+
+export async function summaryCards(req: Request, res: Response): Promise<void> {
+  res.json(await analyticsService.getSummaryCards(await requireResolvedScope(req)));
+}
+
+export async function groupAnalytics(req: Request, res: Response): Promise<void> {
+  res.json({ rows: await analyticsService.getGroupAnalytics(await requireResolvedScope(req)) });
+}
+
+export async function patchGroupMember(req: Request, res: Response): Promise<void> {
+  const { id } = idParamSchema.parse(req.params);
+  const userId = String(req.params["userId"] ?? "");
+  const input = patchGroupMemberSchema.parse(req.body);
+  res.json(await dashboardService.patchGroupMember(req.user, id, userId, input));
 }

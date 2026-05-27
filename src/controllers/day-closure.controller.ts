@@ -1,25 +1,35 @@
 import type { Request, Response } from "express";
 
-import { AppError, ValidationError } from "../lib/errors.js";
+import { AppError } from "../lib/errors.js";
 import { idParamSchema } from "../schemas/common.js";
 import {
   getDayClosureQuerySchema,
+  reviewDayClosureInputSchema,
   submitDayClosureInputSchema,
 } from "../schemas/day-closure.schema.js";
 import * as dayClosureService from "../services/day-closure.service.js";
 
+/**
+ * Sprint 17 Phase 2 — `POST /day-closure/review`.
+ * Generates the AI feedback once, persists a draft, and returns it. Re-calling
+ * on an existing draft returns the same payload without hitting Vertex.
+ */
+export async function review(req: Request, res: Response): Promise<void> {
+  const input = reviewDayClosureInputSchema.parse(req.body);
+  const result = await dayClosureService.reviewDayClosure(req.user, input);
+  res.status(201).json(result);
+}
+
+/**
+ * Sprint 17 Phase 3 — `POST /day-closure/submit`.
+ * Finalizes a draft created by `/review`. No audio, no voice processing —
+ * closure voice is excuse commentary only, transcribed via `POST /transcribe`
+ * before being sent here as part of `commentary`.
+ */
 export async function submit(req: Request, res: Response): Promise<void> {
   const input = submitDayClosureInputSchema.parse(req.body);
-  // Sprint 10: audio is now optional. The EOD multi-recording fix on the
-  // frontend processes each recording via `/voice/process` and accumulates
-  // transcripts into `commentary` — by the time we land here, the user has
-  // already submitted a text commentary. Either modality must be present.
-  if (!req.file && !input.commentary?.trim()) {
-    throw new ValidationError("Either audio or commentary is required");
-  }
-  const audio = req.file ? { buffer: req.file.buffer, mimeType: req.file.mimetype } : undefined;
-  const result = await dayClosureService.submitDayClosure(req.user, audio, input);
-  res.status(201).json(result);
+  const result = await dayClosureService.submitDayClosure(req.user, input);
+  res.status(200).json(result);
 }
 
 export async function get(req: Request, res: Response): Promise<void> {

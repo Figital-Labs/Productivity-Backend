@@ -1353,7 +1353,7 @@
           }
         },
         {
-          "name": "Submit Day Closure With Audio",
+          "name": "Review Day Closure (Sprint 17 phase 1)",
           "event": [
             {
               "listen": "test",
@@ -1371,7 +1371,53 @@
           ],
           "request": {
             "method": "POST",
-            "description": "Evening closeout. Requires a day plan for {{date}} and an audio file in the audio field. It can take 10-20 seconds because it makes AI calls.",
+            "description": "Sprint 17: phase 1 of two-phase day closure. Runs AI feedback once, persists a draft row, and returns it. Re-calling on an existing draft returns the same payload without invoking Vertex. Requires a day plan for {{date}}.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{date}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/day-closure/review"
+          }
+        },
+        {
+          "name": "Submit Day Closure (Sprint 17 phase 2)",
+          "request": {
+            "method": "POST",
+            "description": "Sprint 17: phase 2 of two-phase day closure. Finalizes a draft created by /review. No multipart, no audio. `commentary` is plain text (transcribe excuse voice clips via POST /transcribe first).",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{date}}\",\n  \"commentary\": \"Ward round late tha staff shortage ki wajah se. Discharge summaries kal subah pure karunga.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/day-closure/submit"
+          }
+        },
+        {
+          "name": "Transcribe Audio (Sprint 17)",
+          "request": {
+            "method": "POST",
+            "description": "Sprint 17: reusable verbatim audio → text. Single-file multipart on field `audio` (10 MB max). No DB write, no task dispatch. Output is Roman-script Hinglish/English even for Hindi audio.",
             "header": [
               {
                 "key": "Authorization",
@@ -1385,20 +1431,10 @@
                   "key": "audio",
                   "type": "file",
                   "src": []
-                },
-                {
-                  "key": "commentary",
-                  "value": "Patient rounds completed. Lab reports were partially done. Discharge summary is still pending.",
-                  "type": "text"
-                },
-                {
-                  "key": "date",
-                  "value": "{{date}}",
-                  "type": "text"
                 }
               ]
             },
-            "url": "{{baseUrl}}/api/v1/day-closure/submit"
+            "url": "{{baseUrl}}/api/v1/transcribe"
           }
         },
         {

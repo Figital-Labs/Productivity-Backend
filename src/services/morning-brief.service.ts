@@ -110,10 +110,12 @@ export async function getMorningBrief(
     schema: morningBriefResponseSchema,
   });
 
-  if (DEVANAGARI_RE.test(payload.summaryHinglish)) {
+  // Defensive: strip any non-Latin chars the model might emit despite the
+  // English-only instruction. The prompt is the primary control; this is a belt.
+  if (DEVANAGARI_RE.test(payload.summary)) {
     payload = {
       ...payload,
-      summaryHinglish: payload.summaryHinglish.replace(DEVANAGARI_RE, ""),
+      summary: payload.summary.replace(DEVANAGARI_RE, ""),
     };
   }
 
