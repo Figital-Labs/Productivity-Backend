@@ -364,6 +364,16 @@ export async function attachExistingUser(
   return toPublicTeamUser(target);
 }
 
+export async function detachReport(manager: AuthenticatedUser, reportId: string): Promise<void> {
+  if (!manager.reportIds.has(reportId)) {
+    throw new NotFoundError("Report", reportId);
+  }
+  await prisma.user.update({
+    where: { id: manager.id },
+    data: { reports: { disconnect: { id: reportId } } },
+  });
+}
+
 /**
  * Manager resets a report's password. Manager must manage the target user.
  */

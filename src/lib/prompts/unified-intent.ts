@@ -77,12 +77,32 @@ INPUT LANGUAGE
 Any modality may contain English, Hindi (Devanagari/Roman), or Hinglish (code-switched). Treat all equivalently. Match across modalities semantically — e.g., Hindi audio saying "report khatm kar di" can match an English task titled "Finish quarterly report".
 
 OUTPUT LANGUAGE FOR title / notes — ALWAYS ENGLISH
-Convert the user's intent into clear, simple English. Never use Devanagari or Hinglish in titles/notes.
-Proper nouns (names like Sneha, Dr. Mehta; place names like Ward 12, OT) stay as-is.
+Translate the user's intent into clear English. Never use Devanagari or Hinglish in titles/notes.
+
+NAMES AND HONORIFICS — preserve exactly as spoken/written across all modalities:
+  - Personal names (Sneha, Suresh, Shubh, Dr. Mehta) — always keep as-is.
+  - Indian honorifics WITH a name ("Sir", "Madam", "Bhai/Bhaiya", "Didi", "Ji") — preserve the FULL name+honorific pair. Never drop the name and keep only the honorific.
+    ✓ "Subh Sir ko project overview dena hai" → "Give project overview to Subh Sir"
+    ✗ "Project update to sir"  ← WRONG: dropped "Subh", changed "overview" to "update"
+    ✓ "Sneha didi ko report bhejna hai"       → "Send report to Sneha Didi"
+    ✗ "Send report to didi"   ← WRONG: dropped "Sneha"
+  - Place names (Ward 12, OT, ICU, Room 402) — keep as-is.
+
+TRANSLATE FAITHFULLY — use the user's words, not synonyms or summaries:
+  ✓ "project ka overview dena" → "Give project overview"  (not "project update")
+  ✓ "bill banana hai"          → "Prepare bill"           (not "billing")
+  ✓ "baat karna hai"           → "Talk to"                (not "meet" or "contact")
+
+PERSON-SPECIFIC TASKS — always include the person's name in the title:
+  ✓ "Subh Sir ko project ka overview dena hai" → "Give project overview to Subh Sir"
+  ✓ "Suresh ka bill banana hai"                → "Prepare Suresh's bill"
+  ✓ "Sneha se baat karna hai"                  → "Talk to Sneha"
+  ✓ "Dr. Mehta ko report bhejna hai"           → "Send report to Dr. Mehta"
+
   ✓ "Complete patient rounds"
-  ✓ "Buy milk on the way home"
-  ✗ "Patient ke rounds complete karne hain" (Hinglish — never output)
-  ✗ "मरीज़ के राउंड पूरे करने हैं"          (Devanagari — never output)
+  ✓ "Check Room 402"
+  ✗ "Patient ke rounds complete karne hain"   (Hinglish — never output)
+  ✗ "मरीज़ के राउंड पूरे करने हैं"            (Devanagari — never output)
 
 OUTPUT LANGUAGE FOR reasoning — ALWAYS ENGLISH
 This reasoning is shown DIRECTLY to the user on the recommendation card. Always write in clear, simple English regardless of what language the user used.
@@ -102,7 +122,11 @@ INTENT TYPES (use exact "type" values):
   "created"             — user wants to add a new task
   "priority_updated"    — user wants to change priority of an existing task
   "completed"           — user marks an existing task as done
-  "partial"             — user partially did an existing task (started but not finished)
+  "partial"             — user partially did an existing task (started but not finished).
+                          Hinglish cues: "half kiya", "adha hua", "50% ho gaya", "thoda kiya",
+                          "chal raha hai", "almost done", "thoda baki hai", "kaafi progress hui",
+                          "shuru kar diya", "bich mein hai".
+                          Image cues: "50%", "WIP", "in progress", partially-filled checkbox
   "target_date_updated" — user wants to MOVE an existing task to a different date
                           (not create a duplicate, not mark it done)
 

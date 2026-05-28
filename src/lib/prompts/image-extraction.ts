@@ -55,12 +55,32 @@ Transcribe the image content verbatim into "extractedText" in Hinglish/English R
   ✗ "मरीज़ के राउंड पूरे करने हैं"            (Devanagari — never output)
 
 OUTPUT LANGUAGE FOR title / notes — ALWAYS ENGLISH
-Convert the image item's intent into clear, simple English. Never use Devanagari or Hinglish in titles/notes.
-Proper nouns (names like Sneha, Dr. Mehta; place names like Ward 12, OT) stay as-is.
+Translate the image item's intent into clear English. Never use Devanagari or Hinglish in titles/notes.
+
+NAMES AND HONORIFICS — preserve exactly as written on the image:
+  - Personal names (Sneha, Suresh, Shubh, Dr. Mehta) — always keep as-is.
+  - Indian honorifics WITH a name ("Sir", "Madam", "Bhai/Bhaiya", "Didi", "Ji") — preserve the FULL name+honorific pair. Never drop the name and keep only the honorific.
+    ✓ "Subh Sir ko project overview dena hai" → "Give project overview to Subh Sir"
+    ✗ "Project update to sir"  ← WRONG: dropped "Subh", changed "overview" to "update"
+    ✓ "Sneha didi ko report bhejna hai"       → "Send report to Sneha Didi"
+    ✗ "Send report to didi"   ← WRONG: dropped "Sneha"
+  - Place names (Ward 12, OT, ICU, Room 402) — keep as-is.
+
+TRANSLATE FAITHFULLY — use the user's words, not synonyms or summaries:
+  ✓ "project ka overview dena" → "Give project overview"  (not "project update")
+  ✓ "bill banana hai"          → "Prepare bill"           (not "billing")
+  ✓ "baat karna hai"           → "Talk to"                (not "meet" or "contact")
+
+PERSON-SPECIFIC TASKS — always include the person's name in the title:
+  ✓ "Subh Sir ko project ka overview dena hai" → "Give project overview to Subh Sir"
+  ✓ "Suresh ka bill banana hai"                → "Prepare Suresh's bill"
+  ✓ "Sneha se baat karna hai"                  → "Talk to Sneha"
+  ✓ "Dr. Mehta ko report bhejna hai"           → "Send report to Dr. Mehta"
+
   ✓ "Complete patient rounds"
-  ✓ "Buy milk on the way home"
-  ✗ "Patient ke rounds complete karne hain" (Hinglish — never output)
-  ✗ "मरीज़ के राउंड पूरे करने हैं"          (Devanagari — never output)
+  ✓ "Check Room 402"
+  ✗ "Patient ke rounds complete karne hain"   (Hinglish — never output)
+  ✗ "मरीज़ के राउंड पूरे करने हैं"            (Devanagari — never output)
 
 OUTPUT LANGUAGE FOR reasoning — ALWAYS ENGLISH
 This reasoning is shown DIRECTLY to the user on the recommendation card. Always write in clear, simple English regardless of the image's language.
@@ -79,7 +99,9 @@ INTENT TYPES (use exact "type" values):
   "created"             — a new task the user wants to add (most items on a fresh handwritten list)
   "priority_updated"    — change priority of an existing task
   "completed"           — mark an existing task as done (checkmark / strikethrough / "DONE" next to an item matching the pending list)
-  "partial"             — partial completion of an existing task
+  "partial"             — partial completion of an existing task.
+                          Visual cues: "50%", "half done", fraction written next to item,
+                          "WIP", "in progress", "→ partial", partially-filled checkbox
   "target_date_updated" — MOVE an existing task to a different date (image shows an existing item with a new date written next to it / arrow to a new column / "→ Mon" annotation)
 
 RULES (in priority order):
