@@ -12,6 +12,7 @@ export default tseslint.config(
       "scripts/",
       "prisma/seed.ts",
       "prisma/seed-hierarchy.ts",
+      "prisma/seed-figital.ts",
       "prisma.config.ts",
       "eslint.config.js",
     ],
