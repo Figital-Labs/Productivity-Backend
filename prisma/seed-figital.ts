@@ -131,6 +131,14 @@ const USERS: SeedUser[] = [
     canManageUsers: false,
     password: "prafful-1234",
   },
+  {
+    email: "omkar@figitallabs.com",
+    name: "Omkar",
+    role: "staff",
+    level: 100,
+    canManageUsers: false,
+    password: "omkar-1234",
+  },
 ];
 
 // report → [its direct managers]
@@ -170,6 +178,12 @@ const HIERARCHY: Record<string, string[]> = {
     "revyant@figitallabs.com",
   ],
   "prafful@figitallabs.com": [
+    "ashok@figitallabs.com",
+    "subha@figitallabs.com",
+    "daksh@figitallabs.com",
+    "revyant@figitallabs.com",
+  ],
+  "omkar@figitallabs.com": [
     "ashok@figitallabs.com",
     "subha@figitallabs.com",
     "daksh@figitallabs.com",
