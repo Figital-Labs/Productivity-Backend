@@ -12,6 +12,7 @@ teamRouter.use(requireManager);
 
 // Rollup + drill-down
 teamRouter.get("/reports", teamController.listReports);
+teamRouter.delete("/reports/:id", teamController.detachReport);
 teamRouter.get("/reports/:id/tasks", teamController.getReportTasks);
 teamRouter.get("/reports/:id/submissions", teamController.getReportSubmissions);
 

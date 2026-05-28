@@ -9,6 +9,7 @@ import { dateStringSchema } from "./common.js";
  */
 export const reviewDayClosureInputSchema = z.object({
   date: dateStringSchema.optional(),
+  commentary: z.string().max(5000).optional(),
 });
 export type ReviewDayClosureInput = z.infer<typeof reviewDayClosureInputSchema>;
 

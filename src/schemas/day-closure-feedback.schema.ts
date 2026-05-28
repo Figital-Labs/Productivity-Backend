@@ -10,13 +10,19 @@ import { z } from "zod";
  * carries the rule.
  */
 export const dayClosureFeedbackSchema = z.object({
-  achievements: z.array(z.string()).describe("Completed tasks from the morning plan"),
-  missed: z
-    .array(z.string())
-    .describe("Planned tasks that weren't completed (and weren't partial either)"),
-  partial: z.array(z.string()).describe("Tasks the user started but didn't fully finish"),
-  additions: z.array(z.string()).describe("Ad-hoc work the user did today that wasn't on the plan"),
+  achievements: z.array(z.string()).describe("Tasks the user completed today"),
+  missed: z.array(z.string()).describe("Tasks that weren't done and weren't mentioned"),
+  partial: z.array(z.string()).describe("Tasks partially done"),
+  additions: z.array(z.string()).describe("Ad-hoc work mentioned in narrative not in task list"),
   tips: z.array(z.string()).min(0).max(3).describe("1-3 actionable suggestions for tomorrow"),
   summary: z.string().describe("Brief 1-2 sentence overall wrap-up"),
+  taskActions: z
+    .array(
+      z.object({
+        taskId: z.string(),
+        status: z.enum(["completed", "partial"]),
+      }),
+    )
+    .describe("Tasks to auto-update based on what the user said in their narrative"),
 });
 export type DayClosureFeedback = z.infer<typeof dayClosureFeedbackSchema>;

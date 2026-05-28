@@ -14,6 +14,7 @@ export interface CreateDayClosureDraftData {
   userId: string;
   date: Date;
   aiFeedback: InputJsonValue;
+  narrative: string;
 }
 
 /**
@@ -37,7 +38,7 @@ export function createDraft(data: CreateDayClosureDraftData): Promise<DayClosure
       date: data.date,
       status: "draft",
       reviewedAt: new Date(),
-      commentary: "",
+      commentary: data.narrative,
       aiFeedback: data.aiFeedback,
       mediaIds: [],
     },

@@ -78,15 +78,24 @@ User finishes morning rounds. Taps the checkbox next to that task.
 **Backend:** standard `PATCH /tasks/:id { completed: true }`. No AI involved. Same primitive the AI flow above ultimately calls.
 
 ### 19:00 — Day closure
-User opens Day Closure. Taps mic.
+User opens Day Closure. Taps mic (or types).
 > *"I finished morning rounds. Got halfway through the chart review. The staff meeting got pushed to tomorrow. I also did emergency triage at 3pm — that wasn't planned."*
 
-**Backend:**
-1. Sends audio + today's task list to Gemini for intent classification.
-2. Gets back: complete X, partial Y (with notes), not_done Z, and a RECOMMENDATION for a new task (*"emergency triage"*).
-3. The recommendation is NOT auto-created — it's returned to the frontend as a suggestion. User taps "Add" or "Skip."
-4. Backend also makes a SECOND Gemini call to generate the structured feedback (achievements, missed, partial, tips, summary).
-5. Persists DayClosureSubmission with everything.
+If they recorded voice, the FE first calls `POST /transcribe` to get the text, then sends that text as `commentary`.
+
+**Backend — Phase 1 (Review):**
+1. Receives the narrative text in `commentary` alongside today's live task list.
+2. Sends both to Gemini. AI acts as a Personal Assistant — warm, not an auditor.
+3. Gets back structured feedback (`achievements`, `missed`, `partial`, `additions`, `tips: []`, `summary`) plus `taskActions` (which tasks to auto-mark done/partial).
+4. Dispatches `taskActions` → marks "Morning rounds" completed, "Chart review" partial.
+5. Creates a completed task for "Emergency triage at 3pm" (it's in `additions` — ad-hoc work not on the plan).
+6. Persists a `status='draft'` row with the AI feedback and the narrative.
+7. Returns `{ dayClosureId, status, reviewedAt, aiFeedback }` to the FE.
+
+FE shows the feedback. User can manually adjust any pill states the AI got wrong.
+
+**Backend — Phase 2 (Submit):**
+User clicks Submit (optionally adding a note to management). Backend flips the row to `status='submitted'`. No second AI call — the feedback snapshot from review is preserved.
 
 ---
 

@@ -92,6 +92,12 @@ export async function attachExistingUser(req: Request, res: Response): Promise<v
   res.status(201).json(user);
 }
 
+export async function detachReport(req: Request, res: Response): Promise<void> {
+  const { id: reportId } = idParamSchema.parse(req.params);
+  await teamService.detachReport(req.user, reportId);
+  res.status(204).send();
+}
+
 export async function resetUserPassword(req: Request, res: Response): Promise<void> {
   const { id: targetUserId } = idParamSchema.parse(req.params);
   const input = resetTeamUserPasswordInputSchema.parse((req.body as unknown) ?? {});

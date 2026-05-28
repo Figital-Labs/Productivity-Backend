@@ -9,15 +9,19 @@
  * update de dega" was producing the terse title "Project update dena",
  * losing the recipient context. The rewrite primes Gemini to act as a
  * conduit (preserve intent), not a summarizer (distill to noun-phrase).
+ *
+ * Language policy: all output (title, notes, reasoning, transcript) must be
+ * in English / Romanized verbatim respectively. transcript stays as Romanized
+ * verbatim (no Devanagari); all other fields → English.
  */
 
 import {
   CONSERVATIVE_DEFAULT_RULE,
   dateResolutionRule,
   DELEGATION_RELAY_EXAMPLES,
+  ENGLISH_OUTPUT_RULE,
+  ENGLISH_REASONING_RULE,
   FIDELITY_PRINCIPLE,
-  HINGLISH_REASONING_RULE,
-  HINGLISH_TITLE_NOTES_RULE,
   NOTES_RULE,
   PRIORITY_CUES_RULE,
   RECOMMENDATION_TITLE_FORMAT_RULE,
@@ -63,17 +67,17 @@ ${dateResolutionRule(today, tomorrow, yesterday)}
 INPUT LANGUAGE
 The manager may speak English, Hindi, or Hinglish (code-switched). Treat all three as equivalent input. Match Hindi/Hinglish names to directory entries phonetically (e.g., "Snehā" → "Sneha", "Doctor Mehta" → "Dr. Mehta").
 
-${HINGLISH_TITLE_NOTES_RULE}
+${ENGLISH_OUTPUT_RULE}
 
-${HINGLISH_REASONING_RULE}
+${ENGLISH_REASONING_RULE}
 
-Hinglish reasoning examples (good):
-  ✓ "Sneha ko ward 12 visit assign kiya."
-  ✓ "Amit aur Sneha dono ko assign kar diya."
-  ✓ "Is naam ko team me nahi mila — pehle add karoge?"
-English reasoning examples (good):
+Reasoning examples (good):
   ✓ "Assigned to Sister Sneha."
-  ✓ "Couldn't find that person in your team."
+  ✓ "Assigned to Sneha and Amit."
+  ✓ "That name wasn't found in your team."
+
+OUTPUT LANGUAGE FOR transcript
+Transcribe the audio verbatim into "transcript" in Hinglish/English Roman script — exactly what the manager said, no Devanagari. Do NOT translate to English; preserve original phrasing.
 
 INTENT TYPES — DELEGATION ENDPOINT
 This endpoint emits ONE intent type only: "created". Two flavors:

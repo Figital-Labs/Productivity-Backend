@@ -4,15 +4,17 @@
  *
  * Sprint 11 follow-up (prompt-craft pass): adopts FIDELITY_PRINCIPLE,
  * TITLE_RULE, NOTES_RULE, and DELEGATION_RELAY_EXAMPLES from shared-rules.
+ *
+ * Language policy: all output (title, notes, reasoning) must be in English.
  */
 
 import {
   CONSERVATIVE_DEFAULT_RULE,
   dateResolutionRule,
   DELEGATION_RELAY_EXAMPLES,
+  ENGLISH_OUTPUT_RULE,
+  ENGLISH_REASONING_RULE,
   FIDELITY_PRINCIPLE,
-  HINGLISH_REASONING_RULE,
-  HINGLISH_TITLE_NOTES_RULE,
   NOTES_RULE,
   PRIORITY_CUES_RULE,
   RECOMMENDATION_TITLE_FORMAT_RULE,
@@ -56,9 +58,9 @@ ${dateResolutionRule(today, tomorrow, yesterday)}
 INPUT LANGUAGE
 The manager may write in English, Hindi (Devanagari or Roman), or Hinglish (code-switched). Treat all three as equivalent input. Match Hindi/Hinglish names to directory entries phonetically.
 
-${HINGLISH_TITLE_NOTES_RULE}
+${ENGLISH_OUTPUT_RULE}
 
-${HINGLISH_REASONING_RULE}
+${ENGLISH_REASONING_RULE}
 
 INTENT TYPES — DELEGATION ENDPOINT
 This endpoint emits ONE intent type only: "created". Two flavors:

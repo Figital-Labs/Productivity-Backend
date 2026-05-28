@@ -19,7 +19,6 @@ import type {
   ReviewDayClosureInput,
   SubmitDayClosureInput,
 } from "../schemas/day-closure.schema.js";
-import type { TaskSnapshotEntry } from "../schemas/day-plan.schema.js";
 import { parseDateString, todayInUserTz } from "../utils/date.js";
 
 import { userIdsInScope } from "./dashboard-rollup.service.js";
@@ -40,10 +39,6 @@ export interface DayClosureReviewResult {
 
 function formatDateYMD(d: Date): string {
   return d.toISOString().slice(0, 10);
-}
-
-function snapshotJsonToTyped(raw: unknown): TaskSnapshotEntry[] {
-  return Array.isArray(raw) ? (raw as TaskSnapshotEntry[]) : [];
 }
 
 function currentTaskStateFrom(
@@ -70,14 +65,7 @@ export async function reviewDayClosure(
   const date = input.date ? parseDateString(input.date) : todayInUserTz(DEFAULT_TIMEZONE);
   const dateLabel = formatDateYMD(date);
 
-  // A closure is meaningless without a baseline plan to compare against.
   const plan = await dayPlanRepo.findByUserAndDate(user.id, date);
-  if (!plan) {
-    throw new ConflictError(
-      "NO_DAY_PLAN_FOR_DATE",
-      `No day plan exists for ${dateLabel}. Submit a plan before reviewing the day.`,
-    );
-  }
 
   const existing = await dayClosureRepo.findByUserAndDate(user.id, date);
   if (existing) {
@@ -102,16 +90,42 @@ export async function reviewDayClosure(
   const aiFeedback = await generateStructured({
     model: GEMINI_FLASH_MODEL,
     prompt: buildDayClosureFeedbackPrompt({
-      planSnapshot: snapshotJsonToTyped(plan.taskSnapshot),
-      currentTaskStates: currentTaskStateFrom(currentTasks),
-      // No narrative at review time — the user types their excuses
-      // AFTER reading the AI's feedback, and they get persisted on submit.
-      closureNarrative: "",
+      todaysTasks: currentTaskStateFrom(currentTasks),
+      hasDayPlan: !!plan,
+      closureNarrative: input.commentary ?? "",
     }),
     schema: dayClosureFeedbackSchema,
   });
 
-  const draft = await dayClosureRepo.createDraft({ userId: user.id, date, aiFeedback });
+  // Apply task status updates the AI inferred from the narrative.
+  const todayTaskIds = new Set(currentTasks.map((t) => t.id));
+  for (const action of aiFeedback.taskActions) {
+    if (!todayTaskIds.has(action.taskId)) continue;
+    await taskRepo.update(action.taskId, {
+      completed: action.status === "completed",
+      isPartial: action.status === "partial",
+    });
+  }
+
+  // Create completed tasks for ad-hoc work mentioned in the narrative.
+  for (const title of aiFeedback.additions) {
+    const created = await taskRepo.create({
+      assigneeId: user.id,
+      creatorId: user.id,
+      title,
+      targetDate: date,
+      sourceType: "manual",
+      notes: "Ad-hoc work noted during AI day closure review.",
+    });
+    await taskRepo.update(created.id, { completed: true });
+  }
+
+  const draft = await dayClosureRepo.createDraft({
+    userId: user.id,
+    date,
+    aiFeedback,
+    narrative: input.commentary ?? "",
+  });
   return {
     dayClosureId: draft.id,
     status: "draft",
@@ -148,7 +162,9 @@ export async function submitDayClosure(
     );
   }
 
-  return dayClosureRepo.markSubmitted(existing.id, { commentary: input.commentary ?? "" });
+  return dayClosureRepo.markSubmitted(existing.id, {
+    commentary: input.commentary ?? existing.commentary,
+  });
 }
 
 export function getDayClosure(
