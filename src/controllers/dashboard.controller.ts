@@ -14,10 +14,12 @@ import {
   dashboardMeetingsQuerySchema,
   dashboardPeopleQuerySchema,
   dashboardTrendsQuerySchema,
+  meetingConversionQuerySchema,
   overdueQuerySchema,
   patchGroupMemberSchema,
   performersQuerySchema,
   personDayQuerySchema,
+  planAccuracyQuerySchema,
   planVsClosureQuerySchema,
   taskFlowQuerySchema,
   updateDepartmentSchema,
@@ -195,6 +197,20 @@ export async function overdueTasks(req: Request, res: Response): Promise<void> {
   const query = overdueQuerySchema.parse(req.query);
   const scope = await resolveScope(req.user);
   res.json(await analyticsService.getOverdueTasks(scope, query.limit));
+}
+
+export async function planAccuracy(req: Request, res: Response): Promise<void> {
+  const query = planAccuracyQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  const days = query.range === "30d" ? 30 : 7;
+  res.json(await analyticsService.getPlanAccuracy(scope, days));
+}
+
+export async function meetingConversion(req: Request, res: Response): Promise<void> {
+  const query = meetingConversionQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  const days = query.range === "30d" ? 30 : 7;
+  res.json(await analyticsService.getMeetingConversion(scope, days));
 }
 
 export async function patchGroupMember(req: Request, res: Response): Promise<void> {

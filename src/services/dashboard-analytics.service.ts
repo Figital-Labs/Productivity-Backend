@@ -497,6 +497,142 @@ export async function getOverdueTasks(scope: Scope, limit = 20): Promise<Overdue
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// PLAN ACCURACY — % of planned tasks (from DayPlanSubmission snapshots) that
+// ended up completed, per day over N days.
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface PlanAccuracyPoint {
+  date: string;
+  planned: number;
+  completed: number;
+  accuracy: number;
+}
+
+export interface PlanAccuracyResult {
+  series: PlanAccuracyPoint[];
+  avgAccuracy: number;
+  windowDays: number;
+}
+
+export async function getPlanAccuracy(scope: Scope, days: number): Promise<PlanAccuracyResult> {
+  const userIds = await userIdsInScope(scope);
+  if (userIds.length === 0) return { series: [], avgAccuracy: 0, windowDays: days };
+
+  const dates = rangeDays(days);
+
+  const submissions = await prisma.dayPlanSubmission.findMany({
+    where: { userId: { in: userIds }, date: { in: dates } },
+    select: { date: true, taskSnapshot: true },
+  });
+
+  // Group snapshot task IDs by date — only entries that carry an id field.
+  const snapshotIdsByDate = new Map<string, string[]>();
+  for (const sub of submissions) {
+    const key = formatDateYmd(sub.date);
+    const snapshot = sub.taskSnapshot as { id?: unknown }[];
+    const ids = snapshot.map((s) => s.id).filter((id): id is string => typeof id === "string");
+    const existing = snapshotIdsByDate.get(key) ?? [];
+    snapshotIdsByDate.set(key, [...existing, ...ids]);
+  }
+
+  const allTaskIds = [...snapshotIdsByDate.values()].flat();
+  const completedIds = new Set<string>();
+  if (allTaskIds.length > 0) {
+    const completedTasks = await prisma.task.findMany({
+      where: { id: { in: allTaskIds }, completed: true, deletedAt: null },
+      select: { id: true },
+    });
+    for (const t of completedTasks) completedIds.add(t.id);
+  }
+
+  const series = dates.map((d) => {
+    const key = formatDateYmd(d);
+    const ids = snapshotIdsByDate.get(key) ?? [];
+    const planned = ids.length;
+    const completed = ids.filter((id) => completedIds.has(id)).length;
+    const accuracy = planned === 0 ? 0 : Math.round((completed / planned) * 100);
+    return { date: key, planned, completed, accuracy };
+  });
+
+  const daysWithData = series.filter((p) => p.planned > 0);
+  const avgAccuracy =
+    daysWithData.length === 0
+      ? 0
+      : Math.round(daysWithData.reduce((s, p) => s + p.accuracy, 0) / daysWithData.length);
+
+  return { series, avgAccuracy, windowDays: days };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// MEETING CONVERSION — completion rate of meeting-sourced tasks vs others.
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface MeetingConversionBucket {
+  total: number;
+  done: number;
+  pct: number;
+}
+
+export interface MeetingConversionResult {
+  meetingTasks: MeetingConversionBucket;
+  otherTasks: MeetingConversionBucket;
+  windowDays: number;
+}
+
+function toPct(done: number, total: number): number {
+  return total === 0 ? 0 : Math.round((done / total) * 100);
+}
+
+export async function getMeetingConversion(
+  scope: Scope,
+  days: number,
+): Promise<MeetingConversionResult> {
+  const userIds = await userIdsInScope(scope);
+  const empty: MeetingConversionResult = {
+    meetingTasks: { total: 0, done: 0, pct: 0 },
+    otherTasks: { total: 0, done: 0, pct: 0 },
+    windowDays: days,
+  };
+  if (userIds.length === 0) return empty;
+
+  const dates = rangeDays(days);
+
+  const [meetingRows, otherRows] = await Promise.all([
+    prisma.task.groupBy({
+      by: ["completed"],
+      where: {
+        assigneeId: { in: userIds },
+        sourceType: "meeting",
+        targetDate: { in: dates },
+        deletedAt: null,
+      },
+      _count: { _all: true },
+    }),
+    prisma.task.groupBy({
+      by: ["completed"],
+      where: {
+        assigneeId: { in: userIds },
+        sourceType: { not: "meeting" },
+        targetDate: { in: dates },
+        deletedAt: null,
+      },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const meetTotal = meetingRows.reduce((s, r) => s + r._count._all, 0);
+  const meetDone = meetingRows.filter((r) => r.completed).reduce((s, r) => s + r._count._all, 0);
+  const otherTotal = otherRows.reduce((s, r) => s + r._count._all, 0);
+  const otherDone = otherRows.filter((r) => r.completed).reduce((s, r) => s + r._count._all, 0);
+
+  return {
+    meetingTasks: { total: meetTotal, done: meetDone, pct: toPct(meetDone, meetTotal) },
+    otherTasks: { total: otherTotal, done: otherDone, pct: toPct(otherDone, otherTotal) },
+    windowDays: days,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // GROUP-WISE ANALYTICS — assigned vs closed per group within scope.
 // ───────────────────────────────────────────────────────────────────────────
 

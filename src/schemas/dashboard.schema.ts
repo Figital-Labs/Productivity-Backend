@@ -116,6 +116,18 @@ export type OverdueQuery = z.infer<typeof overdueQuerySchema>;
 
 // `GET /dashboard/analytics/submissions-today` has no query params — always today.
 
+/** `GET /dashboard/analytics/plan-accuracy` — snapshot completion rate per day. */
+export const planAccuracyQuerySchema = z.object({
+  range: z.enum(["7d", "30d"]).default("7d"),
+});
+export type PlanAccuracyQuery = z.infer<typeof planAccuracyQuerySchema>;
+
+/** `GET /dashboard/analytics/meeting-conversion` — meeting-sourced task completion rate. */
+export const meetingConversionQuerySchema = z.object({
+  range: z.enum(["7d", "30d"]).default("7d"),
+});
+export type MeetingConversionQuery = z.infer<typeof meetingConversionQuerySchema>;
+
 /** `PATCH /dashboard/groups/:id/members/:userId` — flip lead / canManage. */
 export const patchGroupMemberSchema = z
   .object({
