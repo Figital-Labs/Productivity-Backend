@@ -209,18 +209,25 @@ export interface SummaryCardsResult {
   tasksDone: number;
   meetingsThisWeek: number;
   totalEmployees: number;
+  staffOnLeaveToday: number;
 }
 
 export async function getSummaryCards(scope: Scope): Promise<SummaryCardsResult> {
   const userIds = await userIdsInScope(scope);
   if (userIds.length === 0) {
-    return { totalTasks: 0, tasksDone: 0, meetingsThisWeek: 0, totalEmployees: 0 };
+    return {
+      totalTasks: 0,
+      tasksDone: 0,
+      meetingsThisWeek: 0,
+      totalEmployees: 0,
+      staffOnLeaveToday: 0,
+    };
   }
   const today = todayInUserTz(DEFAULT_TIMEZONE);
   const weekAgo = new Date(today);
   weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
 
-  const [taskCounts, meetingCount] = await Promise.all([
+  const [taskCounts, meetingCount, leaveCount] = await Promise.all([
     prisma.task.groupBy({
       by: ["completed"],
       where: {
@@ -237,6 +244,8 @@ export async function getSummaryCards(scope: Scope): Promise<SummaryCardsResult>
         OR: [{ userId: { in: userIds } }, { attendeeIds: { hasSome: userIds } }],
       },
     }),
+    // A4: count staff with an approved holiday record for today.
+    prisma.holiday.count({ where: { userId: { in: userIds }, date: today } }),
   ]);
   const totalTasks = taskCounts.reduce((sum, r) => sum + r._count._all, 0);
   const tasksDone = taskCounts
@@ -248,7 +257,82 @@ export async function getSummaryCards(scope: Scope): Promise<SummaryCardsResult>
     tasksDone,
     meetingsThisWeek: meetingCount,
     totalEmployees: userIds.length,
+    staffOnLeaveToday: leaveCount,
   };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// TASK FLOW — daily inflow (created) vs outflow (completed) over N days.
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface TaskFlowPoint {
+  date: string;
+  created: number;
+  completed: number;
+}
+
+export interface TaskFlowResult {
+  series: TaskFlowPoint[];
+  netFlow: number;
+  windowDays: number;
+}
+
+export async function getTaskFlow(scope: Scope, days: number): Promise<TaskFlowResult> {
+  const userIds = await userIdsInScope(scope);
+  if (userIds.length === 0) return { series: [], netFlow: 0, windowDays: days };
+
+  const dates = rangeDays(days);
+  const firstDate = dates[0];
+  const lastDate = dates[dates.length - 1];
+  if (!firstDate || !lastDate) return { series: [], netFlow: 0, windowDays: days };
+  const rangeStart = startOfDay(firstDate);
+  const rangeEnd = endOfDay(lastDate);
+
+  const [createdTasks, completedRows] = await Promise.all([
+    // Inflow: tasks assigned to scoped users, created within the window.
+    prisma.task.findMany({
+      where: {
+        assigneeId: { in: userIds },
+        createdAt: { gte: rangeStart, lte: rangeEnd },
+        deletedAt: null,
+      },
+      select: { createdAt: true },
+    }),
+    // Outflow: tasks targeted on each date in the window that are completed.
+    prisma.task.groupBy({
+      by: ["targetDate"],
+      where: {
+        assigneeId: { in: userIds },
+        targetDate: { in: dates },
+        completed: true,
+        deletedAt: null,
+      },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const createdByDate = new Map<string, number>();
+  for (const t of createdTasks) {
+    const k = formatDateYmd(t.createdAt);
+    createdByDate.set(k, (createdByDate.get(k) ?? 0) + 1);
+  }
+  const completedByDate = new Map(
+    completedRows.map((r) => [formatDateYmd(r.targetDate), r._count._all]),
+  );
+
+  const series = dates.map((d) => {
+    const key = formatDateYmd(d);
+    return {
+      date: key,
+      created: createdByDate.get(key) ?? 0,
+      completed: completedByDate.get(key) ?? 0,
+    };
+  });
+
+  const totalCreated = series.reduce((s, p) => s + p.created, 0);
+  const totalCompleted = series.reduce((s, p) => s + p.completed, 0);
+
+  return { series, netFlow: totalCompleted - totalCreated, windowDays: days };
 }
 
 // ───────────────────────────────────────────────────────────────────────────

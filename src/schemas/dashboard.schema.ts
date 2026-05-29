@@ -102,6 +102,12 @@ export const personDayQuerySchema = z.object({
 });
 export type PersonDayQuery = z.infer<typeof personDayQuerySchema>;
 
+/** `GET /dashboard/analytics/task-flow` — daily task inflow vs outflow. */
+export const taskFlowQuerySchema = z.object({
+  range: z.enum(["7d", "30d"]).default("7d"),
+});
+export type TaskFlowQuery = z.infer<typeof taskFlowQuerySchema>;
+
 /** `PATCH /dashboard/groups/:id/members/:userId` — flip lead / canManage. */
 export const patchGroupMemberSchema = z
   .object({

@@ -18,6 +18,7 @@ import {
   performersQuerySchema,
   personDayQuerySchema,
   planVsClosureQuerySchema,
+  taskFlowQuerySchema,
   updateDepartmentSchema,
   updateGroupSchema,
 } from "../schemas/dashboard.schema.js";
@@ -170,6 +171,13 @@ export async function summaryCards(req: Request, res: Response): Promise<void> {
 
 export async function groupAnalytics(req: Request, res: Response): Promise<void> {
   res.json({ rows: await analyticsService.getGroupAnalytics(await resolveScope(req.user)) });
+}
+
+export async function taskFlow(req: Request, res: Response): Promise<void> {
+  const query = taskFlowQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  const days = query.range === "30d" ? 30 : 7;
+  res.json(await analyticsService.getTaskFlow(scope, days));
 }
 
 export async function patchGroupMember(req: Request, res: Response): Promise<void> {
