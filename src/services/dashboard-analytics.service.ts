@@ -53,18 +53,30 @@ export async function getPerformers(
   if (userIds.length === 0) {
     return { top: [], bottom: [], metric, windowDays: days };
   }
+
+  // Performers list is individual-contributor only — exclude managers and above.
+  // Level is the reliable discriminator: L100 = IC, L300+ = lead/manager/admin.
+  const staffRows = await prisma.user.findMany({
+    where: { id: { in: userIds }, level: { lte: 100 } },
+    select: { id: true },
+  });
+  const staffIds = staffRows.map((r) => r.id);
+  if (staffIds.length === 0) {
+    return { top: [], bottom: [], metric, windowDays: days };
+  }
+
   const dates = rangeDays(days);
 
   if (metric === "tasks") {
     const [users, taskCounts] = await Promise.all([
       prisma.user.findMany({
-        where: { id: { in: userIds } },
+        where: { id: { in: staffIds } },
         select: { id: true, name: true, role: true },
       }),
       prisma.task.groupBy({
         by: ["assigneeId"],
         where: {
-          assigneeId: { in: userIds },
+          assigneeId: { in: staffIds },
           targetDate: { in: dates },
           deletedAt: null,
           completed: true,
@@ -89,7 +101,7 @@ export async function getPerformers(
   }
 
   // consistency: rank by lowest missed-days. Bottom = highest missed-days.
-  const rows = await consistencyForUsers(userIds, days);
+  const rows = await consistencyForUsers(staffIds, days);
   const performerRows: PerformerRow[] = rows.map((r) => {
     const missed = r.planMissedDays + r.closureMissedDays;
     const score = Math.max(0, 100 - missed * 10);
