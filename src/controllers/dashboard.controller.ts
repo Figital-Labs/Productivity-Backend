@@ -14,6 +14,7 @@ import {
   dashboardMeetingsQuerySchema,
   dashboardPeopleQuerySchema,
   dashboardTrendsQuerySchema,
+  overdueQuerySchema,
   patchGroupMemberSchema,
   performersQuerySchema,
   personDayQuerySchema,
@@ -178,6 +179,17 @@ export async function taskFlow(req: Request, res: Response): Promise<void> {
   const scope = await resolveScope(req.user);
   const days = query.range === "30d" ? 30 : 7;
   res.json(await analyticsService.getTaskFlow(scope, days));
+}
+
+export async function priorityBreakdown(req: Request, res: Response): Promise<void> {
+  const scope = await resolveScope(req.user);
+  res.json(await analyticsService.getPriorityBreakdown(scope));
+}
+
+export async function overdueTasks(req: Request, res: Response): Promise<void> {
+  const query = overdueQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  res.json(await analyticsService.getOverdueTasks(scope, query.limit));
 }
 
 export async function patchGroupMember(req: Request, res: Response): Promise<void> {

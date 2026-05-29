@@ -336,6 +336,105 @@ export async function getTaskFlow(scope: Scope, days: number): Promise<TaskFlowR
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// PRIORITY BREAKDOWN — today's task count split by priority level.
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface PriorityBreakdownPoint {
+  priority: "high" | "medium" | "low" | "none";
+  count: number;
+}
+
+export interface PriorityBreakdownResult {
+  series: PriorityBreakdownPoint[];
+  total: number;
+}
+
+export async function getPriorityBreakdown(scope: Scope): Promise<PriorityBreakdownResult> {
+  const userIds = await userIdsInScope(scope);
+  if (userIds.length === 0) return { series: [], total: 0 };
+
+  const today = todayInUserTz(DEFAULT_TIMEZONE);
+  const rows = await prisma.task.groupBy({
+    by: ["priority"],
+    where: { assigneeId: { in: userIds }, targetDate: today, deletedAt: null },
+    _count: { _all: true },
+  });
+
+  const series: PriorityBreakdownPoint[] = rows.map((r) => ({
+    priority: r.priority !== null ? (r.priority as "high" | "medium" | "low") : "none",
+    count: r._count._all,
+  }));
+  const total = series.reduce((s, p) => s + p.count, 0);
+  return { series, total };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// OVERDUE TASKS — tasks past their targetDate, not completed, within scope.
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface OverdueTaskRow {
+  id: string;
+  title: string;
+  priority: "high" | "medium" | "low" | null;
+  daysOverdue: number;
+  assignee: { id: string; name: string; role: string };
+}
+
+export interface OverdueResult {
+  tasks: OverdueTaskRow[];
+  total: number;
+}
+
+export async function getOverdueTasks(scope: Scope, limit = 20): Promise<OverdueResult> {
+  const userIds = await userIdsInScope(scope);
+  if (userIds.length === 0) return { tasks: [], total: 0 };
+
+  const today = todayInUserTz(DEFAULT_TIMEZONE);
+
+  const [tasks, total] = await Promise.all([
+    prisma.task.findMany({
+      where: {
+        assigneeId: { in: userIds },
+        targetDate: { lt: today },
+        completed: false,
+        deletedAt: null,
+      },
+      orderBy: { targetDate: "asc" },
+      take: limit,
+      select: {
+        id: true,
+        title: true,
+        priority: true,
+        targetDate: true,
+        assignee: { select: { id: true, name: true, role: true } },
+      },
+    }),
+    prisma.task.count({
+      where: {
+        assigneeId: { in: userIds },
+        targetDate: { lt: today },
+        completed: false,
+        deletedAt: null,
+      },
+    }),
+  ]);
+
+  const todayMs = today.getTime();
+  const MS_PER_DAY = 86_400_000;
+
+  return {
+    tasks: tasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      priority: t.priority as "high" | "medium" | "low" | null,
+      daysOverdue: Math.max(1, Math.floor((todayMs - t.targetDate.getTime()) / MS_PER_DAY)),
+      assignee: t.assignee,
+    })),
+    total,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // GROUP-WISE ANALYTICS — assigned vs closed per group within scope.
 // ───────────────────────────────────────────────────────────────────────────
 

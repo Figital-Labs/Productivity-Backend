@@ -108,6 +108,12 @@ export const taskFlowQuerySchema = z.object({
 });
 export type TaskFlowQuery = z.infer<typeof taskFlowQuerySchema>;
 
+/** `GET /dashboard/analytics/overdue` — overdue incomplete tasks in scope. */
+export const overdueQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+export type OverdueQuery = z.infer<typeof overdueQuerySchema>;
+
 /** `PATCH /dashboard/groups/:id/members/:userId` — flip lead / canManage. */
 export const patchGroupMemberSchema = z
   .object({
