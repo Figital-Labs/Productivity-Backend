@@ -266,6 +266,7 @@ export interface GroupAnalyticsRow {
 export async function getGroupAnalytics(scope: Scope): Promise<GroupAnalyticsRow[]> {
   if (scope.type === "none") return [];
   const today = todayInUserTz(DEFAULT_TIMEZONE);
+  const scopedIds = new Set(await userIdsInScope(scope));
 
   const groups = await prisma.contextGroup.findMany({
     where: {
@@ -296,13 +297,14 @@ export async function getGroupAnalytics(scope: Scope): Promise<GroupAnalyticsRow
   return Promise.all(
     groups.map(async (group) => {
       const memberIds = group.memberships.map((m) => m.userId);
+      const scopedMemberIds = memberIds.filter((id) => scopedIds.has(id));
       let assignedToday = 0;
       let closedToday = 0;
-      if (memberIds.length > 0) {
+      if (scopedMemberIds.length > 0) {
         const taskRows = await prisma.task.groupBy({
           by: ["completed"],
           where: {
-            assigneeId: { in: memberIds },
+            assigneeId: { in: scopedMemberIds },
             targetDate: today,
             deletedAt: null,
           },
@@ -322,7 +324,7 @@ export async function getGroupAnalytics(scope: Scope): Promise<GroupAnalyticsRow
           kind: group.kind,
           departmentName: group.department?.name ?? null,
         },
-        activeStaff: memberIds.length,
+        activeStaff: scopedMemberIds.length,
         assignedToday,
         closedToday,
         donePct,
