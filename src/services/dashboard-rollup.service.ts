@@ -176,12 +176,13 @@ export async function kpisForUsersInRange(userIds: string[], days: number): Prom
   const scopedUserIds = unique(userIds);
   if (scopedUserIds.length === 0) return kpisForUsers([]);
   const dates = rangeDays(days);
-  const today = dates[dates.length - 1] ?? todayInUserTz(DEFAULT_TIMEZONE);
   const [plansSubmittedToday, closuresSubmittedToday, taskCounts] = await Promise.all([
-    prisma.dayPlanSubmission.count({ where: { userId: { in: scopedUserIds }, date: today } }),
+    prisma.dayPlanSubmission.count({
+      where: { userId: { in: scopedUserIds }, date: { in: dates } },
+    }),
     // Sprint 17 Phase 5: only finalized closures count.
     prisma.dayClosureSubmission.count({
-      where: { userId: { in: scopedUserIds }, date: today, status: "submitted" },
+      where: { userId: { in: scopedUserIds }, date: { in: dates }, status: "submitted" },
     }),
     prisma.task.groupBy({
       by: ["completed"],
@@ -430,31 +431,115 @@ export async function peopleForScope(
   const allowed = new Set(await userIdsInScope(safeScope));
   userIds = unique(userIds).filter((id) => allowed.has(id));
 
-  const [users, consistency] = await Promise.all([
+  const today = todayInUserTz(DEFAULT_TIMEZONE);
+  const weekDates = rangeDays(7);
+
+  const [
+    users,
+    consistency,
+    planCountsToday,
+    closureCountsToday,
+    taskCountsToday,
+    planCountsWeek,
+    closureCountsWeek,
+    taskCountsWeek,
+  ] = await Promise.all([
     prisma.user.findMany({
       where: { id: { in: userIds } },
       select: { id: true, name: true, email: true, role: true },
       orderBy: { name: "asc" },
     }),
     consistencyForUsers(userIds, 7),
-  ]);
-  const consistencyByUser = new Map(consistency.map((row) => [row.user.id, row]));
-
-  return Promise.all(
-    users.map(async (user) => {
-      const todayKpis = await kpisForUsers([user.id]);
-      const weekKpis = await kpisForUsersInRange([user.id], 7);
-      const missed =
-        (consistencyByUser.get(user.id)?.planMissedDays ?? 0) +
-        (consistencyByUser.get(user.id)?.closureMissedDays ?? 0);
-      return {
-        user,
-        todayKpis,
-        weekKpis,
-        consistencyScore: Math.max(0, 100 - missed * 10),
-      };
+    prisma.dayPlanSubmission.groupBy({
+      by: ["userId"],
+      where: { userId: { in: userIds }, date: today },
+      _count: { _all: true },
     }),
-  );
+    prisma.dayClosureSubmission.groupBy({
+      by: ["userId"],
+      where: { userId: { in: userIds }, date: today, status: "submitted" },
+      _count: { _all: true },
+    }),
+    prisma.task.groupBy({
+      by: ["assigneeId", "completed"],
+      where: { assigneeId: { in: userIds }, targetDate: today, deletedAt: null },
+      _count: { _all: true },
+    }),
+    prisma.dayPlanSubmission.groupBy({
+      by: ["userId"],
+      where: { userId: { in: userIds }, date: { in: weekDates } },
+      _count: { _all: true },
+    }),
+    prisma.dayClosureSubmission.groupBy({
+      by: ["userId"],
+      where: { userId: { in: userIds }, date: { in: weekDates }, status: "submitted" },
+      _count: { _all: true },
+    }),
+    prisma.task.groupBy({
+      by: ["assigneeId", "completed"],
+      where: { assigneeId: { in: userIds }, targetDate: { in: weekDates }, deletedAt: null },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const consistencyByUser = new Map(consistency.map((row) => [row.user.id, row]));
+  const plansTodayByUser = new Map(planCountsToday.map((r) => [r.userId, r._count._all]));
+  const closuresTodayByUser = new Map(closureCountsToday.map((r) => [r.userId, r._count._all]));
+  const plansWeekByUser = new Map(planCountsWeek.map((r) => [r.userId, r._count._all]));
+  const closuresWeekByUser = new Map(closureCountsWeek.map((r) => [r.userId, r._count._all]));
+
+  const tasksTodayByUser = new Map<string, { total: number; done: number }>();
+  for (const r of taskCountsToday) {
+    const entry = tasksTodayByUser.get(r.assigneeId) ?? { total: 0, done: 0 };
+    entry.total += r._count._all;
+    if (r.completed) entry.done += r._count._all;
+    tasksTodayByUser.set(r.assigneeId, entry);
+  }
+
+  const tasksWeekByUser = new Map<string, { total: number; done: number }>();
+  for (const r of taskCountsWeek) {
+    const entry = tasksWeekByUser.get(r.assigneeId) ?? { total: 0, done: 0 };
+    entry.total += r._count._all;
+    if (r.completed) entry.done += r._count._all;
+    tasksWeekByUser.set(r.assigneeId, entry);
+  }
+
+  return users.map((user) => {
+    const todayTasks = tasksTodayByUser.get(user.id) ?? { total: 0, done: 0 };
+    const weekTasks = tasksWeekByUser.get(user.id) ?? { total: 0, done: 0 };
+    const plansToday = plansTodayByUser.get(user.id) ?? 0;
+    const closuresToday = closuresTodayByUser.get(user.id) ?? 0;
+    const plansWeek = plansWeekByUser.get(user.id) ?? 0;
+    const closuresWeek = closuresWeekByUser.get(user.id) ?? 0;
+
+    const todayKpis: Kpis = {
+      activeStaffToday: 1,
+      plansSubmittedToday: plansToday,
+      plansSubmittedPct: plansToday > 0 ? 100 : 0,
+      closuresSubmittedToday: closuresToday,
+      closuresSubmittedPct: closuresToday > 0 ? 100 : 0,
+      totalTasks: todayTasks.total,
+      tasksDone: todayTasks.done,
+      tasksDonePct: pct(todayTasks.done, todayTasks.total),
+    };
+
+    const weekKpis: Kpis = {
+      activeStaffToday: 1,
+      plansSubmittedToday: plansWeek,
+      plansSubmittedPct: pct(plansWeek, weekDates.length),
+      closuresSubmittedToday: closuresWeek,
+      closuresSubmittedPct: pct(closuresWeek, weekDates.length),
+      totalTasks: weekTasks.total,
+      tasksDone: weekTasks.done,
+      tasksDonePct: pct(weekTasks.done, weekTasks.total),
+    };
+
+    const missed =
+      (consistencyByUser.get(user.id)?.planMissedDays ?? 0) +
+      (consistencyByUser.get(user.id)?.closureMissedDays ?? 0);
+
+    return { user, todayKpis, weekKpis, consistencyScore: Math.max(0, 100 - missed * 10) };
+  });
 }
 
 export async function meetingsForScope(
