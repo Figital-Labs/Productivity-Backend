@@ -336,6 +336,68 @@ export async function getTaskFlow(scope: Scope, days: number): Promise<TaskFlowR
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// SUBMISSIONS TODAY — A3 plan timing (on-time vs late) + A8 closure status.
+// "Late" = plan submitted after 10 AM IST (04:30 UTC).
+// ───────────────────────────────────────────────────────────────────────────
+
+// 10:00 AM IST == 04:30 UTC (IST = UTC+5:30).
+const PLAN_CUTOFF_UTC = { hour: 4, minute: 30 } as const;
+
+function isPlanOnTime(submittedAt: Date): boolean {
+  const h = submittedAt.getUTCHours();
+  const m = submittedAt.getUTCMinutes();
+  return h < PLAN_CUTOFF_UTC.hour || (h === PLAN_CUTOFF_UTC.hour && m <= PLAN_CUTOFF_UTC.minute);
+}
+
+export interface SubmissionsTodayResult {
+  plans: { onTime: number; late: number; notSubmitted: number; totalUsers: number };
+  closures: { submitted: number; inDraft: number; notStarted: number; totalUsers: number };
+}
+
+export async function getSubmissionsToday(scope: Scope): Promise<SubmissionsTodayResult> {
+  const userIds = await userIdsInScope(scope);
+  const totalUsers = userIds.length;
+  if (totalUsers === 0) {
+    return {
+      plans: { onTime: 0, late: 0, notSubmitted: 0, totalUsers: 0 },
+      closures: { submitted: 0, inDraft: 0, notStarted: 0, totalUsers: 0 },
+    };
+  }
+
+  const today = todayInUserTz(DEFAULT_TIMEZONE);
+
+  const [planRows, closureRows] = await Promise.all([
+    prisma.dayPlanSubmission.findMany({
+      where: { userId: { in: userIds }, date: today },
+      select: { submittedAt: true },
+    }),
+    prisma.dayClosureSubmission.findMany({
+      where: { userId: { in: userIds }, date: today },
+      select: { status: true },
+    }),
+  ]);
+
+  let onTime = 0;
+  let late = 0;
+  for (const p of planRows) {
+    if (isPlanOnTime(p.submittedAt)) onTime++;
+    else late++;
+  }
+
+  let submitted = 0;
+  let inDraft = 0;
+  for (const c of closureRows) {
+    if (c.status === "submitted") submitted++;
+    else inDraft++;
+  }
+
+  return {
+    plans: { onTime, late, notSubmitted: totalUsers - planRows.length, totalUsers },
+    closures: { submitted, inDraft, notStarted: totalUsers - closureRows.length, totalUsers },
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // PRIORITY BREAKDOWN — today's task count split by priority level.
 // ───────────────────────────────────────────────────────────────────────────
 

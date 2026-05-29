@@ -32,6 +32,7 @@ dashboardRouter.get("/performers", dashboardController.performers);
 dashboardRouter.get("/analytics/plan-vs-closure", dashboardController.planVsClosure);
 dashboardRouter.get("/analytics/groups", dashboardController.groupAnalytics);
 dashboardRouter.get("/analytics/task-flow", dashboardController.taskFlow);
+dashboardRouter.get("/analytics/submissions-today", dashboardController.submissionsToday);
 dashboardRouter.get("/analytics/priority-breakdown", dashboardController.priorityBreakdown);
 dashboardRouter.get("/analytics/overdue", dashboardController.overdueTasks);
 dashboardRouter.get("/team/tree", dashboardController.teamTree);

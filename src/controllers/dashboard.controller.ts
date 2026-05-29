@@ -181,6 +181,11 @@ export async function taskFlow(req: Request, res: Response): Promise<void> {
   res.json(await analyticsService.getTaskFlow(scope, days));
 }
 
+export async function submissionsToday(req: Request, res: Response): Promise<void> {
+  const scope = await resolveScope(req.user);
+  res.json(await analyticsService.getSubmissionsToday(scope));
+}
+
 export async function priorityBreakdown(req: Request, res: Response): Promise<void> {
   const scope = await resolveScope(req.user);
   res.json(await analyticsService.getPriorityBreakdown(scope));

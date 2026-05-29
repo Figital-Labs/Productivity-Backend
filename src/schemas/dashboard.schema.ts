@@ -114,6 +114,8 @@ export const overdueQuerySchema = z.object({
 });
 export type OverdueQuery = z.infer<typeof overdueQuerySchema>;
 
+// `GET /dashboard/analytics/submissions-today` has no query params — always today.
+
 /** `PATCH /dashboard/groups/:id/members/:userId` — flip lead / canManage. */
 export const patchGroupMemberSchema = z
   .object({
