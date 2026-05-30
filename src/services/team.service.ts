@@ -14,7 +14,7 @@ import type {
   CreateTeamUserInput,
   ResetTeamUserPasswordInput,
 } from "../schemas/team.schema.js";
-import { canCreateUserAtLevel } from "../utils/auth.js";
+import { canCreateUserAtLevel, reportSubtreeIds } from "../utils/auth.js";
 import { parseDateString, todayInUserTz } from "../utils/date.js";
 
 import { addUserToPersonalDirects } from "./personal-directs.service.js";
@@ -57,9 +57,18 @@ function toPublicTeamUser(u: {
   };
 }
 
-function requireManagerOf(manager: AuthenticatedUser, targetUserId: string): void {
-  if (manager.role === "admin") return;
-  if (!manager.reportIds.has(targetUserId)) {
+async function requireCanManage(manager: AuthenticatedUser, targetUserId: string): Promise<void> {
+  if (manager.isSuperAdmin) return;
+  const target = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { level: true },
+  });
+  if (!target) throw new NotFoundError("User", targetUserId);
+  if (target.level >= manager.level) {
+    throw new ForbiddenError("You cannot manage a user at or above your level");
+  }
+  const subtree = await reportSubtreeIds(manager.id);
+  if (!subtree.has(targetUserId)) {
     throw new ForbiddenError("You are not a manager of this user");
   }
 }
@@ -137,7 +146,7 @@ export async function getReportTasks(
   reportId: string,
   date: Date,
 ): Promise<Task[]> {
-  requireManagerOf(manager, reportId);
+  await requireCanManage(manager, reportId);
   return taskRepo.listByDate(reportId, date);
 }
 
@@ -150,7 +159,7 @@ export async function getReportSubmissions(
   reportId: string,
   date: Date,
 ): Promise<{ dayPlan: DayPlanSubmission | null; dayClosure: DayClosureSubmission | null }> {
-  requireManagerOf(manager, reportId);
+  await requireCanManage(manager, reportId);
   const [dayPlan, dayClosureRow] = await Promise.all([
     dayPlanRepo.findByUserAndDate(reportId, date),
     dayClosureRepo.findByUserAndDate(reportId, date),
@@ -170,7 +179,7 @@ export async function createDelegatedTask(
   manager: AuthenticatedUser,
   input: CreateDelegatedTaskInput,
 ): Promise<Task> {
-  requireManagerOf(manager, input.assigneeId);
+  await requireCanManage(manager, input.assigneeId);
   const targetDate = input.targetDate
     ? parseDateString(input.targetDate)
     : todayInUserTz(DEFAULT_TIMEZONE);
@@ -351,6 +360,9 @@ export async function attachExistingUser(
   if (target.role === "admin") {
     throw new AppError("CANNOT_ATTACH_ADMIN", 403, "Cannot attach an admin as a report");
   }
+  if (target.level >= creator.level) {
+    throw new ForbiddenError("Cannot attach a user at or above your level as a report");
+  }
   if (creator.reportIds.has(target.id)) {
     throw new ConflictError("ALREADY_A_REPORT", "This user already reports to you.");
   }
@@ -362,6 +374,67 @@ export async function attachExistingUser(
   await addUserToPersonalDirects(creator, target.id);
 
   return toPublicTeamUser(target);
+}
+
+export interface ManagedTreeNode {
+  id: string;
+  email: string;
+  name: string;
+  orgId: string;
+  role: "staff" | "manager" | "admin";
+  depth: 0 | 1;
+  managerId: string;
+  todayProgress?: ReportProgress;
+}
+
+/**
+ * Two-level managed tree: direct reports (depth=0, with todayProgress) plus
+ * their direct reports (depth=1, basic info only). Used by the mobile Team
+ * tab to show the full supervised pool for task delegation (G7 + G10).
+ */
+export async function listManagedTree(manager: AuthenticatedUser): Promise<ManagedTreeNode[]> {
+  const directReports = await listReports(manager);
+  if (directReports.length === 0) return [];
+
+  const directIds = directReports.map((r) => r.id);
+
+  const subRows = await prisma.user.findMany({
+    where: {
+      managers: { some: { id: { in: directIds } } },
+      NOT: { id: { in: [manager.id, ...directIds] } },
+    },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      orgId: true,
+      role: true,
+      managers: { where: { id: { in: directIds } }, select: { id: true } },
+    },
+    orderBy: { name: "asc" },
+  });
+
+  return [
+    ...directReports.map((r) => ({
+      id: r.id,
+      email: r.email,
+      name: r.name,
+      orgId: r.orgId,
+      role: r.role,
+      depth: 0 as const,
+      managerId: manager.id,
+      todayProgress: r.todayProgress,
+    })),
+    ...subRows.map((r) => ({
+      id: r.id,
+      email: r.email,
+      name: r.name,
+      orgId: r.orgId,
+      role: r.role as "staff" | "manager" | "admin",
+      depth: 1 as const,
+      managerId: r.managers[0]?.id ?? "",
+    })),
+  ];
 }
 
 export async function detachReport(manager: AuthenticatedUser, reportId: string): Promise<void> {
@@ -382,7 +455,7 @@ export async function resetUserPassword(
   targetUserId: string,
   input: ResetTeamUserPasswordInput,
 ): Promise<void> {
-  requireManagerOf(manager, targetUserId);
+  await requireCanManage(manager, targetUserId);
   const target = await prisma.user.findUnique({ where: { id: targetUserId } });
   if (!target) throw new NotFoundError("User", targetUserId);
   const passwordHash = await hashPassword(input.password);

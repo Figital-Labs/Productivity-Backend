@@ -176,12 +176,13 @@ export async function kpisForUsersInRange(userIds: string[], days: number): Prom
   const scopedUserIds = unique(userIds);
   if (scopedUserIds.length === 0) return kpisForUsers([]);
   const dates = rangeDays(days);
-  const today = dates[dates.length - 1] ?? todayInUserTz(DEFAULT_TIMEZONE);
   const [plansSubmittedToday, closuresSubmittedToday, taskCounts] = await Promise.all([
-    prisma.dayPlanSubmission.count({ where: { userId: { in: scopedUserIds }, date: today } }),
+    prisma.dayPlanSubmission.count({
+      where: { userId: { in: scopedUserIds }, date: { in: dates } },
+    }),
     // Sprint 17 Phase 5: only finalized closures count.
     prisma.dayClosureSubmission.count({
-      where: { userId: { in: scopedUserIds }, date: today, status: "submitted" },
+      where: { userId: { in: scopedUserIds }, date: { in: dates }, status: "submitted" },
     }),
     prisma.task.groupBy({
       by: ["completed"],
@@ -218,31 +219,42 @@ export async function trendForUsers(
   );
   for (const date of previousDates) date.setUTCDate(date.getUTCDate() - 1);
 
-  async function valueForDate(date: Date): Promise<number> {
-    if (scopedUserIds.length === 0) return 0;
+  const allDates = [...currentDates, ...previousDates];
+  const countByDate = new Map<string, number>();
+
+  if (scopedUserIds.length > 0) {
     if (metric === "tasks") {
-      return prisma.task.count({
+      const rows = await prisma.task.groupBy({
+        by: ["targetDate"],
         where: {
           assigneeId: { in: scopedUserIds },
-          targetDate: date,
+          targetDate: { in: allDates },
           completed: true,
           deletedAt: null,
         },
+        _count: { _all: true },
       });
+      for (const r of rows) countByDate.set(formatDateYmd(r.targetDate), r._count._all);
+    } else if (metric === "plans") {
+      const rows = await prisma.dayPlanSubmission.groupBy({
+        by: ["date"],
+        where: { userId: { in: scopedUserIds }, date: { in: allDates } },
+        _count: { _all: true },
+      });
+      for (const r of rows) countByDate.set(formatDateYmd(r.date), r._count._all);
+    } else {
+      // Sprint 17 Phase 5: only finalized closures count on the trend chart.
+      const rows = await prisma.dayClosureSubmission.groupBy({
+        by: ["date"],
+        where: { userId: { in: scopedUserIds }, date: { in: allDates }, status: "submitted" },
+        _count: { _all: true },
+      });
+      for (const r of rows) countByDate.set(formatDateYmd(r.date), r._count._all);
     }
-    if (metric === "plans") {
-      return prisma.dayPlanSubmission.count({ where: { userId: { in: scopedUserIds }, date } });
-    }
-    // Sprint 17 Phase 5: only finalized closures count on the trend chart.
-    return prisma.dayClosureSubmission.count({
-      where: { userId: { in: scopedUserIds }, date, status: "submitted" },
-    });
   }
 
-  const [currentValues, previousValues] = await Promise.all([
-    Promise.all(currentDates.map(valueForDate)),
-    Promise.all(previousDates.map(valueForDate)),
-  ]);
+  const currentValues = currentDates.map((d) => countByDate.get(formatDateYmd(d)) ?? 0);
+  const previousValues = previousDates.map((d) => countByDate.get(formatDateYmd(d)) ?? 0);
   const currentSum = currentValues.reduce((sum, value) => sum + value, 0);
   const previousSum = previousValues.reduce((sum, value) => sum + value, 0);
 
@@ -263,7 +275,7 @@ export async function consistencyForUsers(
   const scopedUserIds = unique(userIds);
   if (scopedUserIds.length === 0) return [];
   const dates = rangeDays(days);
-  const [users, plans, closures] = await Promise.all([
+  const [users, plans, closures, holidays] = await Promise.all([
     prisma.user.findMany({
       where: { id: { in: scopedUserIds } },
       select: { id: true, name: true, role: true },
@@ -280,12 +292,17 @@ export async function consistencyForUsers(
       where: { userId: { in: scopedUserIds }, date: { in: dates }, status: "submitted" },
       select: { userId: true, submittedAt: true, date: true },
     }),
+    prisma.holiday.findMany({
+      where: { userId: { in: scopedUserIds }, date: { in: dates } },
+      select: { userId: true, date: true },
+    }),
   ]);
 
   const planKeys = new Set(plans.map((plan) => `${plan.userId}:${formatDateYmd(plan.date)}`));
   const closureKeys = new Set(
     closures.map((closure) => `${closure.userId}:${formatDateYmd(closure.date)}`),
   );
+  const holidayKeys = new Set(holidays.map((h) => `${h.userId}:${formatDateYmd(h.date)}`));
   const lastByUser = new Map<string, Date>();
   for (const row of [...plans, ...closures]) {
     const previous = lastByUser.get(row.userId);
@@ -296,10 +313,14 @@ export async function consistencyForUsers(
   return users
     .map((user): ConsistencyRow => {
       const planMissedDays = dates.filter(
-        (date) => !planKeys.has(`${user.id}:${formatDateYmd(date)}`),
+        (date) =>
+          !planKeys.has(`${user.id}:${formatDateYmd(date)}`) &&
+          !holidayKeys.has(`${user.id}:${formatDateYmd(date)}`),
       ).length;
       const closureMissedDays = dates.filter(
-        (date) => !closureKeys.has(`${user.id}:${formatDateYmd(date)}`),
+        (date) =>
+          !closureKeys.has(`${user.id}:${formatDateYmd(date)}`) &&
+          !holidayKeys.has(`${user.id}:${formatDateYmd(date)}`),
       ).length;
       return {
         user,
@@ -314,6 +335,7 @@ export async function consistencyForUsers(
 }
 
 export async function departmentsForScope(scope: Scope): Promise<DepartmentCard[]> {
+  if (scope.type === "none") return [];
   const safeScope = requireScope(scope);
   const departments = await prisma.department.findMany({
     where:
@@ -368,6 +390,7 @@ export async function groupsForScope(
   scope: Scope,
   query: DashboardGroupsQuery,
 ): Promise<GroupCard[]> {
+  if (scope.type === "none") return [];
   const safeScope = requireScope(scope);
   const scopeUserIds = await userIdsInScope(safeScope);
   const groups = await prisma.contextGroup.findMany({
@@ -416,6 +439,7 @@ export async function peopleForScope(
   scope: Scope,
   query: DashboardPeopleQuery,
 ): Promise<PersonRow[]> {
+  if (scope.type === "none") return [];
   const safeScope = requireScope(scope);
   let userIds = await userIdsInScope(safeScope);
   if (query.scope === "dept" && query.id !== undefined) {
@@ -430,37 +454,122 @@ export async function peopleForScope(
   const allowed = new Set(await userIdsInScope(safeScope));
   userIds = unique(userIds).filter((id) => allowed.has(id));
 
-  const [users, consistency] = await Promise.all([
+  const today = todayInUserTz(DEFAULT_TIMEZONE);
+  const weekDates = rangeDays(7);
+
+  const [
+    users,
+    consistency,
+    planCountsToday,
+    closureCountsToday,
+    taskCountsToday,
+    planCountsWeek,
+    closureCountsWeek,
+    taskCountsWeek,
+  ] = await Promise.all([
     prisma.user.findMany({
       where: { id: { in: userIds } },
       select: { id: true, name: true, email: true, role: true },
       orderBy: { name: "asc" },
     }),
     consistencyForUsers(userIds, 7),
-  ]);
-  const consistencyByUser = new Map(consistency.map((row) => [row.user.id, row]));
-
-  return Promise.all(
-    users.map(async (user) => {
-      const todayKpis = await kpisForUsers([user.id]);
-      const weekKpis = await kpisForUsersInRange([user.id], 7);
-      const missed =
-        (consistencyByUser.get(user.id)?.planMissedDays ?? 0) +
-        (consistencyByUser.get(user.id)?.closureMissedDays ?? 0);
-      return {
-        user,
-        todayKpis,
-        weekKpis,
-        consistencyScore: Math.max(0, 100 - missed * 10),
-      };
+    prisma.dayPlanSubmission.groupBy({
+      by: ["userId"],
+      where: { userId: { in: userIds }, date: today },
+      _count: { _all: true },
     }),
-  );
+    prisma.dayClosureSubmission.groupBy({
+      by: ["userId"],
+      where: { userId: { in: userIds }, date: today, status: "submitted" },
+      _count: { _all: true },
+    }),
+    prisma.task.groupBy({
+      by: ["assigneeId", "completed"],
+      where: { assigneeId: { in: userIds }, targetDate: today, deletedAt: null },
+      _count: { _all: true },
+    }),
+    prisma.dayPlanSubmission.groupBy({
+      by: ["userId"],
+      where: { userId: { in: userIds }, date: { in: weekDates } },
+      _count: { _all: true },
+    }),
+    prisma.dayClosureSubmission.groupBy({
+      by: ["userId"],
+      where: { userId: { in: userIds }, date: { in: weekDates }, status: "submitted" },
+      _count: { _all: true },
+    }),
+    prisma.task.groupBy({
+      by: ["assigneeId", "completed"],
+      where: { assigneeId: { in: userIds }, targetDate: { in: weekDates }, deletedAt: null },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const consistencyByUser = new Map(consistency.map((row) => [row.user.id, row]));
+  const plansTodayByUser = new Map(planCountsToday.map((r) => [r.userId, r._count._all]));
+  const closuresTodayByUser = new Map(closureCountsToday.map((r) => [r.userId, r._count._all]));
+  const plansWeekByUser = new Map(planCountsWeek.map((r) => [r.userId, r._count._all]));
+  const closuresWeekByUser = new Map(closureCountsWeek.map((r) => [r.userId, r._count._all]));
+
+  const tasksTodayByUser = new Map<string, { total: number; done: number }>();
+  for (const r of taskCountsToday) {
+    const entry = tasksTodayByUser.get(r.assigneeId) ?? { total: 0, done: 0 };
+    entry.total += r._count._all;
+    if (r.completed) entry.done += r._count._all;
+    tasksTodayByUser.set(r.assigneeId, entry);
+  }
+
+  const tasksWeekByUser = new Map<string, { total: number; done: number }>();
+  for (const r of taskCountsWeek) {
+    const entry = tasksWeekByUser.get(r.assigneeId) ?? { total: 0, done: 0 };
+    entry.total += r._count._all;
+    if (r.completed) entry.done += r._count._all;
+    tasksWeekByUser.set(r.assigneeId, entry);
+  }
+
+  return users.map((user) => {
+    const todayTasks = tasksTodayByUser.get(user.id) ?? { total: 0, done: 0 };
+    const weekTasks = tasksWeekByUser.get(user.id) ?? { total: 0, done: 0 };
+    const plansToday = plansTodayByUser.get(user.id) ?? 0;
+    const closuresToday = closuresTodayByUser.get(user.id) ?? 0;
+    const plansWeek = plansWeekByUser.get(user.id) ?? 0;
+    const closuresWeek = closuresWeekByUser.get(user.id) ?? 0;
+
+    const todayKpis: Kpis = {
+      activeStaffToday: 1,
+      plansSubmittedToday: plansToday,
+      plansSubmittedPct: plansToday > 0 ? 100 : 0,
+      closuresSubmittedToday: closuresToday,
+      closuresSubmittedPct: closuresToday > 0 ? 100 : 0,
+      totalTasks: todayTasks.total,
+      tasksDone: todayTasks.done,
+      tasksDonePct: pct(todayTasks.done, todayTasks.total),
+    };
+
+    const weekKpis: Kpis = {
+      activeStaffToday: 1,
+      plansSubmittedToday: plansWeek,
+      plansSubmittedPct: pct(plansWeek, weekDates.length),
+      closuresSubmittedToday: closuresWeek,
+      closuresSubmittedPct: pct(closuresWeek, weekDates.length),
+      totalTasks: weekTasks.total,
+      tasksDone: weekTasks.done,
+      tasksDonePct: pct(weekTasks.done, weekTasks.total),
+    };
+
+    const missed =
+      (consistencyByUser.get(user.id)?.planMissedDays ?? 0) +
+      (consistencyByUser.get(user.id)?.closureMissedDays ?? 0);
+
+    return { user, todayKpis, weekKpis, consistencyScore: Math.max(0, 100 - missed * 10) };
+  });
 }
 
 export async function meetingsForScope(
   scope: Scope,
   query: DashboardMeetingsQuery,
 ): Promise<DashboardMeeting[]> {
+  if (scope.type === "none") return [];
   const safeScope = requireScope(scope);
   const scopedUserIds = await userIdsInScope(safeScope);
   const date = query.date ? parseDateString(query.date) : todayInUserTz(DEFAULT_TIMEZONE);

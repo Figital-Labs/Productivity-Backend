@@ -51,8 +51,9 @@ export function searchSameOrg(
   orgId: string,
   q: string | undefined,
   take: number,
-): Promise<Pick<User, "id" | "email" | "name" | "role">[]> {
-  const where = q
+  maxLevel?: number,
+): Promise<Pick<User, "id" | "email" | "name" | "role" | "level">[]> {
+  const baseWhere = q
     ? {
         orgId,
         OR: [
@@ -61,10 +62,11 @@ export function searchSameOrg(
         ],
       }
     : { orgId };
+  const where = maxLevel !== undefined ? { ...baseWhere, level: { lt: maxLevel } } : baseWhere;
   return prisma.user.findMany({
     where,
     take,
     orderBy: { name: "asc" },
-    select: { id: true, email: true, name: true, role: true },
+    select: { id: true, email: true, name: true, role: true, level: true },
   });
 }

@@ -102,6 +102,38 @@ export const personDayQuerySchema = z.object({
 });
 export type PersonDayQuery = z.infer<typeof personDayQuerySchema>;
 
+/** `GET /dashboard/analytics/task-flow` — daily task inflow vs outflow. */
+export const taskFlowQuerySchema = z.object({
+  range: z.enum(["7d", "30d"]).default("7d"),
+});
+export type TaskFlowQuery = z.infer<typeof taskFlowQuerySchema>;
+
+/** `GET /dashboard/analytics/overdue` — overdue incomplete tasks in scope. */
+export const overdueQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+export type OverdueQuery = z.infer<typeof overdueQuerySchema>;
+
+// `GET /dashboard/analytics/submissions-today` has no query params — always today.
+
+/** `GET /dashboard/analytics/plan-accuracy` — snapshot completion rate per day. */
+export const planAccuracyQuerySchema = z.object({
+  range: z.enum(["7d", "30d"]).default("7d"),
+});
+export type PlanAccuracyQuery = z.infer<typeof planAccuracyQuerySchema>;
+
+/** `GET /dashboard/analytics/meeting-conversion` — meeting-sourced task completion rate. */
+export const meetingConversionQuerySchema = z.object({
+  range: z.enum(["7d", "30d"]).default("7d"),
+});
+export type MeetingConversionQuery = z.infer<typeof meetingConversionQuerySchema>;
+
+/** `GET /dashboard/analytics/meetings` — daily meeting count + action items. */
+export const meetingsAnalyticsQuerySchema = z.object({
+  range: z.enum(["7d", "30d"]).default("7d"),
+});
+export type MeetingsAnalyticsQuery = z.infer<typeof meetingsAnalyticsQuerySchema>;
+
 /** `PATCH /dashboard/groups/:id/members/:userId` — flip lead / canManage. */
 export const patchGroupMemberSchema = z
   .object({

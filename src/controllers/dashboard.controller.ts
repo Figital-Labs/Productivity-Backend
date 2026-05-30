@@ -14,10 +14,15 @@ import {
   dashboardMeetingsQuerySchema,
   dashboardPeopleQuerySchema,
   dashboardTrendsQuerySchema,
+  meetingConversionQuerySchema,
+  meetingsAnalyticsQuerySchema,
+  overdueQuerySchema,
   patchGroupMemberSchema,
   performersQuerySchema,
   personDayQuerySchema,
+  planAccuracyQuerySchema,
   planVsClosureQuerySchema,
+  taskFlowQuerySchema,
   updateDepartmentSchema,
   updateGroupSchema,
 } from "../schemas/dashboard.schema.js";
@@ -27,16 +32,8 @@ import * as dashboardService from "../services/dashboard-rollup.service.js";
 import * as treeService from "../services/dashboard-tree.service.js";
 import * as morningBriefService from "../services/morning-brief.service.js";
 
-async function requireResolvedScope(req: Request) {
-  const scope = await resolveScope(req.user);
-  if (scope.type === "none") {
-    throw new ForbiddenError();
-  }
-  return scope;
-}
-
 export async function overview(req: Request, res: Response): Promise<void> {
-  const scope = await requireResolvedScope(req);
+  const scope = await resolveScope(req.user);
   const userIds = await dashboardService.userIdsInScope(scope);
   res.json({
     kpis: await dashboardService.kpisForUsers(userIds),
@@ -46,35 +43,32 @@ export async function overview(req: Request, res: Response): Promise<void> {
 }
 
 export async function departments(req: Request, res: Response): Promise<void> {
-  res.json({
-    departments: await dashboardService.departmentsForScope(await requireResolvedScope(req)),
-  });
+  const scope = await resolveScope(req.user);
+  res.json({ departments: await dashboardService.departmentsForScope(scope) });
 }
 
 export async function groups(req: Request, res: Response): Promise<void> {
   const query = dashboardGroupsQuerySchema.parse(req.query);
-  res.json({
-    groups: await dashboardService.groupsForScope(await requireResolvedScope(req), query),
-  });
+  const scope = await resolveScope(req.user);
+  res.json({ groups: await dashboardService.groupsForScope(scope, query) });
 }
 
 export async function people(req: Request, res: Response): Promise<void> {
   const query = dashboardPeopleQuerySchema.parse(req.query);
-  res.json({
-    people: await dashboardService.peopleForScope(await requireResolvedScope(req), query),
-  });
+  const scope = await resolveScope(req.user);
+  res.json({ people: await dashboardService.peopleForScope(scope, query) });
 }
 
 export async function consistency(req: Request, res: Response): Promise<void> {
   const query = dashboardConsistencyQuerySchema.parse(req.query);
-  const scope = await requireResolvedScope(req);
+  const scope = await resolveScope(req.user);
   const userIds = await dashboardService.userIdsInScope(scope);
   res.json({ rows: await dashboardService.consistencyForUsers(userIds, query.days) });
 }
 
 export async function trends(req: Request, res: Response): Promise<void> {
   const query = dashboardTrendsQuerySchema.parse(req.query);
-  const scope = await requireResolvedScope(req);
+  const scope = await resolveScope(req.user);
   const userIds = await dashboardService.userIdsInScope(scope);
   const days = query.range === "30d" ? 30 : 7;
   res.json(await dashboardService.trendForUsers(userIds, query.metric, days));
@@ -82,9 +76,8 @@ export async function trends(req: Request, res: Response): Promise<void> {
 
 export async function meetings(req: Request, res: Response): Promise<void> {
   const query = dashboardMeetingsQuerySchema.parse(req.query);
-  res.json({
-    meetings: await dashboardService.meetingsForScope(await requireResolvedScope(req), query),
-  });
+  const scope = await resolveScope(req.user);
+  res.json({ meetings: await dashboardService.meetingsForScope(scope, query) });
 }
 
 export async function activity(req: Request, res: Response): Promise<void> {
@@ -137,7 +130,9 @@ export async function removeGroupMember(req: Request, res: Response): Promise<vo
 
 export async function createReminder(req: Request, res: Response): Promise<void> {
   const input = createReminderSchema.parse(req.body);
-  res.json(await dashboardService.createReminder(req.user, await requireResolvedScope(req), input));
+  const scope = await resolveScope(req.user);
+  if (scope.type === "none") throw new ForbiddenError();
+  res.json(await dashboardService.createReminder(req.user, scope, input));
 }
 
 // ─── Sprint 18 — Phase 2 handlers ──────────────────────────────────────────
@@ -163,23 +158,67 @@ export async function personDay(req: Request, res: Response): Promise<void> {
 
 export async function performers(req: Request, res: Response): Promise<void> {
   const query = performersQuerySchema.parse(req.query);
-  const scope = await requireResolvedScope(req);
+  const scope = await resolveScope(req.user);
   res.json(await analyticsService.getPerformers(scope, query.metric, query.days, query.limit));
 }
 
 export async function planVsClosure(req: Request, res: Response): Promise<void> {
   const query = planVsClosureQuerySchema.parse(req.query);
-  const scope = await requireResolvedScope(req);
+  const scope = await resolveScope(req.user);
   const days = query.range === "30d" ? 30 : 7;
   res.json(await analyticsService.getPlanVsClosure(scope, days));
 }
 
 export async function summaryCards(req: Request, res: Response): Promise<void> {
-  res.json(await analyticsService.getSummaryCards(await requireResolvedScope(req)));
+  res.json(await analyticsService.getSummaryCards(await resolveScope(req.user)));
 }
 
 export async function groupAnalytics(req: Request, res: Response): Promise<void> {
-  res.json({ rows: await analyticsService.getGroupAnalytics(await requireResolvedScope(req)) });
+  res.json({ rows: await analyticsService.getGroupAnalytics(await resolveScope(req.user)) });
+}
+
+export async function taskFlow(req: Request, res: Response): Promise<void> {
+  const query = taskFlowQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  const days = query.range === "30d" ? 30 : 7;
+  res.json(await analyticsService.getTaskFlow(scope, days));
+}
+
+export async function submissionsToday(req: Request, res: Response): Promise<void> {
+  const scope = await resolveScope(req.user);
+  res.json(await analyticsService.getSubmissionsToday(scope));
+}
+
+export async function priorityBreakdown(req: Request, res: Response): Promise<void> {
+  const scope = await resolveScope(req.user);
+  res.json(await analyticsService.getPriorityBreakdown(scope));
+}
+
+export async function overdueTasks(req: Request, res: Response): Promise<void> {
+  const query = overdueQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  res.json(await analyticsService.getOverdueTasks(scope, query.limit));
+}
+
+export async function planAccuracy(req: Request, res: Response): Promise<void> {
+  const query = planAccuracyQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  const days = query.range === "30d" ? 30 : 7;
+  res.json(await analyticsService.getPlanAccuracy(scope, days));
+}
+
+export async function meetingConversion(req: Request, res: Response): Promise<void> {
+  const query = meetingConversionQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  const days = query.range === "30d" ? 30 : 7;
+  res.json(await analyticsService.getMeetingConversion(scope, days));
+}
+
+export async function meetingsAnalytics(req: Request, res: Response): Promise<void> {
+  const query = meetingsAnalyticsQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  const days = query.range === "30d" ? 30 : 7;
+  res.json(await analyticsService.getMeetingsAnalytics(scope, days));
 }
 
 export async function patchGroupMember(req: Request, res: Response): Promise<void> {
