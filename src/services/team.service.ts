@@ -57,10 +57,18 @@ function toPublicTeamUser(u: {
   };
 }
 
-function requireManagerOf(manager: AuthenticatedUser, targetUserId: string): void {
-  if (manager.role === "admin") return;
+async function requireCanManage(manager: AuthenticatedUser, targetUserId: string): Promise<void> {
+  if (manager.isSuperAdmin) return;
   if (!manager.reportIds.has(targetUserId)) {
     throw new ForbiddenError("You are not a manager of this user");
+  }
+  const target = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { level: true },
+  });
+  if (!target) throw new NotFoundError("User", targetUserId);
+  if (target.level >= manager.level) {
+    throw new ForbiddenError("You cannot manage a user at or above your level");
   }
 }
 
@@ -137,7 +145,7 @@ export async function getReportTasks(
   reportId: string,
   date: Date,
 ): Promise<Task[]> {
-  requireManagerOf(manager, reportId);
+  await requireCanManage(manager, reportId);
   return taskRepo.listByDate(reportId, date);
 }
 
@@ -150,7 +158,7 @@ export async function getReportSubmissions(
   reportId: string,
   date: Date,
 ): Promise<{ dayPlan: DayPlanSubmission | null; dayClosure: DayClosureSubmission | null }> {
-  requireManagerOf(manager, reportId);
+  await requireCanManage(manager, reportId);
   const [dayPlan, dayClosureRow] = await Promise.all([
     dayPlanRepo.findByUserAndDate(reportId, date),
     dayClosureRepo.findByUserAndDate(reportId, date),
@@ -170,7 +178,7 @@ export async function createDelegatedTask(
   manager: AuthenticatedUser,
   input: CreateDelegatedTaskInput,
 ): Promise<Task> {
-  requireManagerOf(manager, input.assigneeId);
+  await requireCanManage(manager, input.assigneeId);
   const targetDate = input.targetDate
     ? parseDateString(input.targetDate)
     : todayInUserTz(DEFAULT_TIMEZONE);
@@ -351,6 +359,9 @@ export async function attachExistingUser(
   if (target.role === "admin") {
     throw new AppError("CANNOT_ATTACH_ADMIN", 403, "Cannot attach an admin as a report");
   }
+  if (target.level >= creator.level) {
+    throw new ForbiddenError("Cannot attach a user at or above your level as a report");
+  }
   if (creator.reportIds.has(target.id)) {
     throw new ConflictError("ALREADY_A_REPORT", "This user already reports to you.");
   }
@@ -382,7 +393,7 @@ export async function resetUserPassword(
   targetUserId: string,
   input: ResetTeamUserPasswordInput,
 ): Promise<void> {
-  requireManagerOf(manager, targetUserId);
+  await requireCanManage(manager, targetUserId);
   const target = await prisma.user.findUnique({ where: { id: targetUserId } });
   if (!target) throw new NotFoundError("User", targetUserId);
   const passwordHash = await hashPassword(input.password);
