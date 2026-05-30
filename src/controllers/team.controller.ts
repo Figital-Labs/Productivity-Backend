@@ -24,6 +24,11 @@ export async function listReports(req: Request, res: Response): Promise<void> {
   res.status(200).json(reports);
 }
 
+export async function listManagedTree(req: Request, res: Response): Promise<void> {
+  const nodes = await teamService.listManagedTree(req.user);
+  res.status(200).json(nodes);
+}
+
 export async function getReportTasks(req: Request, res: Response): Promise<void> {
   const { id: reportId } = idParamSchema.parse(req.params);
   const query = getReportTasksQuerySchema.parse(req.query);
