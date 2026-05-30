@@ -128,6 +128,12 @@ export const meetingConversionQuerySchema = z.object({
 });
 export type MeetingConversionQuery = z.infer<typeof meetingConversionQuerySchema>;
 
+/** `GET /dashboard/analytics/meetings` — daily meeting count + action items. */
+export const meetingsAnalyticsQuerySchema = z.object({
+  range: z.enum(["7d", "30d"]).default("7d"),
+});
+export type MeetingsAnalyticsQuery = z.infer<typeof meetingsAnalyticsQuerySchema>;
+
 /** `PATCH /dashboard/groups/:id/members/:userId` — flip lead / canManage. */
 export const patchGroupMemberSchema = z
   .object({

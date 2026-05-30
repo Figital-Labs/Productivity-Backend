@@ -15,6 +15,7 @@ import {
   dashboardPeopleQuerySchema,
   dashboardTrendsQuerySchema,
   meetingConversionQuerySchema,
+  meetingsAnalyticsQuerySchema,
   overdueQuerySchema,
   patchGroupMemberSchema,
   performersQuerySchema,
@@ -211,6 +212,13 @@ export async function meetingConversion(req: Request, res: Response): Promise<vo
   const scope = await resolveScope(req.user);
   const days = query.range === "30d" ? 30 : 7;
   res.json(await analyticsService.getMeetingConversion(scope, days));
+}
+
+export async function meetingsAnalytics(req: Request, res: Response): Promise<void> {
+  const query = meetingsAnalyticsQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  const days = query.range === "30d" ? 30 : 7;
+  res.json(await analyticsService.getMeetingsAnalytics(scope, days));
 }
 
 export async function patchGroupMember(req: Request, res: Response): Promise<void> {

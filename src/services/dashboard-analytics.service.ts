@@ -713,3 +713,82 @@ export async function getGroupAnalytics(scope: Scope): Promise<GroupAnalyticsRow
     }),
   );
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// MEETINGS ANALYTICS — daily meeting count + action items generated.
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface MeetingsDailyPoint {
+  date: string;
+  count: number;
+  actionItemCount: number;
+}
+
+export interface MeetingsAnalyticsResult {
+  series: MeetingsDailyPoint[];
+  windowDays: number;
+  totalMeetings: number;
+  totalActionItems: number;
+  processed: number;
+}
+
+export async function getMeetingsAnalytics(
+  scope: Scope,
+  days: number,
+): Promise<MeetingsAnalyticsResult> {
+  const userIds = await userIdsInScope(scope);
+  const dates = rangeDays(days);
+  const empty: MeetingsAnalyticsResult = {
+    series: dates.map((d) => ({ date: formatDateYmd(d), count: 0, actionItemCount: 0 })),
+    windowDays: days,
+    totalMeetings: 0,
+    totalActionItems: 0,
+    processed: 0,
+  };
+  if (userIds.length === 0) return empty;
+
+  const today = todayInUserTz(DEFAULT_TIMEZONE);
+  const from = startOfDay(dates[0] ?? today);
+  const to = endOfDay(dates[dates.length - 1] ?? today);
+
+  const meetings = await prisma.meeting.findMany({
+    where: {
+      deletedAt: null,
+      scheduledAt: { gte: from, lte: to },
+      OR: [{ userId: { in: userIds } }, { attendeeIds: { hasSome: userIds } }],
+    },
+    select: { scheduledAt: true, processedAt: true, actions: true },
+  });
+
+  const byDate = new Map<string, { count: number; actionItemCount: number }>();
+  for (const d of dates) byDate.set(formatDateYmd(d), { count: 0, actionItemCount: 0 });
+
+  let totalActionItems = 0;
+  let processed = 0;
+
+  for (const m of meetings) {
+    const key = formatDateYmd(m.scheduledAt);
+    const entry = byDate.get(key);
+    if (!entry) continue;
+    entry.count += 1;
+    if (m.processedAt) {
+      const actionCount = Array.isArray(m.actions) ? m.actions.length : 0;
+      entry.actionItemCount += actionCount;
+      totalActionItems += actionCount;
+      processed += 1;
+    }
+  }
+
+  const series = dates.map((d) => ({
+    date: formatDateYmd(d),
+    ...(byDate.get(formatDateYmd(d)) ?? { count: 0, actionItemCount: 0 }),
+  }));
+
+  return {
+    series,
+    windowDays: days,
+    totalMeetings: meetings.length,
+    totalActionItems,
+    processed,
+  };
+}
