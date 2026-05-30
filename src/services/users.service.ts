@@ -7,6 +7,7 @@ export interface PublicUserSummary {
   email: string;
   name: string;
   role: "staff" | "manager" | "admin";
+  level: number;
 }
 
 const SEARCH_RESULT_CAP = 50;
@@ -26,11 +27,13 @@ export async function searchSameOrg(
     caller.orgId,
     trimmed && trimmed.length > 0 ? trimmed : undefined,
     SEARCH_RESULT_CAP,
+    caller.level,
   );
   return rows.map((r) => ({
     id: r.id,
     email: r.email,
     name: r.name,
     role: r.role as PublicUserSummary["role"],
+    level: r.level,
   }));
 }
