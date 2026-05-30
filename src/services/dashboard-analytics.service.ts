@@ -337,11 +337,11 @@ export async function getTaskFlow(scope: Scope, days: number): Promise<TaskFlowR
 
 // ───────────────────────────────────────────────────────────────────────────
 // SUBMISSIONS TODAY — A3 plan timing (on-time vs late) + A8 closure status.
-// "Late" = plan submitted after 10 AM IST (04:30 UTC).
+// "Late" = plan submitted after 12 PM IST (06:30 UTC).
 // ───────────────────────────────────────────────────────────────────────────
 
-// 10:00 AM IST == 04:30 UTC (IST = UTC+5:30).
-const PLAN_CUTOFF_UTC = { hour: 4, minute: 30 } as const;
+// 12:00 PM IST == 06:30 UTC (IST = UTC+5:30).
+const PLAN_CUTOFF_UTC = { hour: 6, minute: 30 } as const;
 
 function isPlanOnTime(submittedAt: Date): boolean {
   const h = submittedAt.getUTCHours();
