@@ -142,53 +142,20 @@ const USERS: SeedUser[] = [
 ];
 
 // report → [its direct managers]
+// Each person reports only to their immediate manager — no skip-level edges.
+// ashok and subha are parallel team leads; staff are split between them.
 const HIERARCHY: Record<string, string[]> = {
   "daksh@figitallabs.com": ["tech@figitallabs.com"],
   "revyant@figitallabs.com": ["tech@figitallabs.com"],
   "ashok@figitallabs.com": ["daksh@figitallabs.com", "revyant@figitallabs.com"],
   "subha@figitallabs.com": ["daksh@figitallabs.com", "revyant@figitallabs.com"],
-  "abhishek@figitallabs.com": [
-    "ashok@figitallabs.com",
-    "subha@figitallabs.com",
-    "daksh@figitallabs.com",
-    "revyant@figitallabs.com",
-  ],
-  "aditya@figitallabs.com": [
-    "ashok@figitallabs.com",
-    "subha@figitallabs.com",
-    "daksh@figitallabs.com",
-    "revyant@figitallabs.com",
-  ],
-  "gautam@figitallabs.com": [
-    "ashok@figitallabs.com",
-    "subha@figitallabs.com",
-    "daksh@figitallabs.com",
-    "revyant@figitallabs.com",
-  ],
-  "imtiaz@figitallabs.com": [
-    "ashok@figitallabs.com",
-    "subha@figitallabs.com",
-    "daksh@figitallabs.com",
-    "revyant@figitallabs.com",
-  ],
-  "mihir@figitallabs.com": [
-    "ashok@figitallabs.com",
-    "subha@figitallabs.com",
-    "daksh@figitallabs.com",
-    "revyant@figitallabs.com",
-  ],
-  "prafful@figitallabs.com": [
-    "ashok@figitallabs.com",
-    "subha@figitallabs.com",
-    "daksh@figitallabs.com",
-    "revyant@figitallabs.com",
-  ],
-  "omkar@figitallabs.com": [
-    "ashok@figitallabs.com",
-    "subha@figitallabs.com",
-    "daksh@figitallabs.com",
-    "revyant@figitallabs.com",
-  ],
+  "abhishek@figitallabs.com": ["ashok@figitallabs.com"],
+  "aditya@figitallabs.com": ["ashok@figitallabs.com"],
+  "gautam@figitallabs.com": ["ashok@figitallabs.com"],
+  "imtiaz@figitallabs.com": ["subha@figitallabs.com"],
+  "mihir@figitallabs.com": ["subha@figitallabs.com"],
+  "prafful@figitallabs.com": ["subha@figitallabs.com"],
+  "omkar@figitallabs.com": ["subha@figitallabs.com"],
 };
 
 async function main(): Promise<void> {
