@@ -16,10 +16,7 @@ import type {
 import { meetingIntentResponseSchema } from "../schemas/meeting.schema.js";
 import { promptDateAnchors, todayInUserTz } from "../utils/date.js";
 
-import {
-  dispatchMeetingAction,
-  type PersistedMeetingAction,
-} from "./meeting-action-dispatch.service.js";
+import type { PersistedMeetingAction } from "./meeting-action-dispatch.service.js";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata";
 
@@ -249,23 +246,24 @@ export async function processMeeting(
   });
 
   const allowedAssigneeIds = new Set(meetingForPrompt.attendeeIds);
+
+  // All AI actions become recommendations — manager confirms before any task is created.
+  // Preserve the suggested assigneeId when it's a valid attendee or the creator.
+  const actionsAsRecommendations: MeetingRecommendation[] = aiResponse.actions.map((action) => ({
+    title: action.title,
+    reasoning: action.reasoning,
+    status: "pending" as const,
+    ...(allowedAssigneeIds.has(action.assigneeId) || action.assigneeId === meetingForPrompt.userId
+      ? { assigneeId: action.assigneeId }
+      : {}),
+    ...(action.priority !== undefined ? { priority: action.priority } : {}),
+    ...(action.targetDate !== undefined ? { targetDate: action.targetDate } : {}),
+  }));
+
   const persistedActions: PersistedMeetingAction[] = [];
-  const extraRecommendations: MeetingRecommendation[] = [];
-
-  for (const action of aiResponse.actions) {
-    const result = await dispatchMeetingAction(action, {
-      meetingId: meetingForPrompt.id,
-      creatorId: meetingForPrompt.userId,
-      allowedAssigneeIds,
-      today,
-    });
-    if (result.kind === "action") persistedActions.push(result.action);
-    else extraRecommendations.push(result.recommendation);
-  }
-
   const allRecommendations: MeetingRecommendation[] = [
+    ...actionsAsRecommendations,
     ...aiResponse.recommendations,
-    ...extraRecommendations,
   ];
 
   const updated = await meetingRepo.recordProcessed(meetingForPrompt.id, {
