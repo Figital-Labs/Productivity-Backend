@@ -69,6 +69,7 @@ export type MeetingAction = z.infer<typeof meetingActionSchema>;
 
 export const meetingRecommendationSchema = z.object({
   title: z.string().min(1),
+  assigneeId: z.string().min(1).optional(),
   priority: priorityEnum.optional(),
   targetDate: ymdDateSchema.optional(),
   reasoning: z.string(),
