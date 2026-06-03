@@ -16,7 +16,7 @@ import type {
   UpdateDepartmentInput,
   UpdateGroupInput,
 } from "../schemas/dashboard.schema.js";
-import { formatDateYmd, parseDateString, todayInUserTz } from "../utils/date.js";
+import { dayBoundsInTz, formatDateYmd, parseDateString, todayInUserTz } from "../utils/date.js";
 import { omitUndefined } from "../utils/object.js";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata";
@@ -72,16 +72,14 @@ function rangeDays(days: number, endDate = todayInUserTz(DEFAULT_TIMEZONE)): Dat
   });
 }
 
-function startOfDay(date: Date): Date {
-  const copy = new Date(date);
-  copy.setUTCHours(0, 0, 0, 0);
-  return copy;
-}
-
-function endOfDay(date: Date): Date {
-  const copy = new Date(date);
-  copy.setUTCHours(23, 59, 59, 999);
-  return copy;
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/#{1,6}\s+/g, "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/^[-*]\s+/gm, "")
+    .replace(/\n+/g, " ")
+    .trim();
 }
 
 function requireScope(scope: Scope): Exclude<Scope, { type: "none" }> {
@@ -573,10 +571,11 @@ export async function meetingsForScope(
   const safeScope = requireScope(scope);
   const scopedUserIds = await userIdsInScope(safeScope);
   const date = query.date ? parseDateString(query.date) : todayInUserTz(DEFAULT_TIMEZONE);
+  const { start, end } = dayBoundsInTz(date, DEFAULT_TIMEZONE);
   const meetings = await prisma.meeting.findMany({
     where: {
       deletedAt: null,
-      scheduledAt: { gte: startOfDay(date), lte: endOfDay(date) },
+      scheduledAt: { gte: start, lte: end },
       OR: [{ userId: { in: scopedUserIds } }, { attendeeIds: { hasSome: scopedUserIds } }],
     },
     orderBy: { scheduledAt: "desc" },
@@ -586,7 +585,7 @@ export async function meetingsForScope(
     title: meeting.title,
     attendeeCount: meeting.attendeeIds.length,
     status: meeting.processedAt ? "processed" : "scheduled",
-    summaryExcerpt: meeting.summary?.slice(0, 180) ?? null,
+    summaryExcerpt: meeting.summary ? stripMarkdown(meeting.summary).slice(0, 180) : null,
     scheduledAt: meeting.scheduledAt.toISOString(),
     processedAt: meeting.processedAt?.toISOString() ?? null,
   }));

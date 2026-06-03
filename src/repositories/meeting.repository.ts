@@ -76,6 +76,24 @@ export function softDelete(id: string): Promise<Meeting> {
   });
 }
 
+export async function updateRecommendationStatus(
+  id: string,
+  index: number,
+  status: string,
+): Promise<Meeting | null> {
+  const meeting = await findById(id);
+  if (meeting?.deletedAt !== null) return null;
+  const recs = Array.isArray(meeting.recommendations)
+    ? [...(meeting.recommendations as Record<string, unknown>[])]
+    : [];
+  if (index < 0 || index >= recs.length) return null;
+  recs[index] = { ...recs[index], status };
+  return prisma.meeting.update({
+    where: { id },
+    data: { recommendations: recs as InputJsonValue },
+  });
+}
+
 export function recordProcessed(id: string, data: RecordProcessedData): Promise<Meeting> {
   return prisma.meeting.update({
     where: { id },

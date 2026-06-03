@@ -10,6 +10,7 @@ import * as userRepo from "../repositories/user.repository.js";
 import type {
   CreateMeetingInput,
   MeetingRecommendation,
+  PatchRecommendationStatusInput,
   UpdateMeetingInput,
 } from "../schemas/meeting.schema.js";
 import { meetingIntentResponseSchema } from "../schemas/meeting.schema.js";
@@ -280,6 +281,24 @@ export async function processMeeting(
     actions: persistedActions,
     recommendations: allRecommendations,
   };
+}
+
+export async function patchRecommendationStatus(
+  caller: AuthenticatedUser,
+  meetingId: string,
+  index: number,
+  status: PatchRecommendationStatusInput["status"],
+): Promise<HydratedMeeting> {
+  const existing = await meetingRepo.findById(meetingId);
+  requireOwnership(existing, caller.id);
+  if (existing.processedAt === null) {
+    throw new AppError("MEETING_NOT_PROCESSED", 400, "Meeting has not been processed yet.");
+  }
+  const updated = await meetingRepo.updateRecommendationStatus(meetingId, index, status);
+  if (!updated) {
+    throw new NotFoundError("Recommendation");
+  }
+  return hydrate(updated);
 }
 
 // Re-export so callers don't need to know about the dispatch service.
