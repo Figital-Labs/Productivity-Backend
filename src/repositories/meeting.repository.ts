@@ -36,7 +36,10 @@ export function findById(id: string): Promise<Meeting | null> {
 
 export function listByUser(userId: string): Promise<Meeting[]> {
   return prisma.meeting.findMany({
-    where: { userId, deletedAt: null },
+    where: {
+      deletedAt: null,
+      OR: [{ userId }, { attendeeIds: { has: userId } }],
+    },
     orderBy: [{ scheduledAt: "desc" }],
   });
 }

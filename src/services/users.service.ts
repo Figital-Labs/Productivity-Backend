@@ -27,7 +27,7 @@ export async function searchSameOrg(
     caller.orgId,
     trimmed && trimmed.length > 0 ? trimmed : undefined,
     SEARCH_RESULT_CAP,
-    caller.level,
+    query.forMeeting ? undefined : caller.level,
   );
   return rows.map((r) => ({
     id: r.id,
