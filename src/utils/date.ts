@@ -49,6 +49,34 @@ export function promptDateAnchors(today: Date): {
   };
 }
 
+/**
+ * Returns the UTC timestamps for the start (00:00:00.000) and end (23:59:59.999)
+ * of the given calendar date as observed in the specified timezone.
+ *
+ * `calendarDate` must be the UTC-midnight Date produced by `todayInUserTz` or
+ * `parseDateString` — i.e. the canonical UTC-midnight anchor for that local date.
+ */
+export function dayBoundsInTz(calendarDate: Date, timezone: string): { start: Date; end: Date } {
+  // At UTC midnight (calendarDate), find what local hour:minute the timezone shows.
+  // That tells us how far ahead of UTC midnight the timezone's own midnight is.
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(calendarDate);
+
+  const tzHour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+  const tzMinute = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
+
+  // UTC midnight lands at tzHour:tzMinute in the local timezone, so local
+  // midnight is that many ms *before* UTC midnight.
+  const offsetMs = (tzHour * 60 + tzMinute) * 60_000;
+  const start = new Date(calendarDate.getTime() - offsetMs);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1);
+  return { start, end };
+}
+
 function calendarDateInTz(instant: Date, timezone: string): Date {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,

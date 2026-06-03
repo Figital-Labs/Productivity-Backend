@@ -4,6 +4,7 @@ import type { InlineMedia } from "../lib/vertex.js";
 import { idParamSchema } from "../schemas/common.js";
 import {
   createMeetingInputSchema,
+  patchRecommendationStatusSchema,
   processMeetingInputSchema,
   updateMeetingInputSchema,
 } from "../schemas/meeting.schema.js";
@@ -37,6 +38,25 @@ export async function deleteMeeting(req: Request, res: Response): Promise<void> 
   const { id } = idParamSchema.parse(req.params);
   await meetingService.softDeleteMeeting(req.user, id);
   res.status(204).send();
+}
+
+export async function patchRecommendationStatus(req: Request, res: Response): Promise<void> {
+  const { id } = idParamSchema.parse(req.params);
+  const rawIndex = parseInt((req.params as { index?: string }).index ?? "", 10);
+  if (Number.isNaN(rawIndex) || rawIndex < 0) {
+    res
+      .status(400)
+      .json({ error: { code: "INVALID_INDEX", message: "Invalid recommendation index." } });
+    return;
+  }
+  const input = patchRecommendationStatusSchema.parse((req.body as unknown) ?? {});
+  const meeting = await meetingService.patchRecommendationStatus(
+    req.user,
+    id,
+    rawIndex,
+    input.status,
+  );
+  res.status(200).json(meeting);
 }
 
 export async function processMeeting(req: Request, res: Response): Promise<void> {

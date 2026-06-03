@@ -15,4 +15,5 @@ meetingsRouter.post("/", meetingController.createMeeting);
 meetingsRouter.get("/:id", meetingController.getMeeting);
 meetingsRouter.patch("/:id", meetingController.updateMeeting);
 meetingsRouter.delete("/:id", meetingController.deleteMeeting);
+meetingsRouter.patch("/:id/recommendations/:index", meetingController.patchRecommendationStatus);
 meetingsRouter.post("/:id/process", meetingsUpload, meetingController.processMeeting);

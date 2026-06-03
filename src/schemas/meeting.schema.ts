@@ -72,8 +72,14 @@ export const meetingRecommendationSchema = z.object({
   priority: priorityEnum.optional(),
   targetDate: ymdDateSchema.optional(),
   reasoning: z.string(),
+  status: z.enum(["pending", "task_created", "skipped"]).default("pending"),
 });
 export type MeetingRecommendation = z.infer<typeof meetingRecommendationSchema>;
+
+export const patchRecommendationStatusSchema = z.object({
+  status: z.enum(["task_created", "skipped"]),
+});
+export type PatchRecommendationStatusInput = z.infer<typeof patchRecommendationStatusSchema>;
 
 export const meetingIntentResponseSchema = z.object({
   summary: z.string(),

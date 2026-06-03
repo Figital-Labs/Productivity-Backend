@@ -57,6 +57,7 @@ export async function dispatchMeetingAction(
       recommendation: {
         title: action.title,
         reasoning: `Assignee id "${action.assigneeId}" was not in the meeting attendees — please assign manually.`,
+        status: "pending" as const,
         ...(action.priority !== undefined && { priority: action.priority }),
         ...(action.targetDate !== undefined && { targetDate: action.targetDate }),
       },
