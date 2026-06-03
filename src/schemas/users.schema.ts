@@ -8,5 +8,6 @@ import { z } from "zod";
  */
 export const searchUsersQuerySchema = z.object({
   q: z.string().max(120).optional(),
+  forMeeting: z.coerce.boolean().optional(),
 });
 export type SearchUsersQuery = z.infer<typeof searchUsersQuerySchema>;
