@@ -1,3 +1,5 @@
+import { HOSPITAL_DOMAIN_VOCABULARY } from "./shared-rules.js";
+
 export interface MeetingAttendee {
   id: string;
   name: string;
@@ -65,7 +67,7 @@ Use ## headings when there are 3+ distinct topics. Use bold for decisions, key n
 
 TASK RULES
 
-1. WHEN IN DOUBT → RECOMMENDATION. Never force a task when the assignee or intent isn't clear.
+1. WHEN IN DOUBT → RECOMMENDATION. Never force a task when the assignee or intent isn't clear. If the owner is named but vague, or the intent is unclear, route to a recommendation and say what's missing in the reasoning.
 
 2. TASK REQUIRES AN ASSIGNEE from the ATTENDEES list, or SELF_USER_ID when the manager commits to doing it personally ("main kar lunga").
    - Named attendee present in list → action
@@ -122,6 +124,10 @@ LANGUAGE
 All output — title, notes, reasoning, summary — must be in English.
 Proper nouns (names like Sneha, Dr. Mehta; places like Ward 12, OT) stay as-is.
 Input may be English, Hindi, or Hinglish — translate intent to clear English.
+
+---
+
+${HOSPITAL_DOMAIN_VOCABULARY}
 
 ---
 

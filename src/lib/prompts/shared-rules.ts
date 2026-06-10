@@ -268,3 +268,75 @@ export const DELEGATION_RELAY_EXAMPLES = `WORKED EXAMPLES (delegation patterns):
       reasoning: "Rajesh not found in your team — add them first?"
     }]
     [name mentioned but not in directory → recommendation, not action]`;
+
+/**
+ * Hospital shorthand glossary. Added so the model resolves clinical terms
+ * reliably and keeps the shorthand intact in titles (staff read "OT"/"ICU"
+ * fine — don't expand them). Consumed by the personal, delegation, and
+ * meeting prompts.
+ */
+export const HOSPITAL_DOMAIN_VOCABULARY = `HOSPITAL VOCABULARY (common shorthand — interpret correctly, keep terms as-is in titles)
+  - "rounds" / "ward rounds"   → visiting admitted patients ward by ward
+  - "OPD"                      → Out-Patient Department
+  - "OT"                       → Operation Theatre
+  - "ICU" / "NICU" / "CCU"     → intensive care units
+  - "discharge" / "DAMA"       → sending a patient home (DAMA = discharge against medical advice)
+  - "handover"                 → passing duty to the next shift
+  - "vitals"                   → BP, pulse, temperature, SpO2
+  - "on-call"                  → staff reachable for emergencies
+  - "indent"                   → raising a supply/medicine request
+  - "case sheet" / "OPD slip"  → patient paperwork
+  - "consultant" / "HOD"       → senior doctor / Head of Department
+  - "sister"                   → a nurse ("Sister Sneha" = a nurse named Sneha)
+Don't expand shorthand in titles — staff read "OT", "ICU", "rounds" fine.`;
+
+/**
+ * Name + honorific preservation. Previously duplicated inline across the three
+ * personal prompts; lifted here so they share one source of truth.
+ */
+export const NAMES_HONORIFICS_RULE = `NAMES AND HONORIFICS — preserve exactly as the user said them:
+  - Personal names (Sneha, Suresh, Shubh, Dr. Mehta) — always keep as-is.
+  - Indian honorifics WITH a name ("Sir", "Madam", "Bhai/Bhaiya", "Didi", "Ji") — keep the FULL name+honorific pair. Never drop the name and keep only the honorific.
+    ✓ "Subh Sir ko project overview dena hai" → "Give project overview to Subh Sir"
+    ✗ "Project update to sir"  ← WRONG: dropped "Subh", changed "overview" to "update"
+    ✓ "Sneha didi ko report bhejna hai"       → "Send report to Sneha Didi"
+    ✗ "Send report to didi"   ← WRONG: dropped "Sneha"
+  - Place names (Ward 12, OT, ICU, Room 402) — keep as-is.`;
+
+/**
+ * Faithful translation + always include the person's name in person-specific
+ * task titles. Lifted from the personal prompts' inline copies.
+ */
+export const TRANSLATE_AND_PERSON_RULE = `TRANSLATE FAITHFULLY — the user's words, not synonyms or summaries:
+  ✓ "project ka overview dena" → "Give project overview"  (not "project update")
+  ✓ "bill banana hai"          → "Prepare bill"           (not "billing")
+  ✓ "baat karna hai"           → "Talk to"                (not "meet" or "contact")
+
+PERSON-SPECIFIC TASKS — always include the person's name in the title:
+  ✓ "Subh Sir ko project ka overview dena hai" → "Give project overview to Subh Sir"
+  ✓ "Suresh ka bill banana hai"                → "Prepare Suresh's bill"
+  ✓ "Sneha se baat karna hai"                  → "Talk to Sneha"
+  ✓ "Dr. Mehta ko report bhejna hai"           → "Send report to Dr. Mehta"`;
+
+/**
+ * The five intent types for the personal capture flows (voice/text/image),
+ * with the Hinglish partial-completion cues. Image extraction appends its own
+ * visual cues on top of this.
+ */
+export const PERSONAL_INTENT_TYPES_RULE = `INTENT TYPES (use exact "type" values):
+  "created"             — add a new task
+  "priority_updated"    — change the priority of an existing task
+  "completed"           — mark an existing task as done
+  "partial"             — partially did an existing task (started, not finished).
+                          Cues: "half kiya", "adha hua", "50% ho gaya", "thoda kiya",
+                          "chal raha hai", "almost done", "thoda baki hai",
+                          "kaafi progress hui", "shuru kar diya", "bich mein hai"
+  "target_date_updated" — MOVE an existing task to a different date (not a duplicate, not done)`;
+
+/**
+ * Ad-hoc work (not on the pending list) routes to recommendations, never a
+ * silent auto-create. Lifted from the personal prompts' inline copies.
+ */
+export const AD_HOC_RULE = `AD-HOC COMPLETED WORK → RECOMMENDATIONS
+If the user reports having ALREADY DONE something that isn't on their pending list (e.g., "maine aaj extra emergency triage bhi kiya"), do NOT silently create-and-complete it. Put it in "recommendations" with completed=true and a brief reasoning so the user confirms adding it.
+This rule is ONLY about already-done work that's missing from the list. New forward-looking tasks the user wants to add are normal "created" actions — capture them, don't downgrade them to recommendations.`;

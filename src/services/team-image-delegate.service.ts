@@ -1,4 +1,6 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
+import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { logRaw } from "../lib/ai-log.js";
 import { buildTeamImageDelegatePrompt } from "../lib/prompts/team-image-delegate.js";
 import { buildDirectoryContext } from "../lib/team-directory.js";
 import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
@@ -56,6 +58,9 @@ export async function delegateImage(
     }),
     schema: teamImageDelegateResponseSchema,
     media: [{ mimeType: image.mimeType, buffer: image.buffer }],
+    temperature: AI_TEMPERATURE.delegation,
+    thinkingBudget: AI_THINKING_BUDGET.delegation,
+    onRaw: logRaw("team-image", manager.id),
   });
 
   const persistedActions: PersistedDelegationAction[] = [];

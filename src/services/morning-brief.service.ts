@@ -1,3 +1,5 @@
+import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { logRaw } from "../lib/ai-log.js";
 import { AppError, ForbiddenError } from "../lib/errors.js";
 import prisma from "../lib/prisma.js";
 import { buildMorningBriefPrompt } from "../lib/prompts/morning-brief.js";
@@ -45,6 +47,15 @@ function fallbackBrief(
     generatedAt,
     fromCache,
   };
+}
+
+function degradedReason(planMissed: number, closureMissed: number): string {
+  if (planMissed > 0 && closureMissed > 0) {
+    return `Missed ${planMissed.toString()} plans and ${closureMissed.toString()} closures`;
+  }
+  if (planMissed > 0) return `Missed ${planMissed.toString()} plans`;
+  if (closureMissed > 0) return `Missed ${closureMissed.toString()} closures`;
+  return "Needs follow-up";
 }
 
 export async function getMorningBrief(
@@ -104,11 +115,35 @@ export async function getMorningBrief(
     activityHighlights: [],
   });
 
-  let payload = await generateStructured({
-    model: GEMINI_FLASH_MODEL,
-    prompt,
-    schema: morningBriefResponseSchema,
-  });
+  let payload: MorningBriefPayload;
+  try {
+    payload = await generateStructured({
+      model: GEMINI_FLASH_MODEL,
+      prompt,
+      schema: morningBriefResponseSchema,
+      temperature: AI_TEMPERATURE.morningBrief,
+      thinkingBudget: AI_THINKING_BUDGET.morningBrief,
+      onRaw: logRaw("morning-brief", user.id),
+    });
+  } catch (err) {
+    // Graceful degradation: never fail the dashboard on an AI hiccup. Serve a
+    // deterministic numbers-only brief and DON'T cache it, so the next request
+    // retries the full generation.
+    console.error("[morning-brief] AI generation failed, serving degraded brief:", err);
+    const degraded: MorningBriefPayload = {
+      summary:
+        "Live brief is unavailable right now — here are today's numbers as they stand. Refresh shortly for the full summary.",
+      highlights: [],
+      concerns: [],
+      topPerformers,
+      needsAttention: peopleToWatch.map((row) => ({
+        userId: row.user.id,
+        name: row.user.name,
+        reason: degradedReason(row.planMissedDays, row.closureMissedDays),
+      })),
+    };
+    return fallbackBrief(degraded, userIds, new Date().toISOString(), false);
+  }
 
   // Defensive: strip any non-Latin chars the model might emit despite the
   // English-only instruction. The prompt is the primary control; this is a belt.

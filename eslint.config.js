@@ -9,6 +9,7 @@ export default tseslint.config(
       "dist/",
       "src/generated/",
       "node_modules/",
+      "eval/",
       "scripts/",
       "prisma/seed.ts",
       "prisma/seed-hierarchy.ts",

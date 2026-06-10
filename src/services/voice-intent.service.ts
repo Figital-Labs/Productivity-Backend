@@ -1,4 +1,6 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
+import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { logRaw } from "../lib/ai-log.js";
 import { truncateNotesForContext } from "../lib/notes-context.js";
 import { buildVoiceIntentPrompt, type PendingTaskContext } from "../lib/prompts/voice-intent.js";
 import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
@@ -69,6 +71,9 @@ export async function processVoice(
     }),
     schema: voiceIntentResponseSchema,
     media: [{ mimeType: audio.mimeType, buffer: audio.buffer }],
+    temperature: AI_TEMPERATURE.extraction,
+    thinkingBudget: AI_THINKING_BUDGET.extraction,
+    onRaw: logRaw("voice", user.id),
   });
 
   const persistedActions: PersistedAiAction[] = [];

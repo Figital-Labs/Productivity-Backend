@@ -598,7 +598,6 @@ async function createHistory(byEmail: Map<string, string>, historyDates: Date[])
               summary: "Today's work tracked well overall.",
               achievements: plannedTitles.slice(0, 2),
               missed: plannedTitles.slice(-1),
-              tips: ["Tomorrow: confirm shift handover earlier."],
             },
             mediaIds: [],
           },

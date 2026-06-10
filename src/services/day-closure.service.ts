@@ -1,3 +1,5 @@
+import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { logRaw } from "../lib/ai-log.js";
 import { AppError, ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
 import {
   buildDayClosureFeedbackPrompt,
@@ -87,15 +89,34 @@ export async function reviewDayClosure(
   }
 
   const currentTasks = await taskRepo.listByDate(user.id, date);
-  const aiFeedback = await generateStructured({
-    model: GEMINI_FLASH_MODEL,
-    prompt: buildDayClosureFeedbackPrompt({
-      todaysTasks: currentTaskStateFrom(currentTasks),
-      hasDayPlan: !!plan,
-      closureNarrative: input.commentary ?? "",
-    }),
-    schema: dayClosureFeedbackSchema,
-  });
+  let aiFeedback: DayClosureFeedback;
+  try {
+    aiFeedback = await generateStructured({
+      model: GEMINI_FLASH_MODEL,
+      prompt: buildDayClosureFeedbackPrompt({
+        todaysTasks: currentTaskStateFrom(currentTasks),
+        hasDayPlan: !!plan,
+        closureNarrative: input.commentary ?? "",
+      }),
+      schema: dayClosureFeedbackSchema,
+      temperature: AI_TEMPERATURE.dayClosure,
+      thinkingBudget: AI_THINKING_BUDGET.dayClosure,
+      onRaw: logRaw("day-closure", user.id),
+    });
+  } catch (err) {
+    // Graceful degradation: don't lose the user's closure on an AI hiccup.
+    // Reflect the task list deterministically; the narrative-driven auto-marking
+    // simply doesn't happen (empty taskActions/additions) but nothing is lost.
+    console.error("[day-closure] AI review failed, serving deterministic feedback:", err);
+    aiFeedback = {
+      achievements: currentTasks.filter((t) => t.completed).map((t) => t.title),
+      partial: currentTasks.filter((t) => t.isPartial).map((t) => t.title),
+      missed: currentTasks.filter((t) => !t.completed && !t.isPartial).map((t) => t.title),
+      additions: [],
+      taskActions: [],
+      summary: "Couldn't generate a summary just now — here's your list as it stands.",
+    };
+  }
 
   // Apply task status updates the AI inferred from the narrative.
   const todayTaskIds = new Set(currentTasks.map((t) => t.id));
@@ -115,7 +136,7 @@ export async function reviewDayClosure(
       title,
       targetDate: date,
       sourceType: "manual",
-      notes: "Ad-hoc work noted during AI day closure review.",
+      notes: "Extra work noted during day closure review.",
     });
     await taskRepo.update(created.id, { completed: true });
   }

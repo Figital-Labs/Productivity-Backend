@@ -1,3 +1,5 @@
+import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { logRaw } from "../lib/ai-log.js";
 import { AppError, ConflictError, NotFoundError } from "../lib/errors.js";
 import { buildMeetingIntentPrompt } from "../lib/prompts/meeting-intent.js";
 import type { MeetingAttendee } from "../lib/prompts/meeting-intent.js";
@@ -243,6 +245,9 @@ export async function processMeeting(
     prompt,
     schema: meetingIntentResponseSchema,
     media: [...inputs.audioClips, ...inputs.images],
+    temperature: AI_TEMPERATURE.meeting,
+    thinkingBudget: AI_THINKING_BUDGET.meeting,
+    onRaw: logRaw("meeting", caller.id),
   });
 
   const allowedAssigneeIds = new Set(meetingForPrompt.attendeeIds);
