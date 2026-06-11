@@ -27,3 +27,15 @@ export const AI_THINKING_BUDGET = {
   morningBrief: 256,
   transcribe: 0, // verbatim — no thinking
 } as const;
+
+/**
+ * Per-attempt request timeout (our `withTimeout`, NOT undici's separate ~10s
+ * connect timeout). Meetings are the heaviest call (multi-clip audio + images);
+ * for this MVP we keep them synchronous and just give them a generous ceiling
+ * rather than building async job processing. (Deploy caveat: a multi-minute
+ * synchronous request can hit platform/proxy timeouts in prod — async then.)
+ */
+export const AI_TIMEOUT_MS = {
+  default: 30_000,
+  meeting: 1_200_000, // 20 min
+} as const;

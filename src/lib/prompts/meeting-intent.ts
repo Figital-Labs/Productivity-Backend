@@ -34,7 +34,7 @@ OUTPUT (JSON — return nothing else):
       "type": "created",
       "title": "<what to do, in English>",
       "assigneeId": "<id from ATTENDEES list, or SELF_USER_ID>",
-      "targetDate": "<YYYY-MM-DD — only when a date was explicitly stated>",
+      "targetDate": "<YYYY-MM-DD — the day to DO the task; set only when a specific do-day was given, never for a deadline>",
       "priority": "<low|medium|high — only when clearly indicated>",
       "notes": "<only when title + other fields don't carry the full context>",
       "reasoning": "<one short English sentence, max 20 words>"
@@ -52,41 +52,65 @@ OUTPUT (JSON — return nothing else):
 
 ---
 
-SUMMARY
-Write the meeting's complete record in Markdown. Include everything that matters:
-- What was discussed (with specifics — numbers, names, root causes, not just topic names)
-- Decisions made (who agreed to what)
-- Problems or concerns raised
-- Items left unresolved or deferred
+SUMMARY — the part the manager actually reads. Write a polished, professional meeting recap in Markdown — the kind a busy person would happily forward, on par with Fireflies / Otter / a good human note-taker. Skimmable, specific, genuinely useful. Someone who MISSED the meeting should finish it knowing exactly what happened and what they need to do.
 
-Length scales with the meeting's content. Write as much as the meeting warrants — completeness is the goal.
-Start with one sentence naming the meeting type and main theme (no heading).
-Use ## headings when there are 3+ distinct topics. Use bold for decisions, key names, critical numbers.
+Open with a 1–2 sentence **TL;DR** (no heading): the meeting's purpose and the single most important outcome.
+
+Then use the sections below. Include a section ONLY if the meeting actually had that content — never pad with empty headings or filler:
+
+## Overview
+2–4 sentences of context — what kind of meeting, who drove it, the main theme.
+
+## Key Discussion Points
+Bullets. Each is a specific point that was actually raised, WITH the details that matter — numbers, names, root causes, the reasoning. Capture the substance, not the topic.
+  ✓ "Gloves stock is down to 12 pairs vs a 50 minimum — the vendor missed last week's delivery"
+  ✗ "Discussed supplies"
+
+## Decisions
+What was actually decided, and for/by whom. **Bold** the decision itself.
+
+## Concerns & Risks
+Problems, blockers, disagreements, or risks raised — and who's affected.
+
+## Action Items / Next Steps
+Every follow-up as: **Owner** — what they'll do — by when (if a date was stated). These should match the tasks you extract below. If an item has no clear owner, write "owner TBD".
+
+## Open Questions
+Anything left unresolved or to revisit.
+
+How to write it:
+- SPECIFIC over generic — write what was actually said, with the figures and names.
+- Length scales with the meeting: a 5-minute hurdle is short (maybe just the TL;DR + a few bullets + next steps); a 30-minute review is fuller. Don't invent content to fill a section — omit sections that had nothing.
+- ONE label per person. Refer to each person consistently throughout the summary — don't switch between two labels for the same individual (their name in one place, a role in another). Prefer the real name from ATTENDEES when the speaker named them; if the speaker used only a role or descriptor, keep that consistent rather than inventing or guessing a name.
+- GROUND every specific. State a date, number, or name ONLY if it was actually said — never infer, round, or add one to make a section look complete. Action items must reflect what was actually committed, with an owner and date only when they were stated.
+- Plain professional English — translate any Hindi/Hinglish. No hedging ("the team discussed…"), no fluff. Bold key names, decisions, and critical numbers.
+- Never fabricate. Summarise only what's actually in the audio / notes.
 
 ---
 
 TASK RULES
 
-1. WHEN IN DOUBT → RECOMMENDATION. Never force a task when the assignee or intent isn't clear. If the owner is named but vague, or the intent is unclear, route to a recommendation and say what's missing in the reasoning.
+1. WHEN IN DOUBT → RECOMMENDATION. Never force a task when the assignee or intent isn't clear. If the owner is vague or the intent is unclear, route it to a recommendation rather than guessing — and keep the reasoning human (see rule 9).
 
-2. TASK REQUIRES AN ASSIGNEE from the ATTENDEES list, or SELF_USER_ID when the manager commits to doing it personally ("main kar lunga").
-   - Named attendee present in list → action
-   - Manager self-commits → action with SELF_USER_ID
-   - No clear owner → recommendation
-   - Name mentioned but not in list → recommendation
+2. TASK REQUIRES AN ASSIGNEE — exactly one of:
+   - a person in the ATTENDEES list → use their id (match the spoken name case-insensitively; ignore titles like "Dr."/"Sister")
+   - SELF_USER_ID — only when the speaker commits to doing it themselves in first person ("main kar lunga", "I'll do it")
+   - No clear owner, or a name that isn't in the ATTENDEES list → recommendation (unassigned)
+   Everyone in ATTENDEES is equal — do NOT prefer or default to any one person.
 
 3. SAME TASK, MULTIPLE PEOPLE → one action per person, identical title.
 
 4. AMBIGUOUS NAME (two attendees share a first name, only first name spoken) → recommendation, don't guess.
 
-5. DATE RESOLUTION — TODAY is ${today}:
+5. DATE — \`targetDate\` is the day the task should be DONE / when it lands on the assignee's list, NOT a deadline. A deadline ("by tomorrow", "by Friday", "... tak chahiye") is not a targetDate — put it in the title/notes and leave targetDate for when the work is actually meant to happen. Only set targetDate when a specific day to DO the work was given ("Friday ko rounds", "kal subah check karna").
+   Resolve relative dates against TODAY (${today}):
    - today / aaj → ${today}
    - tomorrow / kal (future tense) → ${tomorrow}
    - yesterday / kal (past tense) → ${yesterday}
    - next week → 7 days from ${today}
    - day after tomorrow / parso (future) → 2 days from ${today}
    Hindi "kal" means both past and future — read verb tense to disambiguate. If tense unclear → recommendation.
-   Include targetDate ONLY when a date was explicitly mentioned.
+   If no specific do-day was given, OMIT targetDate (the backend defaults to today).
 
 6. TITLE — full clear intent in English. The assignee reads only the title; it must tell them exactly what to do.
    ✓ "Check Ward 12 admission status and send update by morning"
@@ -94,12 +118,19 @@ TASK RULES
    ✗ "Follow up" — too vague
    ✗ "Gloves ka order karna" — never output Hinglish
 
-7. TASK NOTES — only for context the title can't carry (the why, a stakeholder, a consequence). Leave empty otherwise.
+7. TASK NOTES — only for context the title can't carry (the why, a stakeholder, a consequence, a deadline). Leave empty otherwise.
 
 8. PRIORITY — only when clearly indicated: "urgent", "ASAP", "abhi", "important", or obvious criticality.
 
-9. REASONING — one short English sentence, max 20 words. Direct and plain.
-   ✓ "No assignee named — assign manually."   ✓ "Manager committed to this personally."
+9. REASONING — shown DIRECTLY to the manager on the recommendation card, so write it like a helpful colleague, not a system. One short, plain sentence (≤ 20 words) giving the WHY / context the manager actually cares about: the deadline, the dependency, who asked for it, or what's blocking.
+   NEVER expose internal mechanics — no "ID", no "attendees list", no "assigneeId", no rule numbers, no "not in the list". If you can't confidently pick an owner, just describe the work and, if someone was named, say who it's for in plain words. The manager assigns it.
+   ✓ "Needs to be ready by tomorrow for the Hyderabad KIMS demo."
+   ✓ "A bug list was shared and needs fixing."
+   ✓ "Promised but not yet received — it blocks further work."
+   ✓ "Committed by the developer; assign whoever picks it up."
+   ✗ "The developer committed to this, but their ID is not in the attendees list." (internal — never)
+   ✗ "No assignee named — assign manually." (mechanical — never)
+   ✗ "As per rule 2..." (rule leak — never)
 
 10. RECOMMENDATION TITLE — same format as a task title: clear English, not a question, no meta-phrasing.
     ✓ "Create new OT prep SOP"   ✗ "Should someone create an SOP?"
@@ -149,7 +180,7 @@ Example 1 — Multi-topic, tasks with context:
 
   Output:
   {
-    "summary": "**Ward 12 weekly review** — two urgent issues raised: unreviewed patient admissions and a critical supplies shortage.\\n\\n- **Admissions**: 3 patients from last week are still unreviewed. Relatives are waiting. Sneha to check all three and send a status update by tomorrow morning.\\n- **Supplies**: Gloves stock critically low — 12 pairs remaining, minimum 50 required. Amit to place an urgent order with the vendor today.",
+    "summary": "Ward 12 weekly review surfaced two urgent issues — unreviewed patient admissions and a critical gloves shortage — both now owned with clear deadlines.\\n\\n## Key Discussion Points\\n- **Admissions**: 3 patients from last week remain unreviewed and relatives are waiting.\\n- **Supplies**: Gloves are down to **12 pairs** against a **50** minimum — the vendor missed last week's delivery.\\n\\n## Action Items / Next Steps\\n- **Sneha** — review the 3 unreviewed Ward 12 admissions and send a status update — by tomorrow morning.\\n- **Amit** — place an urgent gloves order with the vendor — today.",
     "actions": [
       {
         "type": "created",

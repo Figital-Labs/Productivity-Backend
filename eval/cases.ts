@@ -3,18 +3,23 @@
  * only (no media fixtures needed) so this runs from a dev machine with Vertex
  * creds via `npm run eval`. Assert on STRUCTURE/fields, never free-text.
  *
- * Each case builds the exact prompt the service builds and calls Gemini at the
- * same temperature as production. Add real failures here as they surface in the
- * `[ai-raw]` logs.
+ * ⚠️ HELD-OUT INPUTS RULE: the inputs below MUST NOT appear as worked examples in
+ * any prompt (shared-rules constants, meeting-intent, etc.). Reusing a prompt's own
+ * example tests memorization, not generalization, and inflates the pass rate. So we
+ * deliberately use novel names / tasks / phrasings (no Sneha/Anita/Vikram/Rajesh/
+ * Subh Sir/Dr. Mehta/OT prep/ward rounds/gloves/admissions/emergency-triage) while
+ * exercising the same behaviors the prompts define.
  */
 import "dotenv/config";
 
 import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../src/lib/ai-config.js";
 import { buildDayClosureFeedbackPrompt } from "../src/lib/prompts/day-closure-feedback.js";
+import { buildMeetingIntentPrompt } from "../src/lib/prompts/meeting-intent.js";
 import { buildTeamTextDelegatePrompt } from "../src/lib/prompts/team-text-delegate.js";
 import { buildTextIntentPrompt } from "../src/lib/prompts/text-intent.js";
 import { GEMINI_FLASH_MODEL, generateStructured } from "../src/lib/vertex.js";
 import { dayClosureFeedbackSchema } from "../src/schemas/day-closure-feedback.schema.js";
+import { meetingIntentResponseSchema } from "../src/schemas/meeting.schema.js";
 import { teamTextDelegateResponseSchema } from "../src/schemas/team-text-delegate.schema.js";
 import { textIntentResponseSchema } from "../src/schemas/text-process.schema.js";
 import { promptDateAnchors, todayInUserTz } from "../src/utils/date.js";
@@ -55,15 +60,15 @@ function noDevanagari(r: EvalResponse): string | null {
   return null;
 }
 
-const pendingRounds = [
-  { id: "task-rounds", title: "Patient rounds", priority: "medium", targetDate: anchors.today },
+// Held-out fixtures — names/tasks NOT used in any prompt example.
+const pendingPharmacy = [
+  { id: "t-pharm", title: "Pharmacy stock count", priority: "medium", targetDate: anchors.today },
 ];
-
-const directory = [{ id: "u-sneha", name: "Sneha", role: "Nurse" }];
+const directory = [{ id: "u-kavita", name: "Kavita", role: "Technician" }];
 
 async function text(
   userText: string,
-  pendingTasks: typeof pendingRounds | [],
+  pendingTasks: typeof pendingPharmacy | [],
 ): Promise<EvalResponse> {
   return (await generateStructured({
     model: GEMINI_FLASH_MODEL,
@@ -86,18 +91,18 @@ async function delegate(userText: string): Promise<EvalResponse> {
 
 export const cases: EvalCase[] = [
   {
+    // new task + future date + priority cue (held-out: Bed 7 / discharge summary)
     id: "text/new-task-date-priority",
-    run: () => text("Kal ICU mein Dr. Mehta ke liye OT prep karna hai, urgent", []),
+    run: () => text("Kal Bed 7 ke patient ka discharge summary banana hai, urgent", []),
     assert: (r) => {
       const dev = noDevanagari(r);
       if (dev) return dev;
       const created = (r.actions ?? []).find((a) => a.type === "created");
       if (!created) return "expected a created action";
-      // Title must preserve the work (OT) and the person (Dr. Mehta); exact
-      // phrasing is the model's call ("Prepare OT for Dr. Mehta" is fine).
-      if (!/\bOT\b/i.test(created.title ?? "")) return `title missing 'OT': ${created.title ?? ""}`;
-      if (!/mehta/i.test(created.title ?? ""))
-        return `title missing 'Dr. Mehta': ${created.title ?? ""}`;
+      if (!/discharge summary/i.test(created.title ?? ""))
+        return `title missing 'discharge summary': ${created.title ?? ""}`;
+      if (!/bed 7/i.test(created.title ?? ""))
+        return `title dropped the identifier 'Bed 7': ${created.title ?? ""}`;
       if (created.priority !== "high")
         return `expected priority high, got ${created.priority ?? "none"}`;
       if (created.targetDate !== anchors.tomorrow)
@@ -106,10 +111,10 @@ export const cases: EvalCase[] = [
     },
   },
   {
+    // ad-hoc work already DONE, not on the list → recommendation (AD_HOC_RULE),
+    // held-out: canteen stock check
     id: "text/ad-hoc-completed-recommendation",
-    // Already-done work not on the pending list → recommendation (completed),
-    // NOT a silent create-and-complete. Exercises AD_HOC_RULE.
-    run: () => text("Aaj maine extra emergency triage bhi kiya", []),
+    run: () => text("Aaj maine canteen ka stock bhi check kar liya", []),
     assert: (r) => {
       const dev = noDevanagari(r);
       if (dev) return dev;
@@ -119,19 +124,21 @@ export const cases: EvalCase[] = [
     },
   },
   {
-    id: "text/partial-existing-rounds",
-    run: () => text("Aaj rounds adha hua", pendingRounds),
+    // partial of an existing task (held-out: pharmacy stock count)
+    id: "text/partial-existing",
+    run: () => text("Pharmacy stock count abhi aadha hua hai", pendingPharmacy),
     assert: (r) => {
       const partial = (r.actions ?? []).find((a) => a.type === "partial");
       if (!partial) return "expected a 'partial' action on the existing task, not a new task";
-      if (partial.taskId !== "task-rounds")
-        return `expected taskId task-rounds, got ${partial.taskId ?? "none"}`;
+      if (partial.taskId !== "t-pharm")
+        return `expected taskId t-pharm, got ${partial.taskId ?? "none"}`;
       return null;
     },
   },
   {
+    // future-tense 'kal' → tomorrow (held-out: Dr. Nair / lab results)
     id: "text/future-tense-date",
-    run: () => text("Kal Dr. Sharma ko report bhejni hai", []),
+    run: () => text("Kal Dr. Nair ke saath lab results discuss karne hain", []),
     assert: (r) => {
       const created = (r.actions ?? []).find((a) => a.type === "created");
       if (!created) return "expected a created action";
@@ -141,30 +148,76 @@ export const cases: EvalCase[] = [
     },
   },
   {
-    id: "delegation/known-name",
-    run: () => delegate("Sneha ko bolo ICU rounds le le sham tak"),
+    // past-tense 'kal ... kar liya tha' → must NOT create a tomorrow task
+    // (held-out: pharmacy audit)
+    id: "text/kal-past-not-future",
+    run: () => text("kal maine pharmacy ka audit kar liya tha", pendingPharmacy),
     assert: (r) => {
-      const a = (r.actions ?? [])[0];
-      if (!a) return "expected a delegation action";
-      if (a.assigneeId !== "u-sneha")
-        return `expected assigneeId u-sneha, got ${a.assigneeId ?? "none"}`;
-      if (!/ICU rounds/i.test(a.title ?? "")) return `title missing 'ICU rounds': ${a.title ?? ""}`;
+      const futureCreate = (r.actions ?? []).find(
+        (a) => a.type === "created" && a.targetDate === anchors.tomorrow,
+      );
+      if (futureCreate) return "past-tense 'kal ... kar liya tha' wrongly created a tomorrow task";
       return null;
     },
   },
   {
+    // multi-item chunking (held-out: blood samples / Dr. Iyer / oxygen cylinders)
+    id: "text/multi-task-chunking",
+    run: () =>
+      text(
+        "Pehle blood samples collect karne hain, phir Dr. Iyer ko discharge update dena hai, aur shaam ko oxygen cylinders ka count karna hai",
+        [],
+      ),
+    assert: (r) => {
+      const dev = noDevanagari(r);
+      if (dev) return dev;
+      const created = (r.actions ?? []).filter((a) => a.type === "created");
+      if (created.length < 3) return `expected >=3 created tasks, got ${created.length.toString()}`;
+      return null;
+    },
+  },
+  {
+    // honorific + name preserved — RULE generalization, NOT the "Subh Sir" example
+    // (held-out: Farhan bhai / duty roster)
+    id: "text/honorific-preserved",
+    run: () => text("Farhan bhai ko duty roster bhejna hai", []),
+    assert: (r) => {
+      const c = (r.actions ?? []).find((a) => a.type === "created");
+      if (!c) return "expected a created action";
+      if (!/farhan/i.test(c.title ?? "")) return `dropped the name 'Farhan': ${c.title ?? ""}`;
+      if (!/duty roster/i.test(c.title ?? "")) return `dropped 'duty roster': ${c.title ?? ""}`;
+      return null;
+    },
+  },
+  {
+    // delegation to a known team member (held-out: Kavita / X-ray calibration)
+    id: "delegation/known-name",
+    run: () => delegate("Kavita ko bol do X-ray machine ka calibration kar le"),
+    assert: (r) => {
+      const a = (r.actions ?? [])[0];
+      if (!a) return "expected a delegation action";
+      if (a.assigneeId !== "u-kavita")
+        return `expected assigneeId u-kavita, got ${a.assigneeId ?? "none"}`;
+      if (!/calibration/i.test(a.title ?? ""))
+        return `title missing 'calibration': ${a.title ?? ""}`;
+      return null;
+    },
+  },
+  {
+    // delegation to a name NOT in the directory → recommendation (held-out: Imran)
     id: "delegation/unknown-name",
-    run: () => delegate("Rajesh ko bolo X karna hai"),
+    run: () => delegate("Imran ko bolo bed allocation update karna hai"),
     assert: (r) => {
       if ((r.actions ?? []).some((a) => a.assigneeId && a.assigneeId !== "u-self"))
         return "must not assign to a person who isn't in the directory";
       if ((r.recommendations ?? []).length < 1)
-        return "expected a recommendation (Rajesh not in the team directory)";
+        return "expected a recommendation (Imran not in the team directory)";
       return null;
     },
   },
   {
-    id: "day-closure/sab-ho-gaya",
+    // "everything done" understanding with novel phrasing (NOT "sab ho gaya / list clear")
+    id: "day-closure/all-done-novel-phrasing",
     run: async () =>
       (await generateStructured({
         model: GEMINI_FLASH_MODEL,
@@ -172,22 +225,28 @@ export const cases: EvalCase[] = [
           todaysTasks: [
             {
               id: "t1",
-              title: "Ward 12 rounds",
+              title: "Morning OPD slips",
               completed: false,
               isPartial: false,
               priority: "medium",
             },
             {
               id: "t2",
-              title: "Submit report",
+              title: "Restock crash cart",
               completed: false,
               isPartial: false,
               priority: "high",
             },
-            { id: "t3", title: "Call vendor", completed: false, isPartial: false, priority: "low" },
+            {
+              id: "t3",
+              title: "Email lab vendor",
+              completed: false,
+              isPartial: false,
+              priority: "low",
+            },
           ],
           hasDayPlan: true,
-          closureNarrative: "Sab ho gaya aaj, list clear kar di",
+          closureNarrative: "aaj sab nipta diya, kuch bhi pending nahi raha",
         }),
         schema: dayClosureFeedbackSchema,
         temperature: AI_TEMPERATURE.dayClosure,
@@ -199,6 +258,36 @@ export const cases: EvalCase[] = [
       );
       if (!(done.has("t1") && done.has("t2") && done.has("t3")))
         return `expected all 3 tasks completed via taskActions, got [${[...done].join(", ")}]`;
+      return null;
+    },
+  },
+  {
+    // meeting: don't miss the two items; one has an owner, one is owner-TBD
+    // (held-out: Ravi / sterilise OT instruments / broken AC in Room 204)
+    id: "meeting/owner-and-unassigned",
+    run: async () =>
+      (await generateStructured({
+        model: GEMINI_FLASH_MODEL,
+        prompt: buildMeetingIntentPrompt({
+          attendees: [{ id: "u-ravi", name: "Ravi", role: "OT Technician" }],
+          selfUserId: "u-self",
+          title: "OT morning huddle",
+          agenda: null,
+          notes:
+            "Ravi will sterilise the OT instruments before the 8am list. Also the AC in Room 204 is broken and must be fixed — owner not decided yet.",
+          customPrompt: undefined,
+          ...anchors,
+        }),
+        schema: meetingIntentResponseSchema,
+        temperature: AI_TEMPERATURE.meeting,
+        thinkingBudget: AI_THINKING_BUDGET.meeting,
+      })) as unknown as EvalResponse,
+    assert: (r) => {
+      if (!(r.summary && r.summary.length > 0)) return "expected a non-empty summary";
+      const all = [...(r.actions ?? []), ...(r.recommendations ?? [])];
+      if (!all.some((x) => /steril|instrument/i.test(x.title ?? "")))
+        return "missed the sterilise-instruments task";
+      if (!all.some((x) => /\bAC\b|204/i.test(x.title ?? ""))) return "missed the AC repair item";
       return null;
     },
   },

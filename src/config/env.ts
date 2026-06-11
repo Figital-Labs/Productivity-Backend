@@ -1,5 +1,10 @@
-import "dotenv/config";
+import { config as loadEnv } from "dotenv";
 import { z } from "zod";
+
+// `override: true` so values in `.env` win over any stale variable already present in
+// the shell/system environment (dotenv does NOT override by default — that footgun once
+// left the app pointed at a dead localhost DB while `.env` had the right Neon URL).
+loadEnv({ override: true });
 
 const ServiceAccountSchema = z.object({
   type: z.literal("service_account"),

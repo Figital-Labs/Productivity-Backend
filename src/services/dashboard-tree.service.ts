@@ -79,21 +79,31 @@ async function todayProgressForUsers(
 }
 
 /**
- * Builds the recursive subtree of the actor's reports. BFS by level so we
- * issue one DB query per depth (small constant for a tier-2 hospital).
- * Matrix-safe: a user reachable via multiple managers appears once, attached
- * to the first manager that reaches them in BFS order.
+ * Builds the recursive reporting subtree of the actor's reports.
+ *
+ * Matrix hierarchy: a person can report to MULTIPLE managers (e.g. a lead under
+ * two directors). The tree reflects that honestly — such a person (and their
+ * whole subtree) appears under EACH of their managers, not just the first one.
+ * `ancestors` is a per-path guard so a bad/cyclic edge can't loop forever.
+ *
+ * Loading is deduped (each user's reports are queried at most once); placement
+ * is NOT — duplication into the tree is intentional. Fine for hospital-size orgs;
+ * a pathologically dense matrix could fan out, revisit if that ever shows up.
  */
 export async function getTeamTree(actor: AuthenticatedUser): Promise<TeamTreeNode[]> {
   const today = todayInUserTz(DEFAULT_TIMEZONE);
 
-  // 1. Walk the reports edges level-by-level, deduplicating nodes.
-  interface Level {
-    parentId: string;
-    user: { id: string; name: string; role: string; level: number; email: string };
+  interface ReportRow {
+    id: string;
+    name: string;
+    role: string;
+    level: number;
+    email: string;
   }
-  const seen = new Set<string>([actor.id]);
-  const edges: Level[] = [];
+
+  // 1. Load every reachable user's direct reports, level by level (load-dedup).
+  const reportsOf = new Map<string, ReportRow[]>();
+  const loaded = new Set<string>([actor.id]);
   let frontier: string[] = [actor.id];
   while (frontier.length > 0) {
     const rows = await prisma.user.findMany({
@@ -108,49 +118,43 @@ export async function getTeamTree(actor: AuthenticatedUser): Promise<TeamTreeNod
     });
     const next: string[] = [];
     for (const row of rows) {
+      reportsOf.set(row.id, row.reports);
       for (const r of row.reports) {
-        if (seen.has(r.id)) continue;
-        seen.add(r.id);
-        edges.push({ parentId: row.id, user: r });
+        if (loaded.has(r.id)) continue;
+        loaded.add(r.id);
         next.push(r.id);
       }
     }
     frontier = next;
   }
 
-  // 2. Pull today's progress for everyone in the subtree in one batch.
-  const userIds = edges.map((e) => e.user.id);
-  const progress = await todayProgressForUsers(userIds, today);
+  // 2. One batched progress lookup for every reachable user.
+  const progress = await todayProgressForUsers(
+    [...loaded].filter((id) => id !== actor.id),
+    today,
+  );
 
-  // 3. Assemble nested nodes. childrenByParent indexes edges by their parent.
-  const childrenByParent = new Map<string, TeamTreeNode[]>();
-  for (const edge of edges) {
-    const node: TeamTreeNode = {
-      user: edge.user,
-      todayProgress: progress.get(edge.user.id) ?? {
-        done: 0,
-        total: 0,
-        planSubmitted: false,
-        closureSubmitted: false,
-      },
-      reports: [],
-    };
-    const bucket = childrenByParent.get(edge.parentId);
-    if (bucket) bucket.push(node);
-    else childrenByParent.set(edge.parentId, [node]);
-  }
-  // Attach children to each node by walking edges again (top-down).
-  for (const edge of edges) {
-    const parentNodeChildren = childrenByParent.get(edge.user.id);
-    if (parentNodeChildren) {
-      // find this edge's node in its own parent's bucket and attach its reports
-      const siblings = childrenByParent.get(edge.parentId);
-      const me = siblings?.find((n) => n.user.id === edge.user.id);
-      if (me) me.reports = parentNodeChildren;
+  // 3. Build the nested tree, duplicating multiply-managed users under each
+  //    manager. `ancestors` is the path from the actor to the current node.
+  const build = (userId: string, ancestors: ReadonlySet<string>): TeamTreeNode[] => {
+    const out: TeamTreeNode[] = [];
+    for (const r of reportsOf.get(userId) ?? []) {
+      if (ancestors.has(r.id)) continue; // cycle guard
+      out.push({
+        user: r,
+        todayProgress: progress.get(r.id) ?? {
+          done: 0,
+          total: 0,
+          planSubmitted: false,
+          closureSubmitted: false,
+        },
+        reports: build(r.id, new Set(ancestors).add(r.id)),
+      });
     }
-  }
+    return out;
+  };
 
-  return childrenByParent.get(actor.id) ?? [];
+  return build(actor.id, new Set([actor.id]));
 }
 
 // ───────────────────────────────────────────────────────────────────────────

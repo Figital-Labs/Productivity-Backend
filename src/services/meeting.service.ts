@@ -1,4 +1,4 @@
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { AppError, ConflictError, NotFoundError } from "../lib/errors.js";
 import { buildMeetingIntentPrompt } from "../lib/prompts/meeting-intent.js";
@@ -226,6 +226,14 @@ export async function processMeeting(
     name: a.name,
     role: a.role,
   }));
+  // Include the organizer (= caller) in the people directory by NAME, deduped — so the AI
+  // can assign to them when they're named, exactly like any other person. No special
+  // weighting: they're just another assignable person. (First-person "main kar lunga" is
+  // still handled separately via SELF_USER_ID.)
+  if (!attendeeDirectory.some((a) => a.id === caller.id)) {
+    const [self] = await userRepo.findByIds([caller.id]);
+    if (self) attendeeDirectory.push({ id: self.id, name: self.name, role: self.role });
+  }
 
   const today = todayInUserTz(DEFAULT_TIMEZONE);
   const anchors = promptDateAnchors(today);
@@ -247,6 +255,10 @@ export async function processMeeting(
     media: [...inputs.audioClips, ...inputs.images],
     temperature: AI_TEMPERATURE.meeting,
     thinkingBudget: AI_THINKING_BUDGET.meeting,
+    // MVP: generous per-attempt ceiling, no async jobs. Keep the default retry — a
+    // connect timeout fails fast/cheap, and retrying is what pushes a meeting through
+    // the intermittent connect flakiness on a constrained host.
+    timeoutMs: AI_TIMEOUT_MS.meeting,
     onRaw: logRaw("meeting", caller.id),
   });
 
@@ -254,16 +266,22 @@ export async function processMeeting(
 
   // All AI actions become recommendations — manager confirms before any task is created.
   // Preserve the suggested assigneeId when it's a valid attendee or the creator.
-  const actionsAsRecommendations: MeetingRecommendation[] = aiResponse.actions.map((action) => ({
-    title: action.title,
-    reasoning: action.reasoning,
-    status: "pending" as const,
-    ...(allowedAssigneeIds.has(action.assigneeId) || action.assigneeId === meetingForPrompt.userId
-      ? { assigneeId: action.assigneeId }
-      : {}),
-    ...(action.priority !== undefined ? { priority: action.priority } : {}),
-    ...(action.targetDate !== undefined ? { targetDate: action.targetDate } : {}),
-  }));
+  const actionsAsRecommendations: MeetingRecommendation[] = aiResponse.actions.map((action) => {
+    const validAssignee =
+      allowedAssigneeIds.has(action.assigneeId) || action.assigneeId === meetingForPrompt.userId;
+    return {
+      title: action.title,
+      // Keep the model's user-facing reasoning as-is. When the named person isn't a
+      // meeting attendee we simply drop the assigneeId (unknown user) — the recommendation
+      // comes back unassigned and the manager picks an owner. We do NOT append a mechanical
+      // "not in attendees" note; the prompt's reasoning rule keeps the card human.
+      reasoning: action.reasoning,
+      status: "pending" as const,
+      ...(validAssignee ? { assigneeId: action.assigneeId } : {}),
+      ...(action.priority !== undefined ? { priority: action.priority } : {}),
+      ...(action.targetDate !== undefined ? { targetDate: action.targetDate } : {}),
+    };
+  });
 
   const persistedActions: PersistedMeetingAction[] = [];
   const allRecommendations: MeetingRecommendation[] = [
