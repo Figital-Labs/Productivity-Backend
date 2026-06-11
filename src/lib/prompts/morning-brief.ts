@@ -35,6 +35,21 @@ FIDELITY
 - If the KPI block says 12 plans, write 12 plans.
 - If input is thin, say the situation is light instead of inventing drama.
 
+KPI THRESHOLDS — turn each number into a judgment:
+- Plan submission >= 80%  -> healthy (mention only if notably high)
+- Plan submission < 50%   -> concern; state it plainly
+- Task completion >= 70%  -> highlight
+- Task completion < 50%   -> concern, especially if the 7-day trend is falling
+- 7-day trend up >= 10%   -> momentum -> highlights
+- 7-day trend falling     -> one concern line
+- A person with planMissedDays >= 3 -> name them in concerns
+- A person with BOTH plan AND closure missed >= 3 days -> "<Name> needs follow-up on plans and EOD closures"
+
+WRITE LIKE THIS (the <X>/<Y>/<Z>/<N> are placeholders — substitute the REAL KPI values, never copy these tokens or invent numbers):
+  summary: "Most of the team is on track — <X> of <Y> plans in, completion at <Z>%. <N> people have missed plans 3+ days and may need a nudge."
+  highlights: ["Completion at <Z>% — up week-on-week", "<N> staff above 90%"]
+  concerns: ["<Name> and <Name>: plans missing 3+ days", "Closure rate at <Z>%"]
+
 OUTPUT
 Return JSON matching the schema exactly.
 

@@ -16,7 +16,9 @@ import { tasksRouter } from "./tasks.routes.js";
 import { teamRouter } from "./team.routes.js";
 import { textRouter } from "./text-process.routes.js";
 import { transcribeRouter } from "./transcribe.routes.js";
-import { unifiedProcessRouter } from "./unified-process.routes.js";
+// DEPRECATED 2026-06-11: unified /process path parked (decision Q-1: comment it out).
+// Re-enable this import AND the `v1Router.use("/", ...)` mount below to restore.
+// import { unifiedProcessRouter } from "./unified-process.routes.js";
 import { usersRouter } from "./users.routes.js";
 import { voiceRouter } from "./voice.routes.js";
 
@@ -39,4 +41,5 @@ v1Router.use("/team", teamRouter);
 v1Router.use("/users", usersRouter);
 v1Router.use("/meetings", meetingsRouter);
 v1Router.use("/transcribe", transcribeRouter);
-v1Router.use("/", unifiedProcessRouter);
+// DEPRECATED 2026-06-11: unified /process path parked (decision Q-1). See import above.
+// v1Router.use("/", unifiedProcessRouter);

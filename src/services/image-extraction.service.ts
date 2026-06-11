@@ -1,4 +1,6 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
+import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { logRaw } from "../lib/ai-log.js";
 import { truncateNotesForContext } from "../lib/notes-context.js";
 import {
   buildImageExtractionPrompt,
@@ -69,6 +71,9 @@ export async function processImage(
     }),
     schema: imageExtractionResponseSchema,
     media: [{ mimeType: image.mimeType, buffer: image.buffer }],
+    temperature: AI_TEMPERATURE.extraction,
+    thinkingBudget: AI_THINKING_BUDGET.extraction,
+    onRaw: logRaw("image", user.id),
   });
 
   const persistedActions: PersistedAiAction[] = [];

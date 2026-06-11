@@ -425,15 +425,19 @@ export async function listManagedTree(manager: AuthenticatedUser): Promise<Manag
       managerId: manager.id,
       todayProgress: r.todayProgress,
     })),
-    ...subRows.map((r) => ({
-      id: r.id,
-      email: r.email,
-      name: r.name,
-      orgId: r.orgId,
-      role: r.role as "staff" | "manager" | "admin",
-      depth: 1 as const,
-      managerId: r.managers[0]?.id ?? "",
-    })),
+    // Matrix hierarchy: a depth-1 user co-managed by two direct reports appears
+    // once under EACH of those managers (not just managers[0]).
+    ...subRows.flatMap((r) =>
+      r.managers.map((m) => ({
+        id: r.id,
+        email: r.email,
+        name: r.name,
+        orgId: r.orgId,
+        role: r.role as "staff" | "manager" | "admin",
+        depth: 1 as const,
+        managerId: m.id,
+      })),
+    ),
   ];
 }
 

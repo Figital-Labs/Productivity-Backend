@@ -22,6 +22,7 @@ import {
   ENGLISH_OUTPUT_RULE,
   ENGLISH_REASONING_RULE,
   FIDELITY_PRINCIPLE,
+  HOSPITAL_DOMAIN_VOCABULARY,
   NOTES_RULE,
   PRIORITY_CUES_RULE,
   RECOMMENDATION_TITLE_FORMAT_RULE,
@@ -66,6 +67,8 @@ ${dateResolutionRule(today, tomorrow, yesterday)}
 
 INPUT LANGUAGE
 The manager may speak English, Hindi, or Hinglish (code-switched). Treat all three as equivalent input. Match Hindi/Hinglish names to directory entries phonetically (e.g., "Snehā" → "Sneha", "Doctor Mehta" → "Dr. Mehta").
+
+${HOSPITAL_DOMAIN_VOCABULARY}
 
 ${ENGLISH_OUTPUT_RULE}
 

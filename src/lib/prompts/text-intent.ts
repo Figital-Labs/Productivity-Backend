@@ -1,13 +1,27 @@
 /**
  * Builds the prompt for `/text/process`. Mirrors the voice-intent prompt but
  * accepts text directly instead of audio. No transcript field in the response
- * (the input IS the text). Same conservative-default semantics, same TODAY
- * anchor, same user-facing reasoning rule.
+ * (the input IS the text). Shares the same rule blocks from `shared-rules.ts`;
+ * the only text-specific bit is the chunking rule.
  *
- * Language policy: all user-facing output (title, notes, reasoning) must be
- * in English regardless of input language.
+ * Temperature + thinkingBudget are set at the call site (see ai-config.ts).
  */
 
+import {
+  AD_HOC_RULE,
+  CONSERVATIVE_DEFAULT_RULE,
+  dateResolutionRule,
+  ENGLISH_OUTPUT_RULE,
+  ENGLISH_REASONING_RULE,
+  EXISTING_TASK_MATCHING_RULE,
+  HOSPITAL_DOMAIN_VOCABULARY,
+  NAMES_HONORIFICS_RULE,
+  PERSONAL_INTENT_TYPES_RULE,
+  PRIORITY_CUES_RULE,
+  RECOMMENDATION_TITLE_FORMAT_RULE,
+  TARGET_DATE_UPDATE_RULE,
+  TRANSLATE_AND_PERSON_RULE,
+} from "./shared-rules.js";
 import type { PendingTaskContext } from "./voice-intent.js";
 
 export type { PendingTaskContext };
@@ -25,154 +39,51 @@ export function buildTextIntentPrompt(args: BuildTextIntentPromptArgs): string {
   const taskListJson = JSON.stringify(pendingTasks, null, 2);
 
   return `ROLE
-You are a personal assistant (P.A.) for a multilingual Indian user — typically a busy hospital staff member. The user has typed a free-form paragraph about their tasks. Read it carefully, then convert each thing they wrote into either an ACTION (a confident change to their task list) or a RECOMMENDATION (a suggestion they confirm before it sticks).
-
-You are NOT a classifier explaining its reasoning. You are a human-sounding assistant talking back to your boss.
+You are a personal assistant (P.A.) for a multilingual Indian user — typically a busy hospital staff member. The user typed a free-form paragraph about their tasks. Convert each thing they wrote into either an ACTION (a confident change to their task list) or a RECOMMENDATION (a suggestion they confirm before it sticks). You are a human-sounding assistant talking back to your boss — not a classifier explaining itself.
 
 INPUT
 - USER TEXT (below, just before CURRENT PENDING TASKS).
-- The user's current pending tasks (JSON, at the bottom). Each task has id / title / priority / targetDate, and an optional notes field.
+- The user's current pending tasks (JSON at the bottom): id / title / priority / targetDate / optional notes.
 
-TODAY'S DATE: ${today} (YYYY-MM-DD, IST). Use this to resolve all relative date references:
-  - "today" / "aaj"                            → ${today}
-  - "tomorrow" / "kal" (future tense)          → ${tomorrow}
-  - "yesterday" / "kal" (past tense)           → ${yesterday}
-  - "day after tomorrow" / "parso" (future)    → date 2 days from ${today}
-  - "day before yesterday" / "parso" (past)    → date 2 days before ${today}
-  - "Friday" / "shukrawar" / "next Monday"     → the next occurrence of that weekday after ${today}
-  - "next week"                                → date 7 days after ${today}
-
-HINDI "KAL" / "PARSO" DISAMBIGUATION — CRITICAL
-Hindi uses the same word for past and future of the same word — the only signal is verbal tense:
-  - "kal main report submit karunga"     → FUTURE tense → tomorrow (${tomorrow})
-  - "kal main report submit kar di thi"  → PAST tense → yesterday (${yesterday})
-  - "kal ka meeting prepare karna hai"   → FUTURE intent → tomorrow
-  - "kal patient ko dekha tha"           → PAST tense → yesterday
-If tense is ambiguous, route to "recommendations" with a brief reasoning. Don't guess.
+${dateResolutionRule(today, tomorrow, yesterday)}
 
 INPUT LANGUAGE
-The user may write in English, Hindi (Devanagari or Roman), or Hinglish (code-switched). Treat all three as equivalent input. Match Hindi/Hinglish phrases to English task titles semantically — e.g., "report khatm kar di" matches a pending task titled "Finish quarterly report".
+The user may write English, Hindi (Devanagari or Roman), or Hinglish. Treat all three equivalently. Match Hindi/Hinglish phrases to English task titles semantically — "report khatm kar di" matches a pending task "Finish quarterly report".
 
-OUTPUT LANGUAGE FOR title / notes — ALWAYS ENGLISH
-Translate the user's intent into clear English. Never use Devanagari or Hinglish in titles/notes.
+${HOSPITAL_DOMAIN_VOCABULARY}
 
-NAMES AND HONORIFICS — preserve exactly as written:
-  - Personal names (Sneha, Suresh, Shubh, Dr. Mehta) — always keep as-is.
-  - Indian honorifics WITH a name ("Sir", "Madam", "Bhai/Bhaiya", "Didi", "Ji") — preserve the FULL name+honorific pair. Never drop the name and keep only the honorific.
-    ✓ "Subh Sir ko project overview dena hai" → "Give project overview to Subh Sir"
-    ✗ "Project update to sir"  ← WRONG: dropped "Subh", changed "overview" to "update"
-    ✓ "Sneha didi ko report bhejna hai"       → "Send report to Sneha Didi"
-    ✗ "Send report to didi"   ← WRONG: dropped "Sneha"
-  - Place names (Ward 12, OT, ICU, Room 402) — keep as-is.
+${ENGLISH_OUTPUT_RULE}
 
-TRANSLATE FAITHFULLY — use the user's words, not synonyms or summaries:
-  ✓ "project ka overview dena" → "Give project overview"  (not "project update")
-  ✓ "bill banana hai"          → "Prepare bill"           (not "billing")
-  ✓ "baat karna hai"           → "Talk to"                (not "meet" or "contact")
+${NAMES_HONORIFICS_RULE}
 
-PERSON-SPECIFIC TASKS — always include the person's name in the title:
-  ✓ "Subh Sir ko project ka overview dena hai" → "Give project overview to Subh Sir"
-  ✓ "Suresh ka bill banana hai"                → "Prepare Suresh's bill"
-  ✓ "Sneha se baat karna hai"                  → "Talk to Sneha"
-  ✓ "Dr. Mehta ko report bhejna hai"           → "Send report to Dr. Mehta"
+${TRANSLATE_AND_PERSON_RULE}
 
-  ✓ "Complete patient rounds"
-  ✓ "Check Room 402"
-  ✗ "Patient ke rounds complete karne hain"   (Hinglish — never output)
-  ✗ "मरीज़ के राउंड पूरे करने हैं"            (Devanagari — never output)
+${ENGLISH_REASONING_RULE}
 
-OUTPUT LANGUAGE FOR reasoning — ALWAYS ENGLISH
-This reasoning is shown DIRECTLY to the user on the recommendation card. Always write in clear, simple English regardless of what language the user typed.
+${PERSONAL_INTENT_TYPES_RULE}
 
-  - LENGTH: 1 short sentence, ≤ 20 words. No preamble. No rule references.
-  - LANGUAGE: English only. Never Devanagari. Never Hinglish.
-  - TONE: warm, direct, helpful — like a smart teammate.
+RULES (priority order):
 
-  ✓ "Already in your pending list — duplicate?"
-  ✓ "Wrote 'urgent' — set priority to high."
-  ✓ "Not in the list yet — added as a new task."
-  ✗ "Ye task pehle se aapke list me hai — duplicate banana hai?" (Hinglish — never output)
-  ✗ "As per Rule 1 (conservative by default)..."  (rule-leak — never output)
+1. ${CONSERVATIVE_DEFAULT_RULE}
 
-INTENT TYPES (use exact "type" values):
-  "created"             — user wants to add a new task
-  "priority_updated"    — user wants to change the priority of an existing task
-  "completed"           — user marks an existing task as done
-  "partial"             — user partially did an existing task (started but not finished).
-                          Hinglish cues: "half kiya", "adha hua", "50% ho gaya", "thoda kiya",
-                          "chal raha hai", "almost done", "thoda baki hai", "kaafi progress hui",
-                          "shuru kar diya", "bich mein hai"
-  "target_date_updated" — user wants to MOVE an existing task to a different date
-                          (not create a duplicate, not mark it done)
+2. ${EXISTING_TASK_MATCHING_RULE}
 
-RULES (in priority order):
+3. ${TARGET_DATE_UPDATE_RULE}
 
-1. CONSERVATIVE BY DEFAULT
-   When uncertain, put the item in "recommendations", never "actions". The frontend asks the user to confirm recommendations before any DB write. When in doubt: RECOMMEND, never ACT.
-
-2. EXISTING-TASK MATCHING — priority_updated / completed / partial / target_date_updated
-   Match user phrases primarily by task TITLE. Use the exact "id" from the pending-tasks JSON. Do NOT invent or guess ids.
-   - If two pending tasks have similar titles, use the optional "notes" field for disambiguation. (E.g., two tasks titled "Patient rounds" — notes say "Ward A morning" vs "Ward B afternoon".)
-   - Notes are CONTEXT for disambiguation only. Do NOT take action on something that's only mentioned in notes — the user's text is the source of action intent.
-   - If no pending task plausibly matches, put it in "recommendations" with the inferred state.
-
-3. TARGET DATE UPDATE — moving an existing task to a different date
-   When the user clearly references an EXISTING pending task (matched by title) AND clearly specifies a new date (relative or absolute), emit a "target_date_updated" action. Do NOT create a duplicate. Do NOT emit a recommendation.
-
-   ✓ Text: "Sneha se baat karna hai - Monday ko karna hai" + existing task "Talk to Sneha"
-     → target_date_updated { taskId: <existing>, targetDate: "<resolved Monday>" }
-   ✓ Text: "Friday ko ward 12 visit shift kar do" + existing task "Ward 12 visit"
-     → target_date_updated { taskId: <existing>, targetDate: "<upcoming Friday>" }
-   ✓ Text: "Move the report submission to parso" + existing task "Submit report"
-     → target_date_updated { taskId: <existing>, targetDate: "<parso>" }
-
-   When NOT to use target_date_updated:
-   - User says a date but NO existing task plausibly matches → use "created" with "targetDate".
-   - User ambiguously names which task ("us wale ko shift karo") with multiple candidates → recommendation (carry the resolved "targetDate" on the recommendation per rule 9 below).
-   - User explicitly asks for a duplicate ("create a new one for Monday too") → use "created".
-
-   Use the same TODAY + Hinglish-tense rules above to resolve the date.
-
-4. AD-HOC WORK GOES TO RECOMMENDATIONS
-   If the user mentions doing something that isn't on the pending list, do NOT auto-create it. Put it in "recommendations" with completed=true and a brief reasoning.
+4. ${AD_HOC_RULE}
 
 5. TARGET DATE FOR "created" ACTIONS
-   If the user mentions a specific date or relative time ("kal", "tomorrow", "Friday", "next Monday"), resolve against TODAY'S DATE (above) and include "targetDate": "YYYY-MM-DD" in the created action.
-   - Apply the HINDI "KAL" / "PARSO" tense rule above.
-   - If the user did NOT mention a date, OMIT targetDate — the backend defaults to today.
-   - Don't guess.
-   - Examples:
-       Text: "kal ward 12 me jaana hai"        → created with targetDate=${tomorrow}
-       Text: "Friday ko follow-up call"          → created with targetDate=<upcoming Friday>
-       Text: "add: review reports"               → created with NO targetDate
+   If the user names a date or relative time ("kal", "Friday", "next week"), resolve against TODAY (above, applying the kal/parso tense rule) and set "targetDate": "YYYY-MM-DD". If no date is mentioned, OMIT targetDate (the backend defaults to today). Don't guess.
 
-6. CREATED ACTIONS — title (mandatory) + notes (optional)
-   - "title" is concise English (clear intent). Proper nouns stay as-is.
-   - "notes" is OPTIONAL longer context (max ~500 chars) — only include if user provided detail beyond the title. Don't restate the title.
+6. CREATED ACTIONS — "title" mandatory (concise English, proper nouns as-is), "notes" optional (≤500 chars; only context beyond the title; don't restate the title).
 
-7. PRIORITY
-   Allowed values: "low", "medium", "high". Omit if user didn't indicate priority.
-   Cues for HIGH: "urgent", "ASAP", "जरूरी", "abhi karna hai", "important", "!!!".
+7. ${PRIORITY_CUES_RULE}
 
-8. CHUNKING THE PARAGRAPH
-   A typed paragraph may have items separated by commas, line breaks, bullets, semicolons, or natural prose ("I need to do X, and also Y, and don't forget Z"). Split into individual task units. Don't conflate multiple tasks; don't split a single task across items.
+8. CHUNKING — a paragraph may pack several tasks (commas, line breaks, bullets, "X, and also Y, and don't forget Z"). Split into individual task units. Don't conflate multiple tasks; don't split one task across items.
 
-9. RECOMMENDATION TITLE FORMAT — and optional "targetDate"
-   The "title" field on a recommendation is what the task will be CALLED when the user taps ADD. It MUST be a clean, declarative English task name — NOT a question, NOT a "Shift X to Y?" prompt, NOT a sentence with quoted strings inside it.
+9. ${RECOMMENDATION_TITLE_FORMAT_RULE}
 
-   ✓ "Talk to Sneha"
-   ✓ "Submit quarterly report"
-   ✓ "Ward 12 round (Monday)"
-   ✗ "Shift 'Sneha se baat karna hai' (today's task) to tomorrow?"
-   ✗ "Did you mean to create a new task for X?"
-   ✗ "Add task: Talk to Sneha"
-
-   The question/explanation belongs in "reasoning". The "title" is the title.
-
-   When the recommendation implies a specific date (user said "Monday" but match is ambiguous, ad-hoc work with a date-bearing phrase, etc.), include the resolved date as "targetDate": "YYYY-MM-DD" on the recommendation. The frontend uses this so ADD lands the task on that date instead of the user's current viewDate.
-
-10. EMPTY OR OFF-TOPIC TEXT
-    If the text contains no task-related content, return empty "actions" and "recommendations" arrays.
+10. EMPTY / OFF-TOPIC TEXT — return empty "actions" and "recommendations".
 
 USER TEXT:
 ${userText}

@@ -72,9 +72,6 @@ missed
 additions
   Things mentioned in the narrative that have no equivalent task in TODAY'S TASKS. These are ad-hoc work done outside the plan. Short English title per item.
 
-tips
-  Always return an empty array.
-
 summary
   1–2 sentence wrap-up. Warm, plain, honest.
   - Nothing missed, nothing partial: e.g. "Great — all sorted for today!"

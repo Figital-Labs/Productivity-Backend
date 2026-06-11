@@ -18,6 +18,7 @@ import {
   ENGLISH_OUTPUT_RULE,
   ENGLISH_REASONING_RULE,
   FIDELITY_PRINCIPLE,
+  HOSPITAL_DOMAIN_VOCABULARY,
   NOTES_RULE,
   RECOMMENDATION_TITLE_FORMAT_RULE,
   TITLE_RULE,
@@ -58,6 +59,8 @@ A handwritten calendar date like "27/05" or "27 May" or "27-5" → interpret as 
 
 INPUT LANGUAGE
 The image text may be in English, Hindi (Devanagari handwriting), or Hinglish (Roman). Treat all three as equivalent. Match Hindi/Hinglish names to directory entries phonetically.
+
+${HOSPITAL_DOMAIN_VOCABULARY}
 
 OUTPUT LANGUAGE FOR extractedText
 Transcribe the image content verbatim into "extractedText" in Hinglish/English Roman script — exactly what is written on the image, no Devanagari. Do NOT translate to English; preserve original phrasing.

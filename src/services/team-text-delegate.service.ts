@@ -1,4 +1,6 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
+import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { logRaw } from "../lib/ai-log.js";
 import { buildTeamTextDelegatePrompt } from "../lib/prompts/team-text-delegate.js";
 import { buildDirectoryContext } from "../lib/team-directory.js";
 import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
@@ -50,6 +52,9 @@ export async function delegateText(
       ...promptDateAnchors(today),
     }),
     schema: teamTextDelegateResponseSchema,
+    temperature: AI_TEMPERATURE.delegation,
+    thinkingBudget: AI_THINKING_BUDGET.delegation,
+    onRaw: logRaw("team-text", manager.id),
   });
 
   const persistedActions: PersistedDelegationAction[] = [];
