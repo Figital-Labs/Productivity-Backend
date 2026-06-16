@@ -9,6 +9,11 @@ related: [PRODUCT]
 
 # Scope
 
+> ⚠️ **SUPERSEDED (2026-06-11).** Most items this doc lists as "deferred / out of POC"
+> (meetings, hierarchy/matrix, dashboards, analytics, multi-tenant orgs) are now BUILT. For
+> current product reality read PRODUCT.md; for what's parked/dormant see GOTCHAS.md. Kept
+> below for historical scope rationale only.
+
 ## Scope Philosophy
 
 This is a **POC** (proof of concept). The audience is a client deciding whether to fund the real product.

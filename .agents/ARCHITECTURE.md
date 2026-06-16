@@ -1,367 +1,59 @@
 ---
 id: ARCHITECTURE
-title: Data Model, API Surface, Folder Structure, AI Flows
+title: Data Model, API Surface, AI Layer
 status: stable
-date: 2026-05-22
-tags: [architecture, schema, api]
-related: [PRODUCT, GLOSSARY]
+date: 2026-06-11
+tags: [architecture, schema, api, ai]
+related: [PRODUCT, GOTCHAS, DEVELOPMENT]
 ---
 
 # Architecture
 
-## Folder Structure
+> Refreshed 2026-06-11 from the code. The pre-2026-06 version described a single-user
+> to-do POC; the system is now a multi-tenant hospital team-ops platform. **Trust the
+> code** (`prisma/schema.prisma`, `src/routes/`) over any doc.
 
-```
-Backend_task_list/
-├── prisma/
-│   ├── schema.prisma                 # data model below
-│   └── migrations/
-├── src/
-│   ├── routes/                       # HTTP framing only
-│   ├── controllers/                  # orchestrates services
-│   ├── services/                     # business logic, framework-agnostic
-│   ├── repositories/                 # only place Prisma is called
-│   ├── schemas/                      # zod schemas (input + output)
-│   ├── middleware/
-│   │   ├── auth.ts                   # JWT bearer auth
-│   │   ├── error.ts                  # central error handler
-│   │   ├── idempotency.ts
-│   │   └── upload.ts                 # multer setup
-│   ├── lib/
-│   │   ├── prisma.ts                 # existing
-│   │   ├── vertex.ts                 # Vertex AI client + prompt templates
-│   │   ├── storage/
-│   │   │   ├── index.ts              # BlobStorage interface
-│   │   │   └── s3.ts                 # S3 implementation (deferred until creds)
-│   │   └── errors.ts                 # AppError class hierarchy
-│   ├── config/
-│   │   └── env.ts                    # zod-validated env loader
-│   ├── utils/
-│   │   ├── auth.ts                   # canAccess(user, resource)
-│   │   └── date.ts                   # user-tz-aware "today"
-│   ├── app.ts                        # createApp() factory
-│   └── index.ts                      # boots createApp + listen + signal handlers
-├── secrets/                          # gitignored, holds vertex-sa.json
-├── .agents/                          # this directory
-├── .env
-├── package.json
-└── tsconfig.json
-```
+## Layers (dependencies point inward only)
+`routes/` (HTTP framing) → `controllers/` (orchestrate) → `services/` (business logic) →
+`repositories/` (the ONLY place Prisma is called). A service must not import an Express
+type; a repository must not call Vertex. AI prompts live in `src/lib/prompts/`; the Vertex
+client + resilience in `src/lib/vertex.ts`. See ADR-0007.
 
-The boundary rule: **dependencies only point inward.**
-- Routes depend on controllers; controllers depend on services; services depend on repositories.
-- The reverse direction is forbidden. A service must not import an Express type. A repository must not call out to Vertex.
+## Data model (`prisma/schema.prisma`) — current
+Multi-tenant. Every owned row carries `orgId` or a `userId`.
 
-See [ADR-0007](./decisions/0007-layered-architecture.md).
+- **Organization** — the tenant. `Users`/`Departments`/`ContextGroups` all FK to it. Super-admins (`User.isSuperAdmin`) create orgs.
+- **User** — `email`, `name`, `passwordHash`, `role` ("staff"|"manager"|"admin"), **`level: Int`** (default 100; numeric seniority used by auth gates — *internal bookkeeping, not user-facing*), `orgId`, `isSuperAdmin`, `canManageUsers`, `timezone`. **Matrix hierarchy:** M2M self-relation `managers` ↔ `reports` — a person can have MULTIPLE managers (e.g. a lead under two directors).
+- **Task** — **`assigneeId`** (who does it) vs **`creatorId`** (who created/delegated it) — equal for self-created, different for delegated. **`targetDate` (@db.Date) = the day the task lands on the assignee's list / when to do it — NOT a deadline** (deadlines go in `notes`; see GOTCHAS). `priority?`, `completed`, `isPartial`, `notes?`, `aiFeedback?`, `sourceType` (manual|voice|text|image|unified|meeting), `sourceId?`, `groupId?`, soft-delete (`deletedAt`), `media[]`.
+- **Note**, **Alert** (model exists but **dormant — no routes wired**; frontend shows "Coming soon"), **Holiday** (PK `(userId,date)`).
+- **DayPlanSubmission** — `taskSnapshot` Json, unique `(userId,date)`. Submission cutoff exists (12pm IST, per git history).
+- **DayClosureSubmission** — two-phase: `status` "draft" (on `/review`, AI feedback generated once) → "submitted" (on `/submit`). `commentary`, `aiFeedback` Json (`achievements/missed/partial/additions/summary` + `taskActions`; the `tips` field was REMOVED), `mediaIds`.
+- **VoiceInteraction / ImageExtraction / TextInteraction / UnifiedInteraction** — audit rows for each AI call (`actions`, `recommendations`, transcript/extractedText/inputText). UnifiedInteraction is for the **parked** unified path.
+- **Meeting** — `userId` (creator), `attendeeIds: String[]` (loose, no FK), `type` ("hurdle"|"1-on-1"), `agenda?`, `notes?`, `summary?`, `customPrompt?`, `actions` Json, `recommendations` Json, `processedAt?` (lock — processed once). Audio is never persisted; streamed to Vertex inline.
+- **Department** (`orgId`, `headId?`), **ContextGroup** (`kind`: ward|ot|shift|project|personal), **GroupMembership** (`isLead`, `canManage`, **time-bounded** `validFrom`/`validTo` — models shift coverage), **SubmissionReview** (per submission+manager — matrix review), **ReminderIntent** ("Send Reminder" stub, no delivery), **MorningBriefCache** (per manager+date).
 
----
+## Authorization & visibility
+- **`middleware/auth.ts`** — `jwtAuth` resolves `AuthenticatedUser` = `{ id, orgId, role, reportIds:Set, isSuperAdmin, canManageUsers, level }` in one query.
+- **`lib/resolve-scope.ts`** — dashboard visibility authority. Priority: `admin` → whole org; department head → their depts; group lead → their groups; `manager` with reports → reports-only; else `none`.
+- **`utils/auth.ts`** — `canManageUser` / delegation gate: target's `level` must be **below** the actor's AND target must be in the actor's **report subtree** (`reportSubtreeIds`). So a manager can delegate to anyone in their subtree (direct OR indirect), not just direct reports.
 
-## Data Model
+## AI layer
+- **`lib/vertex.ts`** — single `GoogleGenAI` (Vertex) client; model `gemini-2.5-flash`. `generateStructured` (zod schema → `responseJsonSchema`, re-parsed on receipt) and `generateText`. Both support: `temperature`, `systemInstruction`, `thinkingBudget`, `maxRetries` (default 1), `timeoutMs` (default 30s), `onRaw` (raw-text hook). Wrapped in **retry-with-backoff** on recoverable failures (`AI_INVALID_JSON`/`AI_SCHEMA_MISMATCH`/`AI_EMPTY_RESPONSE`/`AI_TIMEOUT`/network) + per-attempt timeout. Backward-compatible (knobs conditionally spread).
+- **`lib/ai-config.ts`** — per-surface `AI_TEMPERATURE` (extraction/delegation/meeting 0.2, dayClosure 0.3, morningBrief 0.35, transcribe 0.0), `AI_THINKING_BUDGET`, and `AI_TIMEOUT_MS` (meeting = 20 min; the meeting call also runs `maxRetries` default since connect-failures are cheap to retry).
+- **`lib/ai-log.ts`** — `logRaw(surface, userId)` → logs the raw model text (so "the AI missed X" is debuggable).
+- **`lib/prompts/`** — one builder per surface: `voice-intent` / `text-intent` / `image-extraction` (personal capture, `/{voice,text,images}/process`), `team-voice/text/image-delegate` (`/team/*/delegate`), `meeting-intent` (`/meetings/:id/process`), `day-closure-feedback` (`/day-closure/review`), `morning-brief` (`/dashboard/morning-brief`), `transcribe` (`/transcribe`). `shared-rules.ts` holds the reusable rule constants (date resolution, English-output/reasoning, conservative-default, existing-task matching, target-date, priority cues, recommendation-title, names/honorifics, hospital vocabulary, ad-hoc, intent types). `unified-intent.ts` is **parked** (dead path).
+- **Graceful degradation:** morning-brief and day-closure return a deterministic fallback on AI failure (never 500). Capture flows still surface a 502 after retries (a soft `degraded` flag is a noted follow-up).
 
-All entities have `id` (cuid), `userId` foreign key, `createdAt`, `updatedAt`, `deletedAt?` (soft delete where applicable).
+## API surface (current — read `src/routes/v1.ts` + `src/routes/*` for the live list)
+All under `/api/v1`, JWT-gated except `/auth/*` and `/livez`/`/readyz`. Standard error shape `{ error: { code, message, details } }`.
+- **Auth:** `/auth/signup|login|me`
+- **Personal capture:** `/voice/process`, `/text/process`, `/images/process` → `{actions, recommendations[, transcript|extractedText]}`. (`/process` unified is PARKED.)
+- **Tasks/Notes/Holidays:** CRUD under `/tasks`, `/notes`, `/holidays`.
+- **Day plan/closure:** `/day-plan/submit|get`, `/day-closure/review|submit|:id/mark-reviewed|get`.
+- **Team (manager):** `/team/reports`, `/reports/tree`, `/reports/:id/{tasks,submissions}`, `/tasks` (delegate), `/voice|text|image/delegate`, `/users` (create), `/users/attach`, `/users/:id/reset-password`, detach.
+- **Meetings:** `/meetings` CRUD, `/meetings/:id/process` (multipart audio+images), `/meetings/:id/recommendations/:index` (status).
+- **Dashboard/analytics:** `/dashboard/{overview, departments[CRUD], groups[CRUD+members], people, people/:id, people/:id/day, consistency, trends, meetings, activity, morning-brief(+refresh), reminders, summary-cards, performers, team/tree, directory, analytics/*}`.
+- **Org/admin:** `/orgs` (list/create + `/:id/admins`, super-admin), `/users/search`, `/transcribe`, `/activity`.
 
-```prisma
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  passwordHash String
-  role      String   @default("staff")    // "staff" | "manager" | "admin" — for future
-  orgId     String                         // single seed org for POC
-  timezone  String   @default("Asia/Kolkata")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Task {
-  id          String    @id @default(cuid())
-  userId      String
-  title       String
-  targetDate  DateTime  @db.Date           // user's local date (defaults to today)
-  priority    String?                       // "low" | "medium" | "high", AI-assigned
-  completed   Boolean   @default(false)
-  isPartial   Boolean   @default(false)
-  notes       String?
-  aiFeedback  String?                       // populated by day-closure AI review
-  sourceType  String                        // "manual" | "voice" | "image" | "text" | "unified"
-  sourceId    String?                       // links to VoiceInteraction / ImageExtraction / TextInteraction / UnifiedInteraction
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
-
-  media       TaskMedia[]
-  user        User       @relation(fields: [userId], references: [id])
-  @@index([userId, targetDate])
-  @@index([userId, deletedAt])
-}
-
-model TaskMedia {
-  id        String   @id @default(cuid())
-  taskId    String
-  type      String   // "image" | "video" | "audio"
-  url       String   // s3:// URI (see ADR-0023)
-  createdAt DateTime @default(now())
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-}
-
-model Note {
-  id        String    @id @default(cuid())
-  userId    String
-  content   String
-  archived  Boolean   @default(false)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-  @@index([userId, deletedAt])
-}
-
-model Alert {
-  id          String    @id @default(cuid())
-  userId      String
-  title       String
-  description String
-  type        String    // "task" | "meeting" | "system"
-  source      String    // "manual" | "ai"
-  createdAt   DateTime  @default(now())
-  dismissedAt DateTime?
-  @@index([userId, dismissedAt])
-}
-
-model Holiday {
-  userId String
-  date   DateTime @db.Date
-  reason String?
-  @@id([userId, date])
-}
-
-model DayPlanSubmission {
-  id           String   @id @default(cuid())
-  userId       String
-  date         DateTime @db.Date
-  submittedAt  DateTime @default(now())
-  taskSnapshot Json     // immutable array of {id, title, priority, ...}
-  @@unique([userId, date])
-}
-
-model DayClosureSubmission {
-  id          String   @id @default(cuid())
-  userId      String
-  date        DateTime @db.Date
-  submittedAt DateTime @default(now())
-  commentary  String
-  aiFeedback  Json     // {achievements, additions, missed, partial, tips, summary}
-  mediaIds    String[]
-  @@unique([userId, date])
-}
-
-model VoiceInteraction {
-  id               String   @id @default(cuid())
-  userId           String
-  audioUrl         String
-  transcript       String
-  actions          Json     // [{type: 'created'|'priority_updated'|'completed'|'partial', ...}]
-  recommendations  Json     // [{title, priority, reasoning}]
-  createdAt        DateTime @default(now())
-}
-
-model ImageExtraction {
-  id              String   @id @default(cuid())
-  userId          String
-  imageUrl        String
-  actions         Json
-  recommendations Json
-  createdAt       DateTime @default(now())
-}
-
-model TextInteraction {
-  id              String   @id @default(cuid())
-  userId          String
-  inputText       String   // the raw text the user submitted
-  actions         Json
-  recommendations Json
-  createdAt       DateTime @default(now())
-}
-
-model UnifiedInteraction {
-  id              String   @id @default(cuid())
-  userId          String
-  inputText       String?  // typed text component (nullable — user may send audio/image only)
-  audioUrl        String?  // deferred (S3 not yet wired)
-  imageUrl        String?  // deferred (S3 not yet wired)
-  actions         Json     // persisted with per-action source tags
-  recommendations Json
-  createdAt       DateTime @default(now())
-}
-```
-
-### Notes on the model
-- `Task.sourceType` + `sourceId`: audit trail back to the voice/image/text/unified interaction that produced this task.
-- `TextInteraction`: mirrors `VoiceInteraction` minus the audio fields. `inputText` stores the raw user paragraph; no transcript column needed.
-- `UnifiedInteraction`: audit row for fusion calls. `audioUrl`/`imageUrl` are nullable because S3 storage is still deferred; the bytes are sent to Vertex inline but not persisted. The `actions` JSON carries per-action `source` provenance (not on the `Task` row itself, which only knows `sourceType: "unified"`).
-- `DayPlanSubmission.taskSnapshot`: per [ADR-0011](./decisions/0011-submit-snapshot.md), this is the immutable record of what the user committed to at submit time.
-- `Holiday`: composite primary key `(userId, date)`. No surrogate id needed.
-- All `@@index` entries are on the columns that will dominate WHERE clauses.
-
----
-
-## API Surface (v1)
-
-All routes under `/api/v1/`. All responses JSON. Standard error shape:
-
-```json
-{ "error": { "code": "TASK_NOT_FOUND", "message": "...", "details": {} } }
-```
-
-### Health
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/livez` | Liveness probe (no deps) |
-| GET | `/readyz` | Readiness probe (checks DB) |
-
-### Auth
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/auth/signup` | Create user with email/password. Returns `{token, user}`. |
-| POST | `/auth/login` | Verify email/password. Returns `{token, user}`. |
-| GET | `/auth/me` | Return current user for a valid bearer token. |
-
-All non-auth `/api/v1` routes require `Authorization: Bearer <token>`. Health endpoints stay public.
-
-### Tasks
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/tasks?date=YYYY-MM-DD` | List tasks for a date (default today in user's TZ) |
-| GET | `/tasks?openCarryOver=true` | List incomplete tasks with `targetDate < today`, ordered by `targetDate ASC`. Mutually exclusive with `date` — sending both → 400 |
-| POST | `/tasks` | Create task manually `{title, targetDate?, notes?, priority?}` |
-| PATCH | `/tasks/:id` | Update task (title, notes, completed, isPartial, priority, targetDate) |
-| DELETE | `/tasks/:id` | Soft delete (sets `deletedAt`) |
-| POST | `/tasks/:id/restore` | Clear `deletedAt` |
-| POST | `/tasks/:id/media` | Attach media (multipart) |
-| DELETE | `/tasks/:id/media/:mediaId` | Detach media |
-
-### Voice / Image / Text / Unified Processing
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/voice/process` | General-purpose voice action endpoint. Multipart audio. Backend includes top 20–100 pending tasks as context. Returns `{transcript, actions, recommendations}`. Persists `VoiceInteraction`. See [ADR-0003](./decisions/0003-voice-intent-classification.md). |
-| POST | `/images/process` | Multipart image → Gemini Vision. Same response shape minus transcript, with `extractedText`. Persists `ImageExtraction`. |
-| POST | `/text/process` | JSON body `{text}`. AI intent classification on a typed paragraph (Hinglish supported). Same action/recommendation shape as voice, no `transcript` field (the input IS the text). Persists `TextInteraction`. |
-| POST | `/process` | Unified multimodal fusion. Multipart with optional `audio`, `image`, and/or body `text` — at least one required. Single Vertex `generateContent` call across all modalities; each action/recommendation carries `source: "voice"｜"image"｜"text"`. No `transcript` or `extractedText` in response (cascade-hallucination rationale; see ADR-0021). Persists `UnifiedInteraction`. |
-
-### Day Plan / Closure
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/day-plan/submit` | `{date?}` → snapshots today's tasks. Returns submission record. |
-| GET | `/day-plan?date=YYYY-MM-DD` | Get day plan submission if exists |
-| POST | `/day-closure/submit` | Multipart audio + `{commentary?, mediaIds?, date?}`. Internally reuses voice intent classification, **plus** generates structured AI feedback. Returns `{transcript, taskUpdates, recommendedNewTasks, aiFeedback}`. |
-| GET | `/day-closure?date=YYYY-MM-DD` | Get day closure submission if exists |
-
-### Notes
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/notes` | List notes |
-| POST | `/notes` | Create `{content}` |
-| PATCH | `/notes/:id` | Update |
-| POST | `/notes/:id/archive` | Archive (sets `archived=true`) |
-| DELETE | `/notes/:id` | Soft delete |
-
-### Alerts
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/alerts` | List active alerts (`dismissedAt` null) |
-| POST | `/alerts` | Create manually |
-| POST | `/alerts/generate` | Gemini analyzes current tasks → creates AI alerts |
-| POST | `/alerts/:id/dismiss` | Set `dismissedAt` |
-
-### Holidays
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/holidays?from=...&to=...` | List holidays in range |
-| POST | `/holidays/toggle` | `{date, reason?}` → add or remove |
-
-### History
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/history?type=tasks\|notes&q=search&limit=50&cursor=...` | Cursor-paginated search across past entities |
-
-### Uploads
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/uploads` | Multipart file → returns `{url, type}`. Backed by `BlobStorage`. |
-
-All mutating POSTs accept `Idempotency-Key` header. See [ADR-0017](./decisions/0017-idempotency-keys.md).
-
----
-
-## AI Flows (Detailed)
-
-### Voice Flow (`POST /voice/process`)
-
-```
-┌──────────┐                                                     ┌──────────┐
-│ Frontend │                                                     │ Backend  │
-└────┬─────┘                                                     └────┬─────┘
-     │  POST /voice/process (multipart: audio[, images, text])       │
-     │ ────────────────────────────────────────────────────────────► │
-     │                                                              │
-     │                                                              │
-     │                          1. Load top 20–100 pending tasks    │
-     │                             for the user as context          │
-     │                                                              │
-     │                          2. Call Vertex Gemini 2.5 Flash     │
-     │                             with audio + context tasks       │
-     │                             Prompt: "for each phrase, classify│
-     │                             intent → created / priority_updated│
-     │                             / completed / partial; or put    │
-     │                             into recommendations if unsure"  │
-     │                                                              │
-     │                          3. For each action returned:        │
-     │                             call repository method that      │
-     │                             matches (taskRepo.create,        │
-     │                             taskRepo.updatePriority, etc.)   │
-     │                                                              │
-     │                          4. Persist VoiceInteraction         │
-     │                                                              │
-     │  ◄──────────────────────────────────────────────────────────│
-     │  { transcript, actions: [...], recommendations: [...] }      │
-```
-
-### Image Flow (`POST /images/process`)
-
-Same as voice, but the input is an image and the model used is Gemini Vision. Used primarily for handwritten task sheet OCR.
-
-### Day Closure Flow (`POST /day-closure/submit`)
-
-```
-1. Frontend uploads: audio + optional text commentary + optional mediaIds
-2. Backend reuses the voice intent classification service (same as /voice/process)
-3. Backend makes a SECOND Vertex call to generate structured aiFeedback:
-   { achievements, missed, partial, additions, tips, summary }
-4. Persists DayClosureSubmission with everything
-5. Returns: { transcript, taskUpdates, recommendedNewTasks, aiFeedback }
-```
-
-Note: `recommendedNewTasks` is NOT auto-created. Frontend shows them as opt-in items; user taps Add or Skip. If Add, frontend POSTs to `/tasks`. See [ADR-0005](./decisions/0005-recommendation-pattern.md).
-
-### Text Flow (`POST /text/process`)
-
-Same as voice, except input is a JSON body `{ text }` instead of a multipart audio file. No media passed to Vertex — the text is inlined in the prompt body. Persists `TextInteraction`. Response shape is identical to voice minus `transcript`.
-
-### Unified Fusion Flow (`POST /process`)
-
-```
-1. Frontend sends multipart: any combination of audio file, image file, text body field
-2. Controller validates at least one modality present; 400 if all absent
-3. Backend creates empty UnifiedInteraction row (for sourceId referencing)
-4. Builds media[] array from whichever files are present
-5. Single Vertex generateContent call with:
-   - all media buffers as inline attachments
-   - fusion prompt (modality-aware: lists which inputs are present this call)
-   - pending task context (top 50)
-6. For each action returned: dispatch via shared dispatchAiAction (sourceType: "unified")
-   Per-action source tag (voice|image|text) is re-attached after dispatch
-7. Patch UnifiedInteraction with final actions + recommendations
-8. Returns: { unifiedInteractionId, actions (with source), recommendations (with source) }
-   NOTE: no transcript or extractedText — see ADR-0021
-```
-
-See [ADR-0021](./decisions/0021-multimodal-fusion-composer.md) for the full decision record.
+## Uploads
+`middleware/upload.ts` uses **multer `memoryStorage`** (files buffered in RAM), 10MB/file. Meetings allow up to 12 audio + 4 images per request → see GOTCHAS (free-tier memory risk).

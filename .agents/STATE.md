@@ -8,7 +8,10 @@ tags: [meta, state, coordination]
 
 # STATE — Live Project State
 
-> **This file is the coordination point for agents.** Read it at the start of every session. Update it when your work status changes.
+> ⚠️ **SUPERSEDED (2026-06-11) for "current state."** The sprints/changelog below are
+> HISTORICAL build provenance (kept; don't rewrite). For what the system is *now*, read
+> PRODUCT.md → ARCHITECTURE.md → GOTCHAS.md → DEVELOPMENT.md. The live work backlog is
+> `kims-fix-backlog.md` in the gig_project root.
 
 ---
 
@@ -162,16 +165,11 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 ## What An Agent Should Do Right Now
 
-**Sprint 09 is scoped and ready to start.** Sprint 08 (AI date intent + context + safety caps) is committed. Sprint 09 is the History activity-feed endpoint — a derived projection over existing tables, explicitly POC-scoped per [ADR-0024](./decisions/0024-history-derived-projection.md).
-
-This sprint is designed to run **in parallel with [Frontend Sprint 09](../../Task-List/.agents/sprints/09-history-activity-feed.md)** because they touch disjoint files. The full `ActivityEvent` contract is locked in the backend sprint file ("Backend Contract" section); the frontend reads from there.
-
-If you're a fresh agent session picking up Sprint 09:
-1. Read `BACKEND_GUIDE.md` at the project root — single source of truth for what endpoints exist.
-2. Read `ARCHITECTURE.md` for data model + AI flow details.
-3. Read [ADR-0024](./decisions/0024-history-derived-projection.md) BEFORE implementing — it explains why this is a derived projection (not an audit table) and the scale limits.
-4. Read the sprint file at [sprints/09-history-activity-feed.md](./sprints/09-history-activity-feed.md). The contract is the canonical reference for the frontend team.
-5. Don't start any other work autonomously — wait for explicit user direction.
+> ⚠️ The Sprint-09 guidance that used to live here is HISTORICAL — everything through
+> Sprint 17 (and meetings, hierarchy, dashboards, analytics) has since shipped. Current
+> onboarding: **PRODUCT.md → ARCHITECTURE.md → GOTCHAS.md → DEVELOPMENT.md**, then check
+> `kims-fix-backlog.md` (gig_project root) for live work. Don't start work autonomously —
+> wait for explicit user direction.
 
 ### 2026-05-23 (later)
 
