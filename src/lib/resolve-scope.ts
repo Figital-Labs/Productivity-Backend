@@ -1,5 +1,6 @@
 import type { AuthenticatedUser } from "../middleware/auth.js";
 
+import { isOrgAdmin } from "./access.js";
 import prisma from "./prisma.js";
 
 export type Scope =
@@ -14,7 +15,7 @@ export type Scope =
  * authority source so every dashboard endpoint filters data the same way.
  */
 export async function resolveScope(user: AuthenticatedUser): Promise<Scope> {
-  if (user.role === "admin") return { type: "org", orgId: user.orgId };
+  if (isOrgAdmin(user.level)) return { type: "org", orgId: user.orgId };
 
   const headedDepts = await prisma.department.findMany({
     where: { headId: user.id, orgId: user.orgId },
@@ -45,7 +46,10 @@ export async function resolveScope(user: AuthenticatedUser): Promise<Scope> {
     };
   }
 
-  if (user.role === "manager" && user.reportIds.size > 0) {
+  // Relationship signal: anyone who actually has reports gets the reports-only
+  // view, regardless of role label (group leads/dept heads are handled above
+  // via their dept/group; this is the plain manager-with-reports fallback).
+  if (user.reportIds.size > 0) {
     return {
       type: "reports-only",
       reportIds: Array.from(user.reportIds),

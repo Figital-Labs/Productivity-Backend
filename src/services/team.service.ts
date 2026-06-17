@@ -1,3 +1,4 @@
+import { isOrgAdmin } from "../lib/access.js";
 import { AppError, ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
 import { hashPassword } from "../lib/password.js";
 import prisma from "../lib/prisma.js";
@@ -25,6 +26,7 @@ export interface PublicTeamUser {
   id: string;
   email: string;
   name: string;
+  designation: string | null;
   orgId: string;
   role: "staff" | "manager" | "admin";
 }
@@ -44,6 +46,7 @@ function toPublicTeamUser(u: {
   id: string;
   email: string;
   name: string;
+  designation?: string | null;
   orgId: string;
   role: string;
 }): PublicTeamUser {
@@ -52,6 +55,7 @@ function toPublicTeamUser(u: {
     id: u.id,
     email: u.email,
     name: u.name,
+    designation: u.designation ?? null,
     orgId: u.orgId,
     role: u.role as PublicTeamUser["role"],
   };
@@ -83,7 +87,7 @@ export async function listReports(manager: AuthenticatedUser): Promise<ReportWit
     where: { id: manager.id },
     select: {
       reports: {
-        select: { id: true, email: true, name: true, orgId: true, role: true },
+        select: { id: true, email: true, name: true, orgId: true, role: true, designation: true },
         orderBy: { name: "asc" },
       },
     },
@@ -247,7 +251,7 @@ export async function createUser(
   input: CreateTeamUserInput,
 ): Promise<PublicTeamUser> {
   // L8 guardrail: only users with the create-users permission may proceed.
-  if (!creator.isSuperAdmin && creator.role !== "admin" && !creator.canManageUsers) {
+  if (!creator.isSuperAdmin && !isOrgAdmin(creator.level) && !creator.canManageUsers) {
     throw new ForbiddenError("You do not have permission to create users.");
   }
 
@@ -357,7 +361,7 @@ export async function attachExistingUser(
   if (target.id === creator.id) {
     throw new AppError("CANNOT_ATTACH_SELF", 400, "Cannot attach yourself as a report");
   }
-  if (target.role === "admin") {
+  if (isOrgAdmin(target.level)) {
     throw new AppError("CANNOT_ATTACH_ADMIN", 403, "Cannot attach an admin as a report");
   }
   if (target.level >= creator.level) {
@@ -380,6 +384,7 @@ export interface ManagedTreeNode {
   id: string;
   email: string;
   name: string;
+  designation: string | null;
   orgId: string;
   role: "staff" | "manager" | "admin";
   depth: 0 | 1;
@@ -407,6 +412,7 @@ export async function listManagedTree(manager: AuthenticatedUser): Promise<Manag
       id: true,
       email: true,
       name: true,
+      designation: true,
       orgId: true,
       role: true,
       managers: { where: { id: { in: directIds } }, select: { id: true } },
@@ -419,6 +425,7 @@ export async function listManagedTree(manager: AuthenticatedUser): Promise<Manag
       id: r.id,
       email: r.email,
       name: r.name,
+      designation: r.designation,
       orgId: r.orgId,
       role: r.role,
       depth: 0 as const,
@@ -432,6 +439,7 @@ export async function listManagedTree(manager: AuthenticatedUser): Promise<Manag
         id: r.id,
         email: r.email,
         name: r.name,
+        designation: r.designation,
         orgId: r.orgId,
         role: r.role as "staff" | "manager" | "admin",
         depth: 1 as const,

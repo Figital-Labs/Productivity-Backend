@@ -14,6 +14,7 @@ export default tseslint.config(
       "prisma/seed.ts",
       "prisma/seed-hierarchy.ts",
       "prisma/seed-figital.ts",
+      "prisma/seed-kims-hospitals.ts",
       "prisma.config.ts",
       "eslint.config.js",
     ],

@@ -1,6 +1,9 @@
+import { capabilitiesFor, type Capabilities } from "../lib/access.js";
 import { ConflictError, UnauthorizedError } from "../lib/errors.js";
 import { signAuthToken } from "../lib/jwt.js";
 import { hashPassword, verifyPassword } from "../lib/password.js";
+import prisma from "../lib/prisma.js";
+import { resolveScope } from "../lib/resolve-scope.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as userRepo from "../repositories/user.repository.js";
 import type { LoginInput, SignupInput } from "../schemas/auth.schema.js";
@@ -12,8 +15,18 @@ export interface PublicAuthUser {
   id: string;
   email: string;
   name: string;
+  designation: string | null;
   orgId: string;
   role: AuthenticatedUser["role"];
+  // Sprint 19: surfaced so the day-timeline knows the user's schedulable window
+  // (and tz for the now-line) without an extra round-trip.
+  timezone: string;
+  workStartMinute: number;
+  workEndMinute: number;
+  // Authorization: numeric level + derived capabilities. The frontend gates on
+  // these, NOT on the role string.
+  level: number;
+  capabilities: Capabilities;
 }
 
 export interface AuthResponse {
@@ -28,18 +41,41 @@ function toAuthRole(role: string): AuthenticatedUser["role"] {
   throw new UnauthorizedError("Invalid user role");
 }
 
-function toPublicUser(user: userRepo.User): PublicAuthUser {
+async function toPublicUser(user: userRepo.User): Promise<PublicAuthUser> {
+  // Build the authenticated-user shape resolveScope needs (reports drive the
+  // "manages someone" relationship signal), then derive capabilities from
+  // level + that scope.
+  const withReports = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { reports: { select: { id: true } } },
+  });
+  const authUser: AuthenticatedUser = {
+    id: user.id,
+    orgId: user.orgId,
+    role: toAuthRole(user.role),
+    reportIds: new Set((withReports?.reports ?? []).map((r) => r.id)),
+    isSuperAdmin: user.isSuperAdmin,
+    canManageUsers: user.canManageUsers,
+    level: user.level,
+  };
+  const scope = await resolveScope(authUser);
   return {
     id: user.id,
     email: user.email,
     name: user.name,
+    designation: user.designation,
     orgId: user.orgId,
     role: toAuthRole(user.role),
+    timezone: user.timezone,
+    workStartMinute: user.workStartMinute,
+    workEndMinute: user.workEndMinute,
+    level: user.level,
+    capabilities: capabilitiesFor(user.level, scope),
   };
 }
 
-function buildAuthResponse(user: userRepo.User): AuthResponse {
-  const publicUser = toPublicUser(user);
+async function buildAuthResponse(user: userRepo.User): Promise<AuthResponse> {
+  const publicUser = await toPublicUser(user);
   return {
     token: signAuthToken({
       sub: publicUser.id,

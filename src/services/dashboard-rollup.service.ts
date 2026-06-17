@@ -1,3 +1,4 @@
+import { isOrgAdmin } from "../lib/access.js";
 import { AppError, ForbiddenError, NotFoundError } from "../lib/errors.js";
 import prisma from "../lib/prisma.js";
 import type { Scope } from "../lib/resolve-scope.js";
@@ -39,7 +40,7 @@ export interface GroupCard {
 }
 
 export interface PersonRow {
-  user: { id: string; name: string; email: string; role: string };
+  user: { id: string; name: string; email: string; role: string; designation: string | null };
   todayKpis: Kpis;
   weekKpis: Kpis;
   consistencyScore: number;
@@ -276,7 +277,7 @@ export async function consistencyForUsers(
   const [users, plans, closures, holidays] = await Promise.all([
     prisma.user.findMany({
       where: { id: { in: scopedUserIds } },
-      select: { id: true, name: true, role: true },
+      select: { id: true, name: true, role: true, designation: true },
       orderBy: { name: "asc" },
     }),
     prisma.dayPlanSubmission.findMany({
@@ -467,7 +468,7 @@ export async function peopleForScope(
   ] = await Promise.all([
     prisma.user.findMany({
       where: { id: { in: userIds } },
-      select: { id: true, name: true, email: true, role: true },
+      select: { id: true, name: true, email: true, role: true, designation: true },
       orderBy: { name: "asc" },
     }),
     consistencyForUsers(userIds, 7),
@@ -600,7 +601,7 @@ export async function createDepartment(
   actor: AuthenticatedUser,
   input: CreateDepartmentInput,
 ): Promise<unknown> {
-  if (actor.role !== "admin") throw new ForbiddenError("Only admins can manage departments");
+  if (!isOrgAdmin(actor.level)) throw new ForbiddenError("Only admins can manage departments");
   return prisma.department.create({
     data: { orgId: actor.orgId, name: input.name, headId: input.headId ?? null },
   });
@@ -611,7 +612,7 @@ export async function updateDepartment(
   departmentId: string,
   input: UpdateDepartmentInput,
 ): Promise<unknown> {
-  if (actor.role !== "admin") throw new ForbiddenError("Only admins can manage departments");
+  if (!isOrgAdmin(actor.level)) throw new ForbiddenError("Only admins can manage departments");
   return prisma.department.update({
     where: { id: departmentId },
     data: omitUndefined({ name: input.name, headId: input.headId }),
@@ -622,7 +623,7 @@ async function canManageDepartment(
   actor: AuthenticatedUser,
   departmentId: string | null | undefined,
 ): Promise<boolean> {
-  if (actor.role === "admin") return true;
+  if (isOrgAdmin(actor.level)) return true;
   if (departmentId === null || departmentId === undefined) return false;
   const count = await prisma.department.count({
     where: { id: departmentId, orgId: actor.orgId, headId: actor.id },
@@ -631,7 +632,7 @@ async function canManageDepartment(
 }
 
 async function canManageGroup(actor: AuthenticatedUser, groupId: string): Promise<boolean> {
-  if (actor.role === "admin") return true;
+  if (isOrgAdmin(actor.level)) return true;
   const group = await prisma.contextGroup.findUnique({
     where: { id: groupId },
     select: { orgId: true, departmentId: true },
