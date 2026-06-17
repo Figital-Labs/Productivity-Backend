@@ -137,6 +137,9 @@ export type MeetingsAnalyticsQuery = z.infer<typeof meetingsAnalyticsQuerySchema
 /** `GET /dashboard/analytics/schedule-heatmap?date=` — per-person hourly load. */
 export const scheduleHeatmapQuerySchema = z.object({
   date: dateStringSchema.optional(),
+  // When present, return that department's per-person grid (drill-down). Absent
+  // = team-wide availability curve only. "__none__" = the no-department bucket.
+  departmentId: z.string().optional(),
 });
 export type ScheduleHeatmapQuery = z.infer<typeof scheduleHeatmapQuerySchema>;
 

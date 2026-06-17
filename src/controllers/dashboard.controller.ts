@@ -226,7 +226,7 @@ export async function meetingsAnalytics(req: Request, res: Response): Promise<vo
 export async function scheduleHeatmap(req: Request, res: Response): Promise<void> {
   const query = scheduleHeatmapQuerySchema.parse(req.query);
   const scope = await resolveScope(req.user);
-  res.json(await analyticsService.getScheduleHeatmap(scope, query.date));
+  res.json(await analyticsService.getScheduleHeatmap(scope, query.date, query.departmentId));
 }
 
 export async function scheduleAdherence(req: Request, res: Response): Promise<void> {
