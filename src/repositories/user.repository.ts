@@ -52,7 +52,7 @@ export function searchSameOrg(
   q: string | undefined,
   take: number,
   maxLevel?: number,
-): Promise<Pick<User, "id" | "email" | "name" | "role" | "level">[]> {
+): Promise<Pick<User, "id" | "email" | "name" | "role" | "level" | "designation">[]> {
   const baseWhere = q
     ? {
         orgId,
@@ -67,6 +67,6 @@ export function searchSameOrg(
     where,
     take,
     orderBy: { name: "asc" },
-    select: { id: true, email: true, name: true, role: true, level: true },
+    select: { id: true, email: true, name: true, role: true, level: true, designation: true },
   });
 }

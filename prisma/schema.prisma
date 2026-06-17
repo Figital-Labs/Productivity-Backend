@@ -13,6 +13,9 @@ model User {
   id           String   @id @default(cuid())
   email        String   @unique
   name         String
+  // Real job title (e.g. "General Manager"), shown in the UI. role/level stay
+  // internal (authz only); designation is the human-facing label.
+  designation  String?
   passwordHash String
   role         String   @default("staff")
   level        Int      @default(100)
