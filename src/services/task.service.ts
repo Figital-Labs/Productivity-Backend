@@ -5,6 +5,8 @@ import type { CreateTaskInput, ListTasksQuery, UpdateTaskInput } from "../schema
 import { canAccessTask } from "../utils/auth.js";
 import { parseDateString, todayInUserTz } from "../utils/date.js";
 
+import { autoScheduleOnCreate } from "./scheduling/scheduling.service.js";
+
 const DEFAULT_TIMEZONE = "Asia/Kolkata";
 
 export async function getTask(user: AuthenticatedUser, id: string): Promise<taskRepo.Task> {
@@ -26,7 +28,7 @@ export function listTasks(
   return taskRepo.listByDate(user.id, date);
 }
 
-export function createTask(
+export async function createTask(
   user: AuthenticatedUser,
   input: CreateTaskInput,
 ): Promise<taskRepo.Task> {
@@ -34,7 +36,7 @@ export function createTask(
     ? parseDateString(input.targetDate)
     : todayInUserTz(DEFAULT_TIMEZONE);
 
-  return taskRepo.create({
+  const task = await taskRepo.create({
     // Sprint 11: a manually created task on one's own list is its own
     // assignee + creator. Delegation goes through team.service.ts, not here.
     assigneeId: user.id,
@@ -45,6 +47,8 @@ export function createTask(
     ...(input.notes !== undefined && { notes: input.notes }),
     ...(input.priority !== undefined && { priority: input.priority }),
   });
+  // Sprint 19: new tasks auto-drop into the earliest free slot for their day.
+  return autoScheduleOnCreate(task);
 }
 
 export async function updateTask(
@@ -52,12 +56,22 @@ export async function updateTask(
   id: string,
   patch: UpdateTaskInput,
 ): Promise<taskRepo.Task> {
-  await getTask(user, id);
+  const before = await getTask(user, id);
   const { targetDate, ...rest } = patch;
-  return taskRepo.update(id, {
+  const dateChanged =
+    targetDate !== undefined &&
+    parseDateString(targetDate).getTime() !== before.targetDate.getTime();
+
+  const updated = await taskRepo.update(id, {
     ...rest,
     ...(targetDate !== undefined && { targetDate: parseDateString(targetDate) }),
   });
+
+  // Sprint 19: a task that moved to a different day (e.g. carry-over → today)
+  // carries a slot that no longer applies — re-drop it into the new day's
+  // earliest free slot (or leave it Unscheduled if that day is full).
+  if (dateChanged) return autoScheduleOnCreate(updated);
+  return updated;
 }
 
 export async function deleteTask(user: AuthenticatedUser, id: string): Promise<taskRepo.Task> {

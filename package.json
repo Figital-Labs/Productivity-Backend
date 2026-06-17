@@ -19,6 +19,7 @@
     "format:check": "prettier --check \"src/**/*.{ts,json}\" \"*.{ts,js,json,md}\"",
     "typecheck": "tsc --noEmit",
     "eval": "tsx eval/run.ts",
+    "test:engine": "tsx src/services/scheduling/engine.spec.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "prepare": "husky || true"
   },

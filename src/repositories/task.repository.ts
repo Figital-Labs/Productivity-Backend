@@ -2,7 +2,10 @@ import type { TaskGetPayload } from "../generated/prisma/models/Task.js";
 import prisma from "../lib/prisma.js";
 import { omitUndefined } from "../utils/object.js";
 
-const taskWithCreator = {
+// Exported so the scheduling service can persist slot changes inside its own
+// transaction while returning the same `creator`-hydrated payload as every
+// other task response.
+export const taskWithCreator = {
   include: { creator: { select: { id: true, name: true } } },
 } as const;
 

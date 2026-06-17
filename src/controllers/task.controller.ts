@@ -4,8 +4,10 @@ import { idParamSchema } from "../schemas/common.js";
 import {
   createTaskInputSchema,
   listTasksQuerySchema,
+  scheduleTaskInputSchema,
   updateTaskInputSchema,
 } from "../schemas/task.schema.js";
+import * as schedulingService from "../services/scheduling/scheduling.service.js";
 import * as taskService from "../services/task.service.js";
 
 export async function list(req: Request, res: Response): Promise<void> {
@@ -25,6 +27,13 @@ export async function update(req: Request, res: Response): Promise<void> {
   const patch = updateTaskInputSchema.parse(req.body);
   const task = await taskService.updateTask(req.user, id, patch);
   res.json(task);
+}
+
+export async function schedule(req: Request, res: Response): Promise<void> {
+  const { id } = idParamSchema.parse(req.params);
+  const input = scheduleTaskInputSchema.parse(req.body);
+  const result = await schedulingService.scheduleTask(req.user, id, input);
+  res.json(result);
 }
 
 export async function remove(req: Request, res: Response): Promise<void> {

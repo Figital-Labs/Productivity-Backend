@@ -6,6 +6,8 @@ import type {
 } from "../schemas/team-voice-delegate.schema.js";
 import { parseDateString } from "../utils/date.js";
 
+import { autoScheduleOnCreate } from "./scheduling/scheduling.service.js";
+
 // Declared as a `type` (not `interface`) so it satisfies Prisma's
 // `InputJsonValue` shape when serialized into VoiceInteraction.actions /
 // TextInteraction.actions / ImageExtraction.actions — interfaces are open
@@ -70,6 +72,8 @@ export async function dispatchDelegationAction(
     ...(action.notes !== undefined && { notes: action.notes }),
     ...(action.priority !== undefined && { priority: action.priority }),
   });
+  // Sprint 19: delegated AI tasks auto-schedule into the assignee's day.
+  await autoScheduleOnCreate(created);
 
   return {
     kind: "action",

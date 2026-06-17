@@ -11,3 +11,17 @@ export const searchUsersQuerySchema = z.object({
   forMeeting: z.coerce.boolean().optional(),
 });
 export type SearchUsersQuery = z.infer<typeof searchUsersQuerySchema>;
+
+/**
+ * Sprint 19: per-user working hours for `PATCH /users/me/working-hours`.
+ * Minutes from local midnight; end must be strictly after start.
+ */
+export const workingHoursSchema = z
+  .object({
+    workStartMinute: z.number().int().min(0).max(1439),
+    workEndMinute: z.number().int().min(1).max(1440),
+  })
+  .refine((v) => v.workEndMinute > v.workStartMinute, {
+    message: "workEndMinute must be after workStartMinute",
+  });
+export type WorkingHoursInput = z.infer<typeof workingHoursSchema>;

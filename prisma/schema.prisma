@@ -23,6 +23,10 @@ model User {
   canManageUsers Boolean  @default(false)
   org            Organization @relation(fields: [orgId], references: [id])
   timezone     String   @default("Asia/Kolkata")
+  // Sprint 19: per-user working hours as minutes from local midnight — the
+  // window the day-timeline schedules tasks into. Defaults to 09:00–18:00.
+  workStartMinute Int    @default(540)
+  workEndMinute   Int    @default(1080)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -70,6 +74,12 @@ model Task {
   creatorId  String
   title      String
   targetDate DateTime  @db.Date
+  // Sprint 19: intra-day time-slot scheduling. Minutes from local midnight on
+  // the targetDate day (0–1439); null = Unscheduled. Duration defaults to 30
+  // when scheduled. Wall-clock = targetDate (local date) + minute offset, so no
+  // UTC/DST math is needed and overlap is a pure integer-interval comparison.
+  scheduledStartMinute     Int?
+  scheduledDurationMinutes Int?
   priority   String?
   completed  Boolean   @default(false)
   isPartial  Boolean   @default(false)
@@ -90,6 +100,7 @@ model Task {
   @@index([assigneeId, targetDate])
   @@index([assigneeId, deletedAt])
   @@index([groupId, targetDate])
+  @@index([assigneeId, targetDate, scheduledStartMinute])
 }
 
 model TaskMedia {

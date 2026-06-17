@@ -24,6 +24,15 @@ export const updateTaskInputSchema = z
   });
 export type UpdateTaskInput = z.infer<typeof updateTaskInputSchema>;
 
+// Sprint 19: time-slot scheduling. `startMinute` is minutes from local midnight
+// (null unschedules → Unscheduled bucket); `durationMinutes` defaults server-side
+// to the task's current duration or 30. Cascade is applied in the service.
+export const scheduleTaskInputSchema = z.object({
+  startMinute: z.number().int().min(0).max(1439).nullable(),
+  durationMinutes: z.number().int().min(15).max(1440).optional(),
+});
+export type ScheduleTaskInput = z.infer<typeof scheduleTaskInputSchema>;
+
 export const listTasksQuerySchema = z
   .object({
     date: dateStringSchema.optional(),

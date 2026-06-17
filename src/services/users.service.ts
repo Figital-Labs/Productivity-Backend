@@ -1,6 +1,6 @@
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as userRepo from "../repositories/user.repository.js";
-import type { SearchUsersQuery } from "../schemas/users.schema.js";
+import type { SearchUsersQuery, WorkingHoursInput } from "../schemas/users.schema.js";
 
 export interface PublicUserSummary {
   id: string;
@@ -36,4 +36,19 @@ export async function searchSameOrg(
     role: r.role as PublicUserSummary["role"],
     level: r.level,
   }));
+}
+
+/**
+ * Sprint 19: update the caller's own working-hours window. Validation (end >
+ * start, 0–1440 range) is enforced at the schema boundary.
+ */
+export async function updateWorkingHours(
+  user: AuthenticatedUser,
+  input: WorkingHoursInput,
+): Promise<{ workStartMinute: number; workEndMinute: number }> {
+  const updated = await userRepo.updateWorkingHours(user.id, {
+    workStartMinute: input.workStartMinute,
+    workEndMinute: input.workEndMinute,
+  });
+  return { workStartMinute: updated.workStartMinute, workEndMinute: updated.workEndMinute };
 }

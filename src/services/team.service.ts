@@ -18,6 +18,7 @@ import { canCreateUserAtLevel, reportSubtreeIds } from "../utils/auth.js";
 import { parseDateString, todayInUserTz } from "../utils/date.js";
 
 import { addUserToPersonalDirects } from "./personal-directs.service.js";
+import { autoScheduleOnCreate } from "./scheduling/scheduling.service.js";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata";
 
@@ -183,7 +184,7 @@ export async function createDelegatedTask(
   const targetDate = input.targetDate
     ? parseDateString(input.targetDate)
     : todayInUserTz(DEFAULT_TIMEZONE);
-  return taskRepo.create({
+  const task = await taskRepo.create({
     assigneeId: input.assigneeId,
     creatorId: manager.id,
     title: input.title,
@@ -192,6 +193,8 @@ export async function createDelegatedTask(
     ...(input.notes !== undefined && { notes: input.notes }),
     ...(input.priority !== undefined && { priority: input.priority }),
   });
+  // Sprint 19: delegated tasks auto-schedule into the assignee's day + hours.
+  return autoScheduleOnCreate(task);
 }
 
 /**

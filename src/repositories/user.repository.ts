@@ -39,6 +39,14 @@ export function create(data: CreateUserData): Promise<User> {
   return prisma.user.create({ data: omitUndefined(data) });
 }
 
+/** Sprint 19: persist a user's working-hours window (minutes from midnight). */
+export function updateWorkingHours(
+  id: string,
+  data: { workStartMinute: number; workEndMinute: number },
+): Promise<User> {
+  return prisma.user.update({ where: { id }, data });
+}
+
 /**
  * Sprint 14 addendum: same-org user search by name or email substring
  * (case-insensitive). Used by the manager dashboard's "Add Existing" flow

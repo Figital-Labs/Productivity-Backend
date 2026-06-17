@@ -14,6 +14,11 @@ export interface PublicAuthUser {
   name: string;
   orgId: string;
   role: AuthenticatedUser["role"];
+  // Sprint 19: surfaced so the day-timeline knows the user's schedulable window
+  // (and tz for the now-line) without an extra round-trip.
+  timezone: string;
+  workStartMinute: number;
+  workEndMinute: number;
 }
 
 export interface AuthResponse {
@@ -35,6 +40,9 @@ function toPublicUser(user: userRepo.User): PublicAuthUser {
     name: user.name,
     orgId: user.orgId,
     role: toAuthRole(user.role),
+    timezone: user.timezone,
+    workStartMinute: user.workStartMinute,
+    workEndMinute: user.workEndMinute,
   };
 }
 
