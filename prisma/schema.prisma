@@ -83,6 +83,9 @@ model Task {
   priority   String?
   completed  Boolean   @default(false)
   isPartial  Boolean   @default(false)
+  // Sprint 20: stamped when a task transitions to completed (cleared on un-complete).
+  // Gives a real "done at" signal for schedule-adherence analytics.
+  completedAt DateTime?
   notes      String?
   aiFeedback String?
   sourceType String

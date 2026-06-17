@@ -22,6 +22,8 @@ import {
   personDayQuerySchema,
   planAccuracyQuerySchema,
   planVsClosureQuerySchema,
+  scheduleAdherenceQuerySchema,
+  scheduleHeatmapQuerySchema,
   taskFlowQuerySchema,
   updateDepartmentSchema,
   updateGroupSchema,
@@ -219,6 +221,19 @@ export async function meetingsAnalytics(req: Request, res: Response): Promise<vo
   const scope = await resolveScope(req.user);
   const days = query.range === "30d" ? 30 : 7;
   res.json(await analyticsService.getMeetingsAnalytics(scope, days));
+}
+
+export async function scheduleHeatmap(req: Request, res: Response): Promise<void> {
+  const query = scheduleHeatmapQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  res.json(await analyticsService.getScheduleHeatmap(scope, query.date));
+}
+
+export async function scheduleAdherence(req: Request, res: Response): Promise<void> {
+  const query = scheduleAdherenceQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  const days = query.range === "30d" ? 30 : 7;
+  res.json(await analyticsService.getScheduleAdherence(scope, days));
 }
 
 export async function patchGroupMember(req: Request, res: Response): Promise<void> {

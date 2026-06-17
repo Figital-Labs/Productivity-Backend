@@ -134,6 +134,18 @@ export const meetingsAnalyticsQuerySchema = z.object({
 });
 export type MeetingsAnalyticsQuery = z.infer<typeof meetingsAnalyticsQuerySchema>;
 
+/** `GET /dashboard/analytics/schedule-heatmap?date=` — per-person hourly load. */
+export const scheduleHeatmapQuerySchema = z.object({
+  date: dateStringSchema.optional(),
+});
+export type ScheduleHeatmapQuery = z.infer<typeof scheduleHeatmapQuerySchema>;
+
+/** `GET /dashboard/analytics/schedule-adherence` — scheduled-vs-done, on-time. */
+export const scheduleAdherenceQuerySchema = z.object({
+  range: z.enum(["7d", "30d"]).default("7d"),
+});
+export type ScheduleAdherenceQuery = z.infer<typeof scheduleAdherenceQuerySchema>;
+
 /** `PATCH /dashboard/groups/:id/members/:userId` — flip lead / canManage. */
 export const patchGroupMemberSchema = z
   .object({

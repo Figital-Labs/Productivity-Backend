@@ -147,7 +147,20 @@ export function create(data: CreateTaskData): Promise<Task> {
 }
 
 export function update(id: string, patch: UpdateTaskData): Promise<Task> {
-  return prisma.task.update({ ...taskWithCreator, where: { id }, data: omitUndefined(patch) });
+  // Sprint 20: keep `completedAt` in lockstep with `completed` for every caller
+  // (toggle, AI "completed" action, day-closure status sync) — set on the
+  // true-transition, clear on un-complete. Untouched when `completed` is absent.
+  const completedAtPatch =
+    patch.completed === true
+      ? { completedAt: new Date() }
+      : patch.completed === false
+        ? { completedAt: null }
+        : {};
+  return prisma.task.update({
+    ...taskWithCreator,
+    where: { id },
+    data: { ...omitUndefined(patch), ...completedAtPatch },
+  });
 }
 
 export function softDelete(id: string): Promise<Task> {

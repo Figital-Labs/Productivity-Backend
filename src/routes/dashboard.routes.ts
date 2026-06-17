@@ -38,6 +38,8 @@ dashboardRouter.get("/analytics/overdue", dashboardController.overdueTasks);
 dashboardRouter.get("/analytics/plan-accuracy", dashboardController.planAccuracy);
 dashboardRouter.get("/analytics/meeting-conversion", dashboardController.meetingConversion);
 dashboardRouter.get("/analytics/meetings", dashboardController.meetingsAnalytics);
+dashboardRouter.get("/analytics/schedule-heatmap", dashboardController.scheduleHeatmap);
+dashboardRouter.get("/analytics/schedule-adherence", dashboardController.scheduleAdherence);
 dashboardRouter.get("/team/tree", dashboardController.teamTree);
 dashboardRouter.get("/directory", dashboardController.directory);
 // :id-tail routes must come AFTER any literal /people segments above.

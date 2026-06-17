@@ -1,6 +1,6 @@
 import prisma from "../lib/prisma.js";
 import type { Scope } from "../lib/resolve-scope.js";
-import { formatDateYmd, todayInUserTz } from "../utils/date.js";
+import { dayBoundsInTz, formatDateYmd, parseDateString, todayInUserTz } from "../utils/date.js";
 
 import { consistencyForUsers, userIdsInScope } from "./dashboard-rollup.service.js";
 
@@ -791,4 +791,184 @@ export async function getMeetingsAnalytics(
     totalActionItems,
     processed,
   };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Sprint 20 — SCHEDULE HEATMAP — when is the team busy on a given day.
+// Buckets each scheduled task's minutes into the hour(s) it spans, per person.
+// ───────────────────────────────────────────────────────────────────────────
+
+const SLOT_DEFAULT_DURATION = 30;
+
+export interface HeatmapCell {
+  userId: string;
+  hour: number; // hour-of-day (0–23)
+  scheduledMin: number;
+  taskCount: number;
+}
+
+export interface ScheduleHeatmapResult {
+  users: { id: string; name: string }[];
+  hourStart: number; // first hour column (inclusive)
+  hourEnd: number; // last hour column (inclusive)
+  cells: HeatmapCell[];
+  date: string;
+}
+
+export async function getScheduleHeatmap(
+  scope: Scope,
+  dateStr: string | undefined,
+): Promise<ScheduleHeatmapResult> {
+  const date = dateStr ? parseDateString(dateStr) : todayInUserTz(DEFAULT_TIMEZONE);
+  const dateOut = formatDateYmd(date);
+  const empty: ScheduleHeatmapResult = {
+    users: [],
+    hourStart: 9,
+    hourEnd: 17,
+    cells: [],
+    date: dateOut,
+  };
+
+  const userIds = await userIdsInScope(scope);
+  if (userIds.length === 0) return empty;
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      assigneeId: { in: userIds },
+      targetDate: date,
+      deletedAt: null,
+      scheduledStartMinute: { not: null },
+    },
+    select: { assigneeId: true, scheduledStartMinute: true, scheduledDurationMinutes: true },
+  });
+  if (tasks.length === 0) return empty;
+
+  const presentIds = [...new Set(tasks.map((t) => t.assigneeId))];
+  const users = await prisma.user.findMany({
+    where: { id: { in: presentIds } },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+
+  const cellMap = new Map<string, HeatmapCell>();
+  let minStart = 24 * 60;
+  let maxEnd = 0;
+  for (const t of tasks) {
+    const start = t.scheduledStartMinute;
+    if (start === null) continue;
+    const end = start + (t.scheduledDurationMinutes ?? SLOT_DEFAULT_DURATION);
+    minStart = Math.min(minStart, start);
+    maxEnd = Math.max(maxEnd, end);
+    let m = start;
+    while (m < end) {
+      const hour = Math.floor(m / 60);
+      const segEnd = Math.min(end, (hour + 1) * 60);
+      const key = `${t.assigneeId}:${hour.toString()}`;
+      const cell = cellMap.get(key) ?? {
+        userId: t.assigneeId,
+        hour,
+        scheduledMin: 0,
+        taskCount: 0,
+      };
+      cell.scheduledMin += segEnd - m;
+      cell.taskCount += 1;
+      cellMap.set(key, cell);
+      m = segEnd;
+    }
+  }
+
+  return {
+    users,
+    hourStart: Math.floor(minStart / 60),
+    hourEnd: Math.floor((maxEnd - 1) / 60),
+    cells: [...cellMap.values()],
+    date: dateOut,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Sprint 20 — SCHEDULE ADHERENCE — did people do what they scheduled, on time?
+// "on time" = a scheduled task completed on the SAME local day it was planned
+// for (uses `completedAt` vs the target day's bounds — robust to batch EOD
+// completion at the minute level).
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface AdherenceRow {
+  user: { id: string; name: string; role: string };
+  scheduled: number;
+  completed: number;
+  onTime: number;
+}
+
+export interface ScheduleAdherenceResult {
+  rows: AdherenceRow[];
+  trend: { date: string; scheduled: number; completed: number }[];
+  windowDays: number;
+}
+
+export async function getScheduleAdherence(
+  scope: Scope,
+  days: number,
+): Promise<ScheduleAdherenceResult> {
+  const userIds = await userIdsInScope(scope);
+  if (userIds.length === 0) return { rows: [], trend: [], windowDays: days };
+
+  const dates = rangeDays(days);
+  const tasks = await prisma.task.findMany({
+    where: {
+      assigneeId: { in: userIds },
+      targetDate: { in: dates },
+      deletedAt: null,
+      scheduledStartMinute: { not: null },
+    },
+    select: { assigneeId: true, targetDate: true, completed: true, completedAt: true },
+  });
+
+  const presentIds = [...new Set(tasks.map((t) => t.assigneeId))];
+  const users =
+    presentIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: presentIds } },
+          select: { id: true, name: true, role: true },
+        })
+      : [];
+  const userMap = new Map(users.map((u) => [u.id, u]));
+
+  const agg = new Map<string, { scheduled: number; completed: number; onTime: number }>();
+  const trendMap = new Map<string, { scheduled: number; completed: number }>();
+  for (const t of tasks) {
+    const a = agg.get(t.assigneeId) ?? { scheduled: 0, completed: 0, onTime: 0 };
+    a.scheduled += 1;
+    if (t.completed) {
+      a.completed += 1;
+      if (t.completedAt) {
+        const { start, end } = dayBoundsInTz(t.targetDate, DEFAULT_TIMEZONE);
+        if (t.completedAt >= start && t.completedAt <= end) a.onTime += 1;
+      }
+    }
+    agg.set(t.assigneeId, a);
+
+    const ymd = formatDateYmd(t.targetDate);
+    const tr = trendMap.get(ymd) ?? { scheduled: 0, completed: 0 };
+    tr.scheduled += 1;
+    if (t.completed) tr.completed += 1;
+    trendMap.set(ymd, tr);
+  }
+
+  const rows: AdherenceRow[] = [...agg.entries()]
+    .map(([id, a]) => ({
+      user: userMap.get(id) ?? { id, name: "Unknown", role: "staff" },
+      scheduled: a.scheduled,
+      completed: a.completed,
+      onTime: a.onTime,
+    }))
+    .sort((x, y) => x.completed / x.scheduled - y.completed / y.scheduled); // worst adherence first
+
+  const trend = dates.map((d) => {
+    const ymd = formatDateYmd(d);
+    const tr = trendMap.get(ymd) ?? { scheduled: 0, completed: 0 };
+    return { date: ymd, scheduled: tr.scheduled, completed: tr.completed };
+  });
+
+  return { rows, trend, windowDays: days };
 }
