@@ -14,6 +14,21 @@ related: [PRODUCT]
 > current product reality read PRODUCT.md; for what's parked/dormant see GOTCHAS.md. Kept
 > below for historical scope rationale only.
 
+### Now built — where to find it
+
+The tables further down still label these "deferred." They shipped. Trust this redirect +
+the root [`Wavesprint.md`](../../Wavesprint.md):
+
+| Listed below as "deferred" | Actually shipped — see |
+|---|---|
+| Meetings (recording → AI action items) | Sprints 15 + 22 · [ADR-0025](./decisions/0025-async-media-processing.md) · [media-pipeline.md](./media-pipeline.md) |
+| Hospital hierarchy / matrix / multi-tenant | Sprints 11 + 16A + 18 · [ARCHITECTURE.md](./ARCHITECTURE.md) |
+| Dashboards / analytics | Sprints 16 + 20 + 21 · [ARCHITECTURE.md](./ARCHITECTURE.md) |
+| Real login (JWT) | [ADR-0022](./decisions/0022-basic-jwt-auth.md) |
+| S3 media storage | [ADR-0023](./decisions/0023-s3-storage.md) (implemented) · [media-pipeline.md](./media-pipeline.md) |
+| Async job queue (meetings) | **pg-boss on Postgres** — [ADR-0025](./decisions/0025-async-media-processing.md) (no Redis/BullMQ) |
+| Scheduling / time-slots | Sprints 19 + 20 |
+
 ## Scope Philosophy
 
 This is a **POC** (proof of concept). The audience is a client deciding whether to fund the real product.

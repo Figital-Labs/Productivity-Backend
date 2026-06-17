@@ -12,10 +12,18 @@ tags: [meta, state, coordination]
 > HISTORICAL build provenance (kept; don't rewrite). For what the system is *now*, read
 > PRODUCT.md → ARCHITECTURE.md → GOTCHAS.md → DEVELOPMENT.md. The live work backlog is
 > `kims-fix-backlog.md` in the gig_project root.
+>
+> **Canonical sprint/wave log = the root [`Wavesprint.md`](../../Wavesprint.md)** — current
+> through **Sprint 22 (Media Storage + Async Pipeline, 2026-06-17)**. The "Active Sprint" and
+> changelog in *this* file stop at Sprint 17 (2026-05-27) and are kept only as backend
+> provenance — they are NOT the current status.
 
 ---
 
 ## Active Sprint
+
+> _Historical (through Sprint 17). The live sprint/wave status is the root
+> [`Wavesprint.md`](../../Wavesprint.md) — latest is **Sprint 22**._
 
 **Sprint 17 implemented + PA-mode prompt rewrite — Two-phase day closure: Review → Submit + Transcription.** Ready for review. Splits the single-shot `POST /day-closure/submit` into two endpoints: `POST /day-closure/review` (body: `{ date?, commentary? }` — user sends end-of-day narrative; AI generates structured feedback, auto-marks tasks via `taskActions`, creates completed tasks for ad-hoc `additions`) and `POST /day-closure/submit` (finalizes the draft, optional extra note to management in `commentary`). Adds `POST /transcribe` as a reusable verbatim audio→text endpoint (Roman script only, no Devanagari, no DB write). **Day plan no longer required** — closure works without a prior plan. AI persona is a warm Personal Assistant (not an auditor): conservative task matching (only marks done when clearly mentioned), warm English summary, `tips` always empty. `commentary` dual-use: at review = AI narrative (persisted on draft for FE rehydration); at submit = optional extra management note (`input.commentary ?? existing.commentary` so narrative is never wiped). Schema: `status` + `reviewedAt` on `DayClosureSubmission` (migration `20260527120000_sprint17_closure_two_phase`). Phase 5 read-filter audit done: every `dayClosureSubmission` aggregate read (dashboard KPIs, trend, consistency, activity feed, team-reports closure badge, drill-down submissions) now filters `status: "submitted"`; only `findByUserAndDate` (used by review/submit/get) and the FE resume path remain intentionally unfiltered so drafts can rehydrate. New `generateText` helper on `vertex.ts`. Typecheck + lint + build clean. Migration applied to local dev DB. See [sprints/17-closure-review-flow.md](./sprints/17-closure-review-flow.md). Paired with Task-List FE Sprint 17.
 
@@ -89,7 +97,7 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
 
 | Blocker | Tagged | Resolution waits on |
 |---|---|---|
-| S3 bucket name + AWS credentials (access key/secret OR IAM role) | 2026-05-22 | User to provision the S3 bucket and access creds. Blocks any sprint that persists source media (audio/image/video) — currently deferred indefinitely for POC. Storage provider was switched from GCS to S3 on 2026-05-22 per user; see [ADR-0023](./decisions/0023-s3-storage.md) (supersedes ADR-0009). |
+| ~~S3 bucket name + AWS credentials~~ | ~~2026-05-22~~ | **Resolved (2026-06-17)** — S3 creds landed; storage implemented ([ADR-0023](./decisions/0023-s3-storage.md)) and meeting media now persists + processes async ([ADR-0025](./decisions/0025-async-media-processing.md), [`media-pipeline.md`](./media-pipeline.md)). |
 | ~~Database URL for Prisma~~ | ~~2026-05-22~~ | **Resolved** — Postgres 18 in Docker (`task-list-postgres`), `DATABASE_URL` set, Sprint 4 unblocked. |
 | Confirm Vertex AI API is enabled on GCP project `nth-rookery-341212` and billing is active | 2026-05-22 | User to verify in GCP console. Blocking Sprint 5. We'll verify in Sprint 2 via a hello-world script. |
 
@@ -266,3 +274,19 @@ Sprints 3–9 don't have detail files yet. Per our working style, **detail the n
     - **Activity feed:** `meeting_processed` event surfaced on Sharma's `/activity` with `actionItemCount=1, recommendationCount=1` ✅
   - **Cleanup:** all smoke meetings + the Task created during B5 soft-deleted to keep seed pristine. No leftover state.
   - **FE handoff:** the FE delegate (Codex) consumes the contract documented in [Task-List/.agents/sprints/15-meetings-v0.md](../../Task-List/.agents/sprints/15-meetings-v0.md) — includes `BackendMeeting` + `MeetingProcessResult` types, Save-Locally vs Send-to-AI terminal actions, per-clip Download, pause/resume on `useAudioRecorder`, generic indeterminate ProcessingProgressModal copy, and 25 FE smoke cases.
+
+### 2026-06-17 (provenance pointer — full detail in root `Wavesprint.md`)
+
+- **Sprints 18–22 shipped** (this STATE file's "Active Sprint" above stops at 17; these are
+  summarized here so the changelog isn't misleading — the canonical wave log is
+  [`Wavesprint.md`](../../Wavesprint.md)):
+  - **18** — KIMS Hospitals real-org onboarding (2nd tenant).
+  - **19** — Time-slot scheduling (day timeline; minute-of-day model).
+  - **20** — Scheduling v2 (edit-popup slot, list-view time, manager insights) + `Task.completedAt`.
+  - **21** — Manager insights rollup-first (scales to 100+).
+  - **22 — Media Storage + Async Pipeline.** Audio/images persist to **S3**
+    (`BlobStorage`/`S3Storage`, [ADR-0023](./decisions/0023-s3-storage.md), now implemented).
+    Meeting "Send to AI" is **async**: upload → **pg-boss** queue on Postgres (no Redis) →
+    separate **worker** (`src/worker.ts`) → `202 + jobId`, FE polls `GET /jobs/:id`
+    ([ADR-0025](./decisions/0025-async-media-processing.md), [`media-pipeline.md`](./media-pipeline.md)).
+    New `ProcessingJob` model (migration `add_processing_job`). Voice/image/transcribe stay sync.

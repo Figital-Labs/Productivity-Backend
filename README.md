@@ -26,8 +26,9 @@ docker run -d --name task-list-postgres \
 npx prisma migrate dev
 npx prisma db seed
 
-# 4. Run
-npm run dev                   # http://localhost:3000
+# 4. Run (two terminals)
+npm run dev                   # web API — http://localhost:3000
+npm run worker                # background worker (meeting AI processing) — see ADR-0025
 ```
 
 Verify with `curl http://localhost:3000/livez` → `{"status":"ok"}`.
@@ -178,20 +179,33 @@ See `.agents/decisions/0007-layered-architecture.md` for the full rationale.
 
 ### Available npm scripts
 
-| Command                   | What it does                                               |
-| ------------------------- | ---------------------------------------------------------- |
-| `npm run dev`             | Run with hot reload (`tsx watch src/index.ts`)             |
-| `npm run build`           | `prisma generate && tsc` → `dist/`                         |
-| `npm start`               | Run the compiled output (production-like)                  |
-| `npm run db:migrate`      | `prisma migrate dev` — creates + applies migration         |
-| `npm run db:deploy`       | `prisma migrate deploy` — applies, never creates (CI/prod) |
-| `npm run db:studio`       | Opens Prisma Studio in the browser (DB GUI)                |
-| `npm run prisma:generate` | Regenerate the Prisma client (rarely needed manually)      |
-| `npm run typecheck`       | `tsc --noEmit` — strict type check, no emit                |
-| `npm run lint`            | ESLint                                                     |
-| `npm run lint:fix`        | ESLint with auto-fix                                       |
-| `npm run format`          | Prettier write on all source files                         |
-| `npm run format:check`    | Prettier check without writing                             |
+| Command                   | What it does                                                |
+| ------------------------- | ----------------------------------------------------------- |
+| `npm run dev`             | Run with hot reload (`tsx watch src/index.ts`)              |
+| `npm run worker`          | Run the background worker with hot reload (meeting AI jobs) |
+| `npm run build`           | `prisma generate && tsc` → `dist/`                          |
+| `npm start`               | Run the compiled output (production-like)                   |
+| `npm run worker:start`    | Run the compiled worker (production-like)                   |
+| `npm run db:migrate`      | `prisma migrate dev` — creates + applies migration          |
+| `npm run db:deploy`       | `prisma migrate deploy` — applies, never creates (CI/prod)  |
+| `npm run db:studio`       | Opens Prisma Studio in the browser (DB GUI)                 |
+| `npm run prisma:generate` | Regenerate the Prisma client (rarely needed manually)       |
+| `npm run typecheck`       | `tsc --noEmit` — strict type check, no emit                 |
+| `npm run lint`            | ESLint                                                      |
+| `npm run lint:fix`        | ESLint with auto-fix                                        |
+| `npm run format`          | Prettier write on all source files                          |
+| `npm run format:check`    | Prettier check without writing                              |
+
+### Background worker (meeting processing)
+
+Meeting "Send to AI" is **asynchronous** (ADR-0025): `POST /meetings/:id/process` uploads
+the media to S3, enqueues a job on a `pg-boss` queue (on the same Postgres — **no Redis**),
+and returns `202` immediately. A **separate worker process** does the Vertex call, and the
+frontend polls `GET /jobs/:id`.
+
+So run **both** `npm run dev` (web) and `npm run worker` (worker) for meetings to process.
+Voice / image / transcribe stay synchronous and don't need the worker. Full flow:
+[`.agents/media-pipeline.md`](./.agents/media-pipeline.md).
 
 ### Code conventions (the short version)
 
@@ -278,7 +292,7 @@ For any other "should I add X while I'm here" temptation, the default is **no**.
 docker exec task-list-postgres psql -U postgres -d tasklist -c '
   TRUNCATE "Task", "TaskMedia", "Note", "Alert", "Holiday",
           "DayPlanSubmission", "DayClosureSubmission",
-          "VoiceInteraction", "ImageExtraction" CASCADE;
+          "VoiceInteraction", "ImageExtraction", "ProcessingJob" CASCADE;
 '
 npx prisma db seed   # re-create the demo user (idempotent)
 ```
@@ -334,9 +348,9 @@ docker exec -it task-list-postgres psql -U postgres -d tasklist
 
 ## Status
 
-POC scope (Sprints 1–7) complete. Backend supports the full daily product loop: manual + voice + image task creation, day-plan snapshot, day-closure with structured Hinglish AI feedback. See [`.agents/STATE.md`](./.agents/STATE.md) for the live changelog.
+**Sprints 1–22 complete** — a multi-tenant hospital team-ops backend: manual + voice + image task creation, day-plan/closure with Hinglish AI feedback, matrix hierarchy + manager delegation, meetings (async AI processing), analytics dashboards, and intra-day scheduling. The canonical wave-by-wave summary is the root [`Wavesprint.md`](../Wavesprint.md); [`.agents/STATE.md`](./.agents/STATE.md) holds backend changelog provenance.
 
-**Sprint 8 (Alerts + History) and Sprint 9 (Polish) are deferred** for the POC. Not needed before client demo.
+Latest: **Sprint 22 — S3 media storage + async meeting pipeline** (pg-boss worker; see [`.agents/media-pipeline.md`](./.agents/media-pipeline.md)).
 
 ---
 
