@@ -1,11 +1,15 @@
+import { enqueueMeeting } from "../jobs/queue.js";
 import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { AppError, ConflictError, NotFoundError } from "../lib/errors.js";
 import { buildMeetingIntentPrompt } from "../lib/prompts/meeting-intent.js";
 import type { MeetingAttendee } from "../lib/prompts/meeting-intent.js";
+import { storage } from "../lib/storage/index.js";
+import { buildMediaKey, extFromMime } from "../lib/storage/keys.js";
 import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
 import type { InlineMedia } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
+import * as jobRepo from "../repositories/job.repository.js";
 import type { Meeting } from "../repositories/meeting.repository.js";
 import * as meetingRepo from "../repositories/meeting.repository.js";
 import * as userRepo from "../repositories/user.repository.js";
@@ -35,10 +39,10 @@ export interface HydratedMeeting extends Omit<Meeting, "actions" | "recommendati
   recommendations: MeetingRecommendation[];
 }
 
-export interface ProcessMeetingResult {
-  meeting: HydratedMeeting;
-  actions: PersistedMeetingAction[];
-  recommendations: MeetingRecommendation[];
+export interface EnqueueMeetingResult {
+  jobId: string;
+  meetingId: string;
+  status: string;
 }
 
 export interface ProcessMeetingInputs {
@@ -55,7 +59,7 @@ export interface ProcessMeetingInputs {
  * enumeration: a single bad id fails the request without revealing which.
  */
 async function validateAttendees(
-  caller: AuthenticatedUser,
+  caller: { orgId: string },
   attendeeIds: string[],
 ): Promise<HydratedAttendee[]> {
   const rows = await userRepo.findByIds(attendeeIds);
@@ -179,16 +183,39 @@ export async function softDeleteMeeting(caller: AuthenticatedUser, id: string): 
 }
 
 /**
- * The big one: run the meeting through Vertex AI fusion (audio + images +
- * notes + customPrompt → summary + actions + recommendations). Auto-creates
- * Task rows for valid attendee-assigned actions; demotes invalid-assignee
- * actions to recommendations defensively (anti-prompt-injection).
+ * Upload each in-memory media buffer to S3 under a tenant/user-namespaced key and return
+ * the keys. The bytes leave the web process here; the worker re-reads them for the Vertex
+ * call (Gemini can't read `s3://` directly — see ADR-0025 / Appendix A in the plan).
  */
-export async function processMeeting(
+async function uploadMedia(
+  caller: { id: string; orgId: string },
+  items: InlineMedia[],
+): Promise<string[]> {
+  const keys: string[] = [];
+  for (const item of items) {
+    const key = buildMediaKey(caller.orgId, caller.id, extFromMime(item.mimeType));
+    await storage.upload(key, item.buffer, {
+      contentType: item.mimeType,
+      contentLength: item.buffer.length,
+    });
+    keys.push(key);
+  }
+  return keys;
+}
+
+/**
+ * Producer side of meeting processing (ADR-0025). Runs the up-front guards (ownership,
+ * already-processed, processability, attendee validation), persists notes, uploads the
+ * media to S3, creates the `ProcessingJob` status row, and enqueues the pg-boss job — then
+ * returns immediately so the controller can answer 202. The actual Vertex fusion runs in
+ * the worker via `runProcessing`. Idempotent on double-tap: an already-active job for the
+ * meeting is returned as-is.
+ */
+export async function enqueueProcessing(
   caller: AuthenticatedUser,
   id: string,
   inputs: ProcessMeetingInputs,
-): Promise<ProcessMeetingResult> {
+): Promise<EnqueueMeetingResult> {
   const existing = await meetingRepo.findById(id);
   requireOwnership(existing, caller.id);
 
@@ -197,6 +224,12 @@ export async function processMeeting(
       "MEETING_ALREADY_PROCESSED",
       "This meeting has already been processed.",
     );
+  }
+
+  // Double-tap guard: reuse an in-flight job for this meeting rather than starting a second.
+  const active = await jobRepo.findActiveByTarget("meeting", id);
+  if (active) {
+    return { jobId: active.id, meetingId: id, status: active.status };
   }
 
   // Processability gate — must have at least one of audio / notes / images.
@@ -212,24 +245,67 @@ export async function processMeeting(
     );
   }
 
-  // Persist notes (if provided) BEFORE the AI call, so the auto-save survives
-  // even if the AI errors. Idempotent — won't change anything if `notes`
-  // wasn't passed in.
-  let meetingForPrompt = existing;
+  // Validate attendees up-front so a bad request fails at enqueue time, not in the worker.
+  await validateAttendees(caller, existing.attendeeIds);
+
+  // Persist notes (if provided) BEFORE queueing, so the worker reads them from the row and
+  // the auto-save survives even if processing later fails. Idempotent if unchanged.
   if (inputs.notes !== undefined && inputs.notes !== existing.notes) {
-    meetingForPrompt = await meetingRepo.update(id, { notes: inputs.notes });
+    await meetingRepo.update(id, { notes: inputs.notes });
   }
 
-  const attendees = await validateAttendees(caller, meetingForPrompt.attendeeIds);
+  // Offload the bytes to S3, then create the durable status row + enqueue the work.
+  const audioKeys = await uploadMedia(caller, inputs.audioClips);
+  const imageKeys = await uploadMedia(caller, inputs.images);
+
+  const job = await jobRepo.create({
+    orgId: caller.orgId,
+    userId: caller.id,
+    kind: "meeting",
+    targetType: "meeting",
+    targetId: id,
+    mediaKeys: [...audioKeys, ...imageKeys],
+  });
+
+  try {
+    await enqueueMeeting({
+      processingJobId: job.id,
+      audioKeys,
+      imageKeys,
+      ...(inputs.customPrompt !== undefined ? { customPrompt: inputs.customPrompt } : {}),
+    });
+  } catch (err) {
+    // Enqueue failed (queue/DB hiccup) — mark the row so the FE doesn't poll forever.
+    await jobRepo.markFailed(job.id, err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+
+  return { jobId: job.id, meetingId: id, status: job.status };
+}
+
+/**
+ * Consumer side (ADR-0025), invoked by the worker. Runs the meeting through Vertex AI
+ * fusion (audio + images + notes + customPrompt → summary + actions + recommendations)
+ * and persists the result. All AI actions become recommendations — a manager confirms
+ * before any Task is created (no auto-dispatch). The organizer (= caller) is added to the
+ * people directory by name, deduped, so the AI can assign to them when named.
+ */
+export async function runProcessing(
+  meetingId: string,
+  caller: { id: string; orgId: string },
+  media: { audioClips: InlineMedia[]; images: InlineMedia[]; customPrompt: string | undefined },
+): Promise<void> {
+  const meeting = await meetingRepo.findById(meetingId);
+  if (meeting?.deletedAt !== null) {
+    throw new NotFoundError("Meeting");
+  }
+
+  const attendees = await validateAttendees(caller, meeting.attendeeIds);
   const attendeeDirectory: MeetingAttendee[] = attendees.map((a) => ({
     id: a.id,
     name: a.name,
     role: a.role,
   }));
-  // Include the organizer (= caller) in the people directory by NAME, deduped — so the AI
-  // can assign to them when they're named, exactly like any other person. No special
-  // weighting: they're just another assignable person. (First-person "main kar lunga" is
-  // still handled separately via SELF_USER_ID.)
   if (!attendeeDirectory.some((a) => a.id === caller.id)) {
     const [self] = await userRepo.findByIds([caller.id]);
     if (self) attendeeDirectory.push({ id: self.id, name: self.name, role: self.role });
@@ -241,10 +317,10 @@ export async function processMeeting(
   const prompt = buildMeetingIntentPrompt({
     attendees: attendeeDirectory,
     selfUserId: caller.id,
-    title: meetingForPrompt.title,
-    agenda: meetingForPrompt.agenda,
-    notes: meetingForPrompt.notes,
-    customPrompt: inputs.customPrompt,
+    title: meeting.title,
+    agenda: meeting.agenda,
+    notes: meeting.notes,
+    customPrompt: media.customPrompt,
     ...anchors,
   });
 
@@ -252,29 +328,22 @@ export async function processMeeting(
     model: GEMINI_FLASH_MODEL,
     prompt,
     schema: meetingIntentResponseSchema,
-    media: [...inputs.audioClips, ...inputs.images],
+    media: [...media.audioClips, ...media.images],
     temperature: AI_TEMPERATURE.meeting,
     thinkingBudget: AI_THINKING_BUDGET.meeting,
-    // MVP: generous per-attempt ceiling, no async jobs. Keep the default retry — a
-    // connect timeout fails fast/cheap, and retrying is what pushes a meeting through
-    // the intermittent connect flakiness on a constrained host.
     timeoutMs: AI_TIMEOUT_MS.meeting,
     onRaw: logRaw("meeting", caller.id),
   });
 
-  const allowedAssigneeIds = new Set(meetingForPrompt.attendeeIds);
+  const allowedAssigneeIds = new Set(meeting.attendeeIds);
 
   // All AI actions become recommendations — manager confirms before any task is created.
   // Preserve the suggested assigneeId when it's a valid attendee or the creator.
   const actionsAsRecommendations: MeetingRecommendation[] = aiResponse.actions.map((action) => {
     const validAssignee =
-      allowedAssigneeIds.has(action.assigneeId) || action.assigneeId === meetingForPrompt.userId;
+      allowedAssigneeIds.has(action.assigneeId) || action.assigneeId === meeting.userId;
     return {
       title: action.title,
-      // Keep the model's user-facing reasoning as-is. When the named person isn't a
-      // meeting attendee we simply drop the assigneeId (unknown user) — the recommendation
-      // comes back unassigned and the manager picks an owner. We do NOT append a mechanical
-      // "not in attendees" note; the prompt's reasoning rule keeps the card human.
       reasoning: action.reasoning,
       status: "pending" as const,
       ...(validAssignee ? { assigneeId: action.assigneeId } : {}),
@@ -289,19 +358,12 @@ export async function processMeeting(
     ...aiResponse.recommendations,
   ];
 
-  const updated = await meetingRepo.recordProcessed(meetingForPrompt.id, {
+  await meetingRepo.recordProcessed(meeting.id, {
     summary: aiResponse.summary,
-    customPrompt: inputs.customPrompt,
+    customPrompt: media.customPrompt,
     actions: persistedActions,
     recommendations: allRecommendations,
   });
-
-  const meeting = await hydrate(updated);
-  return {
-    meeting,
-    actions: persistedActions,
-    recommendations: allRecommendations,
-  };
 }
 
 export async function patchRecommendationStatus(

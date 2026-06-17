@@ -384,3 +384,26 @@ model Organization {
   departments Department[]
   groups      ContextGroup[]
 }
+
+/// ADR-0025: async media-processing status. One row per meeting "Send to AI" run.
+/// pg-boss (on this same Postgres) owns the queue mechanics; this row is the durable,
+/// frontend-facing status that GET /jobs/:id polls while a worker processes out-of-band.
+/// `userId`/`orgId` are loose scalars (no FK) — same posture as Meeting.attendeeIds.
+model ProcessingJob {
+  id         String    @id @default(cuid())
+  orgId      String
+  userId     String
+  kind       String // "meeting" (generic so voice/image can reuse later)
+  status     String    @default("queued") // queued | processing | succeeded | failed
+  targetType String // "meeting"
+  targetId   String // the meeting id; the FE re-fetches GET /meetings/:id on success
+  mediaKeys  String[] // S3 keys (audio then image) — durable record for audit / retry
+  error      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  @@index([userId, kind, status])
+  @@index([targetType, targetId, status])
+}
