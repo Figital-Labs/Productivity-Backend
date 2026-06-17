@@ -18,11 +18,8 @@ export interface PublicAuthUser {
   designation: string | null;
   orgId: string;
   role: AuthenticatedUser["role"];
-  // Sprint 19: surfaced so the day-timeline knows the user's schedulable window
-  // (and tz for the now-line) without an extra round-trip.
+  // Surfaced for the client's timezone handling without an extra round-trip.
   timezone: string;
-  workStartMinute: number;
-  workEndMinute: number;
   // Authorization: numeric level + derived capabilities. The frontend gates on
   // these, NOT on the role string.
   level: number;
@@ -67,8 +64,6 @@ async function toPublicUser(user: userRepo.User): Promise<PublicAuthUser> {
     orgId: user.orgId,
     role: toAuthRole(user.role),
     timezone: user.timezone,
-    workStartMinute: user.workStartMinute,
-    workEndMinute: user.workEndMinute,
     level: user.level,
     capabilities: capabilitiesFor(user.level, scope),
   };
