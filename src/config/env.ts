@@ -52,6 +52,15 @@ const EnvSchema = z.object({
     ),
   JWT_SECRET: z.string().min(32),
   JWT_TTL: z.string().min(1).default("30d"),
+  // --- AWS S3 (media storage, ADR-0023). SDK-native names; validated here so a missing
+  // credential fails fast at boot rather than on the first upload. ---
+  AWS_REGION: z.string().min(1),
+  AWS_BUCKET_NAME: z.string().min(1),
+  AWS_ACCESS_KEY_ID: z.string().min(1),
+  AWS_SECRET_ACCESS_KEY: z.string().min(1),
+  MEDIA_KEY_PREFIX: z.string().min(1).default("media"),
+  // Max meeting jobs a single worker process handles per poll (ADR-0025).
+  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(2),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -74,6 +83,14 @@ export const env = {
     project: parsed.data.GOOGLE_CLOUD_PROJECT,
     location: parsed.data.GOOGLE_CLOUD_LOCATION,
   },
+  s3: {
+    bucket: parsed.data.AWS_BUCKET_NAME,
+    region: parsed.data.AWS_REGION,
+    accessKeyId: parsed.data.AWS_ACCESS_KEY_ID,
+    secretAccessKey: parsed.data.AWS_SECRET_ACCESS_KEY,
+    keyPrefix: parsed.data.MEDIA_KEY_PREFIX,
+  },
+  workerConcurrency: parsed.data.WORKER_CONCURRENCY,
 } as const;
 
 export type Env = typeof env;

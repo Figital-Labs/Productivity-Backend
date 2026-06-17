@@ -25,7 +25,7 @@ function createUpload(opts: UploadOptions): multer.Multer {
   });
 }
 
-const AUDIO_MIME_TYPES = [
+export const AUDIO_MIME_TYPES = [
   "audio/webm",
   "audio/wav",
   "audio/wave",
@@ -38,7 +38,7 @@ const AUDIO_MIME_TYPES = [
   "audio/x-m4a",
 ] as const;
 
-const IMAGE_MIME_TYPES = [
+export const IMAGE_MIME_TYPES = [
   "image/jpeg",
   "image/png",
   "image/webp",
@@ -50,7 +50,7 @@ const IMAGE_MIME_TYPES = [
 // audio and image. Covers ~5 min audio at typical bitrate + standard phone-camera
 // JPEGs. Frontend (FE Sprint 08) caps at the same number for symmetric UX.
 // MulterError.LIMIT_FILE_SIZE → 413 FILE_TOO_LARGE in src/middleware/error.ts.
-const TEN_MB = 10 * 1024 * 1024;
+export const TEN_MB = 10 * 1024 * 1024;
 
 export const voiceUpload = createUpload({
   allowedMimeTypes: AUDIO_MIME_TYPES,
