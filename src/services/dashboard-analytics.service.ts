@@ -439,7 +439,7 @@ export interface OverdueTaskRow {
   title: string;
   priority: "high" | "medium" | "low" | null;
   daysOverdue: number;
-  assignee: { id: string; name: string; role: string };
+  assignee: { id: string; name: string; role: string; designation: string | null };
 }
 
 export interface OverdueResult {
@@ -468,7 +468,7 @@ export async function getOverdueTasks(scope: Scope, limit = 20): Promise<Overdue
         title: true,
         priority: true,
         targetDate: true,
-        assignee: { select: { id: true, name: true, role: true } },
+        assignee: { select: { id: true, name: true, role: true, designation: true } },
       },
     }),
     prisma.task.count({

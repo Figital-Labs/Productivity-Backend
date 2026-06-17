@@ -179,7 +179,12 @@ export const trendSeriesSchema = z.object({
 export type TrendSeries = z.infer<typeof trendSeriesSchema>;
 
 export const consistencyRowSchema = z.object({
-  user: z.object({ id: z.string(), name: z.string(), role: z.string() }),
+  user: z.object({
+    id: z.string(),
+    name: z.string(),
+    role: z.string(),
+    designation: z.string().nullish(),
+  }),
   planMissedDays: z.number().int().nonnegative(),
   closureMissedDays: z.number().int().nonnegative(),
   lastSubmittedAt: z.string().nullable(),

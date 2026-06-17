@@ -6,6 +6,7 @@ export interface PublicUserSummary {
   id: string;
   email: string;
   name: string;
+  designation: string | null;
   role: "staff" | "manager" | "admin";
   level: number;
 }
@@ -33,6 +34,7 @@ export async function searchSameOrg(
     id: r.id,
     email: r.email,
     name: r.name,
+    designation: r.designation,
     role: r.role as PublicUserSummary["role"],
     level: r.level,
   }));

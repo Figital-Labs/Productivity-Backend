@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 
+import { isManagerLevel } from "../lib/access.js";
 import { ForbiddenError } from "../lib/errors.js";
 
 /**
@@ -9,7 +10,7 @@ import { ForbiddenError } from "../lib/errors.js";
  * so `req.user` is populated.
  */
 export function requireManager(req: Request, _res: Response, next: NextFunction): void {
-  if (req.user.role !== "manager" && req.user.role !== "admin") {
+  if (!isManagerLevel(req.user.level)) {
     throw new ForbiddenError("Only managers can access team endpoints");
   }
   next();

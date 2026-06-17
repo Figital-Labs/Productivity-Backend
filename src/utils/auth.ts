@@ -1,3 +1,4 @@
+import { isOrgAdmin } from "../lib/access.js";
 import prisma from "../lib/prisma.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 
@@ -17,7 +18,7 @@ interface TaskResource {
  * use `canAccessTask` instead.
  */
 export function canAccess(user: AuthenticatedUser, resource: OwnedResource): boolean {
-  return user.id === resource.userId || user.role === "admin";
+  return user.id === resource.userId || isOrgAdmin(user.level);
 }
 
 /**
@@ -33,7 +34,7 @@ export function canAccess(user: AuthenticatedUser, resource: OwnedResource): boo
  * staff are is hospital reality.
  */
 export async function canAccessTask(user: AuthenticatedUser, task: TaskResource): Promise<boolean> {
-  if (user.role === "admin") return true;
+  if (isOrgAdmin(user.level)) return true;
   if (task.assigneeId === user.id) return true;
   if (task.creatorId === user.id) return true;
   if (user.reportIds.has(task.assigneeId)) return true;
@@ -114,7 +115,7 @@ export async function canManageUser(actor: AuthenticatedUser, targetId: string):
   });
   if (target?.orgId !== actor.orgId) return false;
 
-  if (actor.role === "admin") return true;
+  if (isOrgAdmin(actor.level)) return true;
   if (!actor.canManageUsers) return false;
   if (target.level >= actor.level) return false;
 
@@ -130,7 +131,7 @@ export async function canManageUser(actor: AuthenticatedUser, targetId: string):
  */
 export function canCreateUserAtLevel(actor: AuthenticatedUser, targetLevel: number): boolean {
   if (actor.isSuperAdmin) return true;
-  if (actor.role === "admin") return true;
+  if (isOrgAdmin(actor.level)) return true;
   if (!actor.canManageUsers) return false;
   return targetLevel < actor.level;
 }

@@ -1,3 +1,4 @@
+import { isOrgAdmin } from "../lib/access.js";
 import { ForbiddenError, NotFoundError } from "../lib/errors.js";
 import prisma from "../lib/prisma.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
@@ -14,7 +15,14 @@ const DEFAULT_TIMEZONE = "Asia/Kolkata";
 // ───────────────────────────────────────────────────────────────────────────
 
 export interface TeamTreeNode {
-  user: { id: string; name: string; role: string; level: number; email: string };
+  user: {
+    id: string;
+    name: string;
+    designation: string | null;
+    role: string;
+    level: number;
+    email: string;
+  };
   todayProgress: {
     done: number;
     total: number;
@@ -96,6 +104,7 @@ export async function getTeamTree(actor: AuthenticatedUser): Promise<TeamTreeNod
   interface ReportRow {
     id: string;
     name: string;
+    designation: string | null;
     role: string;
     level: number;
     email: string;
@@ -111,7 +120,7 @@ export async function getTeamTree(actor: AuthenticatedUser): Promise<TeamTreeNod
       select: {
         id: true,
         reports: {
-          select: { id: true, name: true, role: true, level: true, email: true },
+          select: { id: true, name: true, designation: true, role: true, level: true, email: true },
           orderBy: [{ level: "desc" }, { name: "asc" }],
         },
       },
@@ -181,7 +190,7 @@ export interface DirectoryDepartmentNode {
 export interface DirectoryTree {
   org: { id: string; name: string };
   departments: DirectoryDepartmentNode[];
-  unassignedStaff: { id: string; name: string; role: string }[];
+  unassignedStaff: { id: string; name: string; designation: string | null; role: string }[];
 }
 
 export async function getDirectory(actor: AuthenticatedUser): Promise<DirectoryTree> {
@@ -205,7 +214,7 @@ export async function getDirectory(actor: AuthenticatedUser): Promise<DirectoryT
     }),
     prisma.user.findMany({
       where: { orgId: actor.orgId },
-      select: { id: true, name: true, role: true },
+      select: { id: true, name: true, designation: true, role: true },
     }),
     prisma.groupMembership
       .findMany({
@@ -248,7 +257,7 @@ export async function getDirectory(actor: AuthenticatedUser): Promise<DirectoryT
           memberCount: group.memberships.length,
           managedByMe:
             actor.isSuperAdmin ||
-            actor.role === "admin" ||
+            isOrgAdmin(actor.level) ||
             headedDeptIds.has(dept.id) ||
             ledGroupIds.has(group.id),
         };
@@ -260,7 +269,7 @@ export async function getDirectory(actor: AuthenticatedUser): Promise<DirectoryT
     departments: departmentNodes,
     unassignedStaff: allUsers
       .filter((u) => !assignedUsers.has(u.id))
-      .map((u) => ({ id: u.id, name: u.name, role: u.role })),
+      .map((u) => ({ id: u.id, name: u.name, designation: u.designation, role: u.role })),
   };
 }
 
@@ -275,6 +284,7 @@ export interface PersonProfile {
   user: {
     id: string;
     name: string;
+    designation: string | null;
     email: string;
     role: string;
     level: number;
@@ -293,6 +303,7 @@ export async function getPersonProfile(
     select: {
       id: true,
       name: true,
+      designation: true,
       email: true,
       role: true,
       level: true,
@@ -317,6 +328,7 @@ export async function getPersonProfile(
     user: {
       id: target.id,
       name: target.name,
+      designation: target.designation,
       email: target.email,
       role: target.role,
       level: target.level,

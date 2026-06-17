@@ -13,6 +13,11 @@
  *   ├── Dr Ankita Roy Chawla (L400)  — Medical Administration (11 reports)
  *   └── Kishore SV (L400)            — Corporate / MIS·Audit·HR (4 reports)
  *
+ * `name` is the clean person name; `designation` is the real job title shown in
+ * the UI (role/level stay internal). The 3 created vertical heads have no sheet
+ * title → designation null (UI falls back to "Manager"); Dr Ankita keeps her
+ * web-confirmed "Associate Medical Director".
+ *
  * Identity cleanups baked in:
  *   - medopsmgr.gbl@ belongs to Dr Ankita (the vertical head); Dr D V Shanthi
  *     gets dymedsupt.gbl@ (from her "Dy. Medical Superintendent" title).
@@ -34,8 +39,45 @@ const DATABASE_URL =
 
 const ORG_ID = "kims-hospitals";
 const ORG_NAME = "KIMS Hospitals";
-// Shared default password for every seeded account (incl. admin). Users reset later.
-const DEFAULT_PASSWORD = "kims1234";
+
+// Per-user passwords (unique). Source of truth — re-running the seed restores
+// these exact credentials.
+const PASSWORDS: Record<string, string> = {
+  "admin@kimshospitals.com": "Admin8850",
+  "gunjanuv.gbl@kimshospitals.com": "Gunjan1730",
+  "medopsmgr.gbl@kimshospitals.com": "Ankita2783",
+  "kishorereddysv@kimshospitals.com": "Kishore5887",
+  "operationsgm.gbl@kimshospitals.com": "Indrasen1141",
+  "headops.gbl@kimshospitals.com": "Shaik9323",
+  "gopikrishna.p@kimshospitals.com": "Gopi3970",
+  "billingdgm.gbl@kimshospitals.com": "Sharath8545",
+  "sbjisrmgr.gbl@kimshospitals.com": "Mallika9375",
+  "sudhakardaddala@yahoo.com": "Sudhakar3290",
+  "securityhead.gbl@kimshospitals.com": "Sudhir1153",
+  "maintenance.gbl@kimshospitals.com": "Rajesh8351",
+  "fnb.gbl@kimshospitals.com": "Srujan6914",
+  "hk.gbl@kimshospitals.com": "Anand6453",
+  "generalpurchase.gbl@kimshospitals.com": "Balakrishna8851",
+  "generalstores.gbl@kimshospitals.com": "David1219",
+  "srinivasulu.p@kimshospitals.com": "Srini9537",
+  "opd.gbl@kimshospitals.com": "Srinadh8885",
+  "liaison.gbl@kimshospitals.com": "Kakara4386",
+  "dymedsupt.gbl@kimshospitals.com": "Shanthi8374",
+  "ns.gbl@kimshospitals.com": "Bhagya5767",
+  "accountssrmgr.gbl@kimshospitals.com": "Srinivas3969",
+  "biomedical.gbl@kimshospitals.com": "Avula7318",
+  "scm.gbl@kimshospitals.com": "Anusha4710",
+  "clinicalpharmacist.gbl@kimshospitals.com": "Sarika2051",
+  "mrd.gbl@kimshospitals.com": "Krupakar2405",
+  "lab.gbl@kimshospitals.com": "Venkatesh8497",
+  "dietician.gbl@kimshospitals.com": "Zeenath1217",
+  "drsreelatharamapuram@gmail.com": "Sreelatha3919",
+  "anilkumar.c@kimshospitals.com": "Anilkumar1884",
+  "hragm.gbl@kimshospitals.com": "Ashwani1019",
+  "mis.gbl@kimshospitals.com": "Karunakar1428",
+  "audit.gbl@kimshospitals.com": "Narayana6316",
+  "mehar.m@kimshospitals.com": "Mehar6929",
+};
 
 const adapter = new PrismaPg({ connectionString: DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
@@ -45,6 +87,8 @@ type SeedRole = "staff" | "manager" | "admin";
 interface SeedUser {
   email: string;
   name: string;
+  // Real job title shown in the UI. null → UI falls back to the role label.
+  designation: string | null;
   role: SeedRole;
   level: number;
   canManageUsers: boolean;
@@ -55,6 +99,7 @@ const USERS: SeedUser[] = [
   {
     email: "admin@kimshospitals.com",
     name: "KIMS Hospitals Admin",
+    designation: "Administrator",
     role: "admin",
     level: 800,
     canManageUsers: true,
@@ -63,21 +108,24 @@ const USERS: SeedUser[] = [
   // ── Three vertical heads (created; referenced as managers in the sheet) ─
   {
     email: "gunjanuv.gbl@kimshospitals.com",
-    name: "Gunjan U V (Operations & Support)",
+    name: "Gunjan U V",
+    designation: "COO",
     role: "manager",
     level: 400,
     canManageUsers: true,
   },
   {
     email: "medopsmgr.gbl@kimshospitals.com",
-    name: "Dr Ankita Roy Chawla (Medical Administration)",
+    name: "Dr Ankita Roy Chawla",
+    designation: "Associate Medical Director",
     role: "manager",
     level: 400,
     canManageUsers: true,
   },
   {
     email: "kishorereddysv@kimshospitals.com",
-    name: "Kishore SV (Corporate / MIS·Audit·HR)",
+    name: "Kishore SV",
+    designation: null,
     role: "manager",
     level: 400,
     canManageUsers: true,
@@ -86,84 +134,96 @@ const USERS: SeedUser[] = [
   // ── Operations & Support (under Gunjan U V) ──────────────────────────
   {
     email: "operationsgm.gbl@kimshospitals.com",
-    name: "Indrasen Reddy Bonthu (General Manager)",
+    name: "Indrasen Reddy Bonthu",
+    designation: "General Manager",
     role: "manager",
     level: 300,
     canManageUsers: true,
   },
   {
     email: "headops.gbl@kimshospitals.com",
-    name: "Shaik Abdul Fayaz (Head Ops)",
+    name: "Shaik Abdul Fayaz",
+    designation: "Head, Operations",
     role: "manager",
     level: 300,
     canManageUsers: true,
   },
   {
     email: "gopikrishna.p@kimshospitals.com",
-    name: "Peteti Gopi Krishna (Deputy General Manager)",
+    name: "Peteti Gopi Krishna",
+    designation: "Deputy General Manager",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "billingdgm.gbl@kimshospitals.com",
-    name: "Magam Sharath (Deputy General Manager — Billing)",
+    name: "Magam Sharath",
+    designation: "Deputy General Manager, Billing",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "sbjisrmgr.gbl@kimshospitals.com",
-    name: "Mallika M (Senior Manager)",
+    name: "Mallika M",
+    designation: "Senior Manager",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "sudhakardaddala@yahoo.com",
-    name: "Sudhakar Daddala (Senior Manager)",
+    name: "Sudhakar Daddala",
+    designation: "Senior Manager",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "securityhead.gbl@kimshospitals.com",
-    name: "Sudhir Kumar Simhadri (Senior Manager — Security)",
+    name: "Sudhir Kumar Simhadri",
+    designation: "Senior Manager, Security",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "maintenance.gbl@kimshospitals.com",
-    name: "Rajesh Geddada (Manager — Maintenance)",
+    name: "Rajesh Geddada",
+    designation: "Manager, Maintenance",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "fnb.gbl@kimshospitals.com",
-    name: "Maddela Srujan Kanth (Manager — F&B)",
+    name: "Maddela Srujan Kanth",
+    designation: "Manager, F&B",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "hk.gbl@kimshospitals.com",
-    name: "Anand Gajapathi Raju Samanthapudi (Dy. Manager — Housekeeping)",
+    name: "Anand Gajapathi Raju Samanthapudi",
+    designation: "Deputy Manager, Housekeeping",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "generalpurchase.gbl@kimshospitals.com",
-    name: "Balakrishna Srigada (Sr. Executive — Purchase)",
+    name: "Balakrishna Srigada",
+    designation: "Senior Executive, Purchase",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "generalstores.gbl@kimshospitals.com",
-    name: "David Barwa (Senior Executive — Stores)",
+    name: "David Barwa",
+    designation: "Senior Executive, Stores",
     role: "staff",
     level: 100,
     canManageUsers: false,
@@ -171,7 +231,8 @@ const USERS: SeedUser[] = [
   {
     // invented (house style: given.surnameinitial@) — Puram = surname
     email: "srinivasulu.p@kimshospitals.com",
-    name: "Puram Srinivasulu (Assistant Manager)",
+    name: "Puram Srinivasulu",
+    designation: "Assistant Manager",
     role: "staff",
     level: 100,
     canManageUsers: false,
@@ -179,7 +240,8 @@ const USERS: SeedUser[] = [
   // 3rd level under Shaik Abdul Fayaz
   {
     email: "opd.gbl@kimshospitals.com",
-    name: "Srinadh Thulluru (Manager — OPD)",
+    name: "Srinadh Thulluru",
+    designation: "Manager, OPD",
     role: "staff",
     level: 100,
     canManageUsers: false,
@@ -187,7 +249,8 @@ const USERS: SeedUser[] = [
   // 3rd level under Indrasen Reddy Bonthu
   {
     email: "liaison.gbl@kimshospitals.com",
-    name: "Kakara Vighneswara Rao (Assistant Manager — Liaison)",
+    name: "Kakara Vighneswara Rao",
+    designation: "Assistant Manager, Liaison",
     role: "staff",
     level: 100,
     canManageUsers: false,
@@ -197,70 +260,80 @@ const USERS: SeedUser[] = [
   {
     // resolved collision: Dr D V Shanthi gets her own mailbox from her title
     email: "dymedsupt.gbl@kimshospitals.com",
-    name: "Dr. D V Shanthi (Dy. Medical Superintendent)",
+    name: "Dr. D V Shanthi",
+    designation: "Deputy Medical Superintendent",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "ns.gbl@kimshospitals.com",
-    name: "Koukuntla Bhagya Lakshmi (Nursing Superintendent)",
+    name: "Koukuntla Bhagya Lakshmi",
+    designation: "Nursing Superintendent",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "accountssrmgr.gbl@kimshospitals.com",
-    name: "Darisi Srinivas Rao (Senior Manager — Accounts)",
+    name: "Darisi Srinivas Rao",
+    designation: "Senior Manager, Accounts",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "biomedical.gbl@kimshospitals.com",
-    name: "Avula Kumar (Manager — Biomedical)",
+    name: "Avula Kumar",
+    designation: "Manager, Biomedical",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "scm.gbl@kimshospitals.com",
-    name: "Ellandula Anusha (Manager — SCM)",
+    name: "Ellandula Anusha",
+    designation: "Manager, SCM",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "clinicalpharmacist.gbl@kimshospitals.com",
-    name: "Gade Sarika (Dy. Manager — Clinical Pharmacy)",
+    name: "Gade Sarika",
+    designation: "Deputy Manager, Clinical Pharmacy",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "mrd.gbl@kimshospitals.com",
-    name: "Nandala Krupakar (Dy. Manager — MRD)",
+    name: "Nandala Krupakar",
+    designation: "Deputy Manager, MRD",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "lab.gbl@kimshospitals.com",
-    name: "Ganapa Venkatesh (Incharge — Lab)",
+    name: "Ganapa Venkatesh",
+    designation: "In-charge, Lab",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "dietician.gbl@kimshospitals.com",
-    name: "Zeenath Fatima (Chief Dietician)",
+    name: "Zeenath Fatima",
+    designation: "Chief Dietician",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "drsreelatharamapuram@gmail.com",
-    name: "Ramapuram Sreelatha (Senior Duty Medical Officer)",
+    name: "Ramapuram Sreelatha",
+    designation: "Senior Duty Medical Officer",
     role: "staff",
     level: 100,
     canManageUsers: false,
@@ -268,7 +341,8 @@ const USERS: SeedUser[] = [
   {
     // invented (house style) — Chilukala = surname
     email: "anilkumar.c@kimshospitals.com",
-    name: "Anilkumar Chilukala (Assistant Manager)",
+    name: "Anilkumar Chilukala",
+    designation: "Assistant Manager",
     role: "staff",
     level: 100,
     canManageUsers: false,
@@ -278,28 +352,32 @@ const USERS: SeedUser[] = [
   {
     // domain typo fixed: was hragm.gbl@kimshsopitals.com
     email: "hragm.gbl@kimshospitals.com",
-    name: "Ashwani Kumar.k (Assistant General Manager — HR)",
+    name: "Ashwani Kumar.k",
+    designation: "Assistant General Manager, HR",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "mis.gbl@kimshospitals.com",
-    name: "Bolgam Karunakar (Manager — MIS)",
+    name: "Bolgam Karunakar",
+    designation: "Manager, MIS",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "audit.gbl@kimshospitals.com",
-    name: "Shanthi Narayana G (Manager — Audit)",
+    name: "Shanthi Narayana G",
+    designation: "Manager, Audit",
     role: "staff",
     level: 100,
     canManageUsers: false,
   },
   {
     email: "mehar.m@kimshospitals.com",
-    name: "Anantha Surya Mehar Sai Munnangi (Assistant Manager)",
+    name: "Anantha Surya Mehar Sai Munnangi",
+    designation: "Assistant Manager",
     role: "staff",
     level: 100,
     canManageUsers: false,
@@ -360,14 +438,17 @@ async function main(): Promise<void> {
   });
   console.log(`Org "${ORG_ID}" ready.`);
 
-  // Upsert all users (single shared password hashed once)
-  const passwordHash = await hashPassword(DEFAULT_PASSWORD);
+  // Upsert all users — each gets their own password from PASSWORDS.
   const byEmail = new Map<string, string>();
 
   for (const user of USERS) {
+    const password = PASSWORDS[user.email];
+    if (!password) throw new Error(`No password defined for ${user.email}`);
+    const passwordHash = await hashPassword(password);
     const data = {
       email: user.email,
       name: user.name,
+      designation: user.designation,
       passwordHash,
       role: user.role,
       level: user.level,
@@ -400,7 +481,7 @@ async function main(): Promise<void> {
 
   const userCount = await prisma.user.count({ where: { orgId: ORG_ID } });
   console.log(`\nKIMS Hospitals seed complete — ${userCount.toString()} users in org.`);
-  console.log(`  Every account password: ${DEFAULT_PASSWORD}`);
+  console.log("  Passwords: unique per user (see the PASSWORDS map in this file).");
   console.log("  Admin:    admin@kimshospitals.com");
   console.log("  Verticals: gunjanuv.gbl@ · medopsmgr.gbl@ (Dr Ankita) · kishorereddysv@");
 }
