@@ -109,3 +109,12 @@ export function recordProcessed(id: string, data: RecordProcessedData): Promise<
     },
   });
 }
+
+/**
+ * Wave 2: persist the S3 object keys for the audio/images sent for processing.
+ * Written BEFORE the AI call (store-then-process) so the audit trail survives even
+ * when the meeting isn't marked processed (no-content / Vertex failure).
+ */
+export function updateMediaKeys(id: string, mediaKeys: string[]): Promise<Meeting> {
+  return prisma.meeting.update({ where: { id }, data: { mediaKeys } });
+}

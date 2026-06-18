@@ -52,6 +52,14 @@ const EnvSchema = z.object({
     ),
   JWT_SECRET: z.string().min(32),
   JWT_TTL: z.string().min(1).default("30d"),
+  // S3 audio retention (audit). All optional — when unset, media simply isn't
+  // persisted and processing still works (mediaKeys stays empty). Set all four on
+  // Render to enable the "listen to what the user recorded" audit trail.
+  AWS_REGION: z.string().min(1).optional(),
+  AWS_BUCKET_NAME: z.string().min(1).optional(),
+  AWS_ACCESS_KEY_ID: z.string().min(1).optional(),
+  AWS_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  MEDIA_KEY_PREFIX: z.string().min(1).default("meetings"),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -74,6 +82,20 @@ export const env = {
     project: parsed.data.GOOGLE_CLOUD_PROJECT,
     location: parsed.data.GOOGLE_CLOUD_LOCATION,
   },
+  // null until all four AWS vars are present — callers check `env.s3 !== null`.
+  s3:
+    parsed.data.AWS_REGION !== undefined &&
+    parsed.data.AWS_BUCKET_NAME !== undefined &&
+    parsed.data.AWS_ACCESS_KEY_ID !== undefined &&
+    parsed.data.AWS_SECRET_ACCESS_KEY !== undefined
+      ? {
+          region: parsed.data.AWS_REGION,
+          bucket: parsed.data.AWS_BUCKET_NAME,
+          accessKeyId: parsed.data.AWS_ACCESS_KEY_ID,
+          secretAccessKey: parsed.data.AWS_SECRET_ACCESS_KEY,
+          keyPrefix: parsed.data.MEDIA_KEY_PREFIX,
+        }
+      : null,
 } as const;
 
 export type Env = typeof env;

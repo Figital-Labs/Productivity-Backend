@@ -50,6 +50,18 @@ export const processMeetingInputSchema = z.object({
 });
 export type ProcessMeetingInput = z.infer<typeof processMeetingInputSchema>;
 
+/** Body for `POST /meetings/:id/media/presign` — direct-to-S3 clip upload. */
+export const presignMediaInputSchema = z.object({
+  contentType: z.string().min(1).max(120),
+});
+export type PresignMediaInput = z.infer<typeof presignMediaInputSchema>;
+
+/** Body for `DELETE /meetings/:id/media` — remove a discarded clip's S3 object. */
+export const deleteMediaInputSchema = z.object({
+  key: z.string().min(1).max(512),
+});
+export type DeleteMediaInput = z.infer<typeof deleteMediaInputSchema>;
+
 /**
  * The output shape Gemini must produce for `POST /meetings/:id/process`.
  * Same pattern as team-voice-delegate: `created` actions carry assigneeId
@@ -83,6 +95,11 @@ export const patchRecommendationStatusSchema = z.object({
 export type PatchRecommendationStatusInput = z.infer<typeof patchRecommendationStatusSchema>;
 
 export const meetingIntentResponseSchema = z.object({
+  // Hotfix: false ONLY when the recording had no usable speech (pure silence/noise).
+  // The service then returns the explanatory `summary` WITHOUT marking the meeting
+  // processed, so the user can re-record and retry. Defaults true so the model may
+  // omit it on the happy path.
+  hasContent: z.boolean().default(true),
   summary: z.string(),
   actions: z.array(meetingActionSchema),
   recommendations: z.array(meetingRecommendationSchema),

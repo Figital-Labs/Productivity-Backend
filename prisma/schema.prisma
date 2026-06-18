@@ -237,8 +237,8 @@ model UnifiedInteraction {
 // Sprint 15: meetings. The meeting creator is `userId`. `attendeeIds` is a
 // loose String[] of User.ids (no FK enforcement at schema level — POC scope;
 // service-layer validates same-org membership at create time). Audio bytes
-// are never persisted; they live client-side until the user clicks Send-to-AI,
-// then flow through Vertex inline. The model stores agenda, typed notes, AI
+// flow through Vertex inline; Wave 2 also persists each clip to S3 (mediaKeys) as a
+// durable audit trail. The model stores agenda, typed notes, AI
 // summary, dispatched actions (PersistedMeetingAction[]), and recommendations
 // — same JSON pattern as VoiceInteraction.actions etc.
 model Meeting {
@@ -254,6 +254,10 @@ model Meeting {
   customPrompt    String?
   actions         Json      @default("[]") // PersistedMeetingAction[] post-process
   recommendations Json      @default("[]") // MeetingRecommendation[] post-process
+  // Wave 2: S3 object keys for every audio clip / uploaded file sent for processing,
+  // in send order. Durable audit trail — presigned at read time (GET /meetings/:id/media).
+  // Populated even when the result was no-content, so a "bad summary" complaint is auditable.
+  mediaKeys       String[]  @default([])
   processedAt     DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt

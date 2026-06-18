@@ -153,6 +153,22 @@ export async function generateStructured<S extends z.ZodType>(
       opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     );
 
+    // [ai-meta] — why a call produced what it did. Without this the empty-summary bug is
+    // invisible: AUDIO token count ~0 ⇒ the model never ingested audio (empty/silent clip),
+    // vs. a real audio-token count + empty output ⇒ content genuinely had no speech. Also
+    // surfaces a non-STOP finishReason (SAFETY / MAX_TOKENS / RECITATION).
+    const usage = response.usageMetadata;
+    const audioTokens = usage?.promptTokensDetails?.find(
+      (d) => String(d.modality) === "AUDIO",
+    )?.tokenCount;
+    const finishReason: string = response.candidates?.[0]?.finishReason ?? "?";
+    console.info(
+      `[ai-meta] model=${opts.model} finish=${finishReason} ` +
+        `promptTokens=${(usage?.promptTokenCount ?? 0).toString()} ` +
+        `candidateTokens=${(usage?.candidatesTokenCount ?? 0).toString()} ` +
+        `audioTokens=${(audioTokens ?? 0).toString()}`,
+    );
+
     const text = response.text;
     if (typeof text !== "string" || text.length === 0) {
       throw new UpstreamError("AI_EMPTY_RESPONSE", "Vertex returned no text content.");

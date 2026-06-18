@@ -1,8 +1,20 @@
 import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
-import { logRaw } from "../lib/ai-log.js";
+import { logInput, logRaw } from "../lib/ai-log.js";
 import { AppError, ConflictError, NotFoundError } from "../lib/errors.js";
 import { buildMeetingIntentPrompt } from "../lib/prompts/meeting-intent.js";
 import type { MeetingAttendee } from "../lib/prompts/meeting-intent.js";
+import {
+  buildMeetingMediaKey,
+  createPresignedUpload,
+  deleteMedia,
+  downloadMedia,
+  isStorageConfigured,
+  isSupportedMediaMime,
+  meetingMediaKeyPrefix,
+  signedGetUrl,
+  uploadMedia,
+} from "../lib/storage/index.js";
+import type { PresignedUpload } from "../lib/storage/index.js";
 import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
 import type { InlineMedia } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
@@ -39,9 +51,18 @@ export interface ProcessMeetingResult {
   meeting: HydratedMeeting;
   actions: PersistedMeetingAction[];
   recommendations: MeetingRecommendation[];
+  /**
+   * false when the recording had no usable speech (silence/noise). The meeting is
+   * NOT marked processed in that case; `meeting.summary` carries a friendly
+   * explanation so the FE can warn the user and let them re-record.
+   */
+  hasContent: boolean;
 }
 
 export interface ProcessMeetingInputs {
+  /** S3 keys of clips already uploaded directly from the browser (presigned POST). */
+  audioKeys: string[];
+  /** Fallback byte clips — clips whose background upload to S3 didn't finish. */
   audioClips: InlineMedia[];
   images: InlineMedia[];
   customPrompt: string | undefined;
@@ -113,6 +134,77 @@ export async function getMeeting(caller: AuthenticatedUser, id: string): Promise
   const row = await meetingRepo.findById(id);
   requireOwnership(row, caller.id);
   return hydrate(row);
+}
+
+export interface MeetingMediaItem {
+  key: string;
+  url: string | null;
+  downloadUrl: string | null;
+}
+
+function filenameFromKey(key: string): string {
+  return key.split("/").pop() ?? "recording";
+}
+
+/**
+ * Wave 2 audit: presigned GET URLs (inline + download) for every stored clip of a meeting,
+ * so the owner can listen to / download exactly what was recorded when a summary is disputed.
+ * Owner-scoped; URLs are null if S3 isn't configured.
+ */
+export async function getMeetingMedia(
+  caller: AuthenticatedUser,
+  id: string,
+): Promise<MeetingMediaItem[]> {
+  const meeting = await meetingRepo.findById(id);
+  requireOwnership(meeting, caller.id);
+  return Promise.all(
+    meeting.mediaKeys.map(async (key) => ({
+      key,
+      url: await signedGetUrl(key),
+      downloadUrl: await signedGetUrl(key, 900, { downloadFilename: filenameFromKey(key) }),
+    })),
+  );
+}
+
+/**
+ * Direct-to-S3: a presigned POST so the browser uploads a clip straight to S3 as it's
+ * recorded. Owner-scoped; the key is server-generated under the meeting's prefix so the
+ * client can't choose it, and the POST Policy caps size + content-type.
+ */
+export async function presignMeetingMedia(
+  caller: AuthenticatedUser,
+  id: string,
+  contentType: string,
+): Promise<PresignedUpload> {
+  const meeting = await meetingRepo.findById(id);
+  requireOwnership(meeting, caller.id);
+  const baseType = contentType.split(";")[0]?.trim() ?? "";
+  if (!isSupportedMediaMime(baseType)) {
+    throw new AppError("UNSUPPORTED_MEDIA_TYPE", 400, `Unsupported media type "${contentType}".`);
+  }
+  const key = buildMeetingMediaKey(caller.orgId, id, baseType);
+  const presigned = await createPresignedUpload(key, baseType);
+  if (presigned === null) {
+    throw new AppError("STORAGE_NOT_CONFIGURED", 503, "Audio storage is not configured.");
+  }
+  return presigned;
+}
+
+/**
+ * Discard cleanup: delete a single clip the user removed after it uploaded. Owner-scoped
+ * and prefix-validated so a caller can only delete objects under their own meeting.
+ */
+export async function deleteMeetingMedia(
+  caller: AuthenticatedUser,
+  id: string,
+  key: string,
+): Promise<void> {
+  const meeting = await meetingRepo.findById(id);
+  requireOwnership(meeting, caller.id);
+  if (!key.startsWith(meetingMediaKeyPrefix(caller.orgId, id))) {
+    throw new AppError("INVALID_MEDIA_KEY", 400, "Key does not belong to this meeting.");
+  }
+  await deleteMedia(key);
 }
 
 export async function createMeeting(
@@ -201,7 +293,7 @@ export async function processMeeting(
 
   // Processability gate — must have at least one of audio / notes / images.
   const effectiveNotes = inputs.notes ?? existing.notes ?? undefined;
-  const hasAudio = inputs.audioClips.length > 0;
+  const hasAudio = inputs.audioKeys.length > 0 || inputs.audioClips.length > 0;
   const hasImages = inputs.images.length > 0;
   const hasNotes = effectiveNotes !== undefined && effectiveNotes.trim().length > 0;
   if (!hasAudio && !hasImages && !hasNotes) {
@@ -248,11 +340,58 @@ export async function processMeeting(
     ...anchors,
   });
 
+  // Resolve audio for Gemini: download the clips already uploaded straight to S3 (validated
+  // keys), and keep any fallback byte clips (whose background upload didn't finish). Gemini
+  // can't read s3://, so keyed clips must be fetched here.
+  const keyPrefix = meetingMediaKeyPrefix(caller.orgId, meetingForPrompt.id);
+  for (const key of inputs.audioKeys) {
+    if (!key.startsWith(keyPrefix)) {
+      throw new AppError("INVALID_MEDIA_KEY", 400, "A media key does not belong to this meeting.");
+    }
+  }
+
+  const keyedAudio: InlineMedia[] = [];
+  if (isStorageConfigured()) {
+    for (const key of inputs.audioKeys) {
+      const { buffer, contentType } = await downloadMedia(key);
+      keyedAudio.push({ buffer, mimeType: contentType });
+    }
+    // Complete the audit trail: already-uploaded keys + freshly-uploaded fallback clips/images.
+    // The upload half is best-effort — a storage hiccup must never block processing.
+    const allKeys = [...inputs.audioKeys];
+    for (const m of [...inputs.audioClips, ...inputs.images]) {
+      try {
+        const key = buildMeetingMediaKey(caller.orgId, meetingForPrompt.id, m.mimeType);
+        await uploadMedia(key, m.buffer, m.mimeType);
+        allKeys.push(key);
+      } catch (err) {
+        console.warn(`[meeting] S3 fallback upload failed for ${meetingForPrompt.id}`, err);
+      }
+    }
+    if (allKeys.length > 0) {
+      await meetingRepo.updateMediaKeys(meetingForPrompt.id, allKeys);
+    }
+  }
+
+  const media = [...keyedAudio, ...inputs.audioClips, ...inputs.images];
+
+  // Record exactly what's going INTO the model (clip count + bytes + mime + notes length)
+  // so an empty/silent-audio result is diagnosable after the fact. Pairs with [ai-meta]
+  // (token counts) and [ai-raw] (output) in the logs.
+  logInput("meeting", caller.id, {
+    audio: [...keyedAudio, ...inputs.audioClips].map((c) => ({
+      bytes: c.buffer.length,
+      mimeType: c.mimeType,
+    })),
+    images: inputs.images.map((c) => ({ bytes: c.buffer.length, mimeType: c.mimeType })),
+    notesLen: (effectiveNotes ?? "").length,
+  });
+
   const aiResponse = await generateStructured({
     model: GEMINI_FLASH_MODEL,
     prompt,
     schema: meetingIntentResponseSchema,
-    media: [...inputs.audioClips, ...inputs.images],
+    media,
     temperature: AI_TEMPERATURE.meeting,
     thinkingBudget: AI_THINKING_BUDGET.meeting,
     // MVP: generous per-attempt ceiling, no async jobs. Keep the default retry — a
@@ -261,6 +400,11 @@ export async function processMeeting(
     timeoutMs: AI_TIMEOUT_MS.meeting,
     onRaw: logRaw("meeting", caller.id),
   });
+
+  // Note: a no-content result (silence/noise) is processed like any other meeting — the
+  // model's explanation IS the summary (see meeting-intent.ts), so the meeting resolves to
+  // History with a clear note and the stored audio can be audited, instead of looping on a
+  // "record again" dead-end.
 
   const allowedAssigneeIds = new Set(meetingForPrompt.attendeeIds);
 
@@ -301,6 +445,7 @@ export async function processMeeting(
     meeting,
     actions: persistedActions,
     recommendations: allRecommendations,
+    hasContent: aiResponse.hasContent,
   };
 }
 
