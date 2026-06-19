@@ -1,11 +1,12 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { truncateNotesForContext } from "../lib/notes-context.js";
 import {
   buildImageExtractionPrompt,
   type PendingTaskContext,
 } from "../lib/prompts/image-extraction.js";
+import { storeCaptureMedia } from "../lib/store-media.js";
 import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as imageRepo from "../repositories/image.repository.js";
@@ -55,14 +56,7 @@ export async function processImage(
     };
   });
 
-  // Create empty row first so created tasks can carry sourceId = this row's id.
-  // Atomicity intentionally skipped for POC (matches the voice flow).
-  const extraction = await imageRepo.create({
-    userId: user.id,
-    actions: [] as InputJsonValue,
-    recommendations: [] as InputJsonValue,
-  });
-
+  // Run AI FIRST, then create the row — so a failed/empty call leaves no orphan extraction.
   const aiResponse = await generateStructured({
     model: GEMINI_FLASH_MODEL,
     prompt: buildImageExtractionPrompt({
@@ -73,7 +67,20 @@ export async function processImage(
     media: [{ mimeType: image.mimeType, buffer: image.buffer }],
     temperature: AI_TEMPERATURE.extraction,
     thinkingBudget: AI_THINKING_BUDGET.extraction,
+    timeoutMs: AI_TIMEOUT_MS.media,
+    label: "image",
     onRaw: logRaw("image", user.id),
+  });
+
+  // Audit copy to S3 (best-effort, after AI so a storage hiccup never fails the result).
+  const imageUrl = await storeCaptureMedia("image", user.orgId, user.id, image);
+
+  const extraction = await imageRepo.create({
+    userId: user.id,
+    extractedText: aiResponse.extractedText,
+    actions: [] as InputJsonValue,
+    recommendations: [] as InputJsonValue,
+    ...(imageUrl !== null ? { imageUrl } : {}),
   });
 
   const persistedActions: PersistedAiAction[] = [];
@@ -88,7 +95,6 @@ export async function processImage(
   }
 
   await imageRepo.update(extraction.id, {
-    extractedText: aiResponse.extractedText,
     actions: persistedActions,
     recommendations: aiResponse.recommendations,
   });

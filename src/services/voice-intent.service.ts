@@ -1,8 +1,9 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { truncateNotesForContext } from "../lib/notes-context.js";
 import { buildVoiceIntentPrompt, type PendingTaskContext } from "../lib/prompts/voice-intent.js";
+import { storeCaptureMedia } from "../lib/store-media.js";
 import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as taskRepo from "../repositories/task.repository.js";
@@ -53,16 +54,7 @@ export async function processVoice(
     };
   });
 
-  // Create the empty row first so AI-created tasks can carry sourceId = this row's id.
-  // Atomicity is intentionally skipped for POC (ADR / sprint plan); if Vertex fails or
-  // an individual dispatch throws, the empty row is left behind. Revisit if it bites.
-  const interaction = await voiceRepo.create({
-    userId: user.id,
-    transcript: "",
-    actions: [] as InputJsonValue,
-    recommendations: [] as InputJsonValue,
-  });
-
+  // Run AI FIRST, then create the row — so a failed/empty call leaves no orphan interaction.
   const aiResponse = await generateStructured({
     model: GEMINI_FLASH_MODEL,
     prompt: buildVoiceIntentPrompt({
@@ -73,7 +65,21 @@ export async function processVoice(
     media: [{ mimeType: audio.mimeType, buffer: audio.buffer }],
     temperature: AI_TEMPERATURE.extraction,
     thinkingBudget: AI_THINKING_BUDGET.extraction,
+    timeoutMs: AI_TIMEOUT_MS.media,
+    label: "voice",
     onRaw: logRaw("voice", user.id),
+  });
+
+  // Audit copy to S3 (best-effort, after AI so a storage hiccup never fails the result).
+  const audioUrl = await storeCaptureMedia("voice", user.orgId, user.id, audio);
+
+  // Row created post-AI; tasks still carry sourceId = this row's id.
+  const interaction = await voiceRepo.create({
+    userId: user.id,
+    transcript: aiResponse.transcript,
+    actions: [] as InputJsonValue,
+    recommendations: [] as InputJsonValue,
+    ...(audioUrl !== null ? { audioUrl } : {}),
   });
 
   const persistedActions: PersistedAiAction[] = [];
@@ -88,7 +94,6 @@ export async function processVoice(
   }
 
   await voiceRepo.update(interaction.id, {
-    transcript: aiResponse.transcript,
     actions: persistedActions,
     recommendations: aiResponse.recommendations,
   });

@@ -1,7 +1,8 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { buildTeamVoiceDelegatePrompt } from "../lib/prompts/team-voice-delegate.js";
+import { storeCaptureMedia } from "../lib/store-media.js";
 import { buildDirectoryContext } from "../lib/team-directory.js";
 import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
@@ -48,13 +49,7 @@ export async function delegateVoice(
 
   const directory = await buildDirectoryContext(manager.id);
 
-  const interaction = await voiceRepo.create({
-    userId: manager.id,
-    transcript: "",
-    actions: [] as InputJsonValue,
-    recommendations: [] as InputJsonValue,
-  });
-
+  // Run AI FIRST, then create the row — so a failed/empty call leaves no orphan interaction.
   const aiResponse = await generateStructured({
     model: GEMINI_FLASH_MODEL,
     prompt: buildTeamVoiceDelegatePrompt({
@@ -66,7 +61,20 @@ export async function delegateVoice(
     media: [{ mimeType: audio.mimeType, buffer: audio.buffer }],
     temperature: AI_TEMPERATURE.delegation,
     thinkingBudget: AI_THINKING_BUDGET.delegation,
+    timeoutMs: AI_TIMEOUT_MS.media,
+    label: "team-voice",
     onRaw: logRaw("team-voice", manager.id),
+  });
+
+  // Audit copy to S3 (best-effort, after AI so a storage hiccup never fails the result).
+  const audioUrl = await storeCaptureMedia("voice", manager.orgId, manager.id, audio);
+
+  const interaction = await voiceRepo.create({
+    userId: manager.id,
+    transcript: aiResponse.transcript,
+    actions: [] as InputJsonValue,
+    recommendations: [] as InputJsonValue,
+    ...(audioUrl !== null ? { audioUrl } : {}),
   });
 
   const persistedActions: PersistedDelegationAction[] = [];
@@ -84,7 +92,6 @@ export async function delegateVoice(
   const allRecommendations = [...aiResponse.recommendations, ...extraRecommendations];
 
   await voiceRepo.update(interaction.id, {
-    transcript: aiResponse.transcript,
     actions: persistedActions,
     recommendations: allRecommendations,
   });
