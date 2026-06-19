@@ -29,13 +29,15 @@ export const AI_THINKING_BUDGET = {
 } as const;
 
 /**
- * Per-attempt request timeout (our `withTimeout`, NOT undici's separate ~10s
- * connect timeout). Meetings are the heaviest call (multi-clip audio + images);
- * for this MVP we keep them synchronous and just give them a generous ceiling
- * rather than building async job processing. (Deploy caveat: a multi-minute
- * synchronous request can hit platform/proxy timeouts in prod — async then.)
+ * Per-attempt request timeout (our `withTimeout`, NOT undici's separate ~10s connect
+ * timeout).
+ * - `meeting` runs in the async worker; a 2-hour recording measures ~1 min on Flash, so a
+ *   5-min ceiling is generous (the pg-boss visibility timeout is derived from this).
+ * - `media` covers the synchronous audio/image capture endpoints — 30s is tight when an
+ *   audio call spikes, so give them 60s of headroom (they're still short, just safer).
  */
 export const AI_TIMEOUT_MS = {
   default: 30_000,
-  meeting: 1_200_000, // 20 min
+  media: 60_000, // sync audio/image capture (voice, image, transcribe, team voice/image)
+  meeting: 300_000, // 5 min — async worker; real ~1 min for a 2-hour recording
 } as const;

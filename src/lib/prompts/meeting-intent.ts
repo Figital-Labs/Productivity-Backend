@@ -28,6 +28,7 @@ export function buildMeetingIntentPrompt(args: BuildMeetingPromptArgs): string {
 
 OUTPUT (JSON — return nothing else):
 {
+  "hasContent": <true normally; false ONLY when the recording has no usable speech at all>,
   "summary": "<Markdown — full record of the meeting>",
   "actions": [
     {
@@ -162,9 +163,13 @@ ${HOSPITAL_DOMAIN_VOCABULARY}
 
 ---
 
-EMPTY / OFF-TOPIC
-If the content contains no real meeting material (silence, music, chatter):
-return { "summary": "", "actions": [], "recommendations": [] }
+AUDIO QUALITY & NO-CONTENT
+The recording is often from a noisy place (hospital floor, traffic, distance from the speaker). IGNORE background noise, hum, music, and crosstalk and extract the real discussion. If a stretch is muffled or unintelligible, SKIP it and summarise what you CAN make out — never hallucinate or guess names, dates, or numbers to fill a gap.
+
+Only when there is genuinely NO usable speech at all — pure silence, music, or noise with no discernible meeting talk — set "hasContent": false, leave "actions" and "recommendations" empty, and write a SHORT, friendly "summary" explaining what likely went wrong and what to do, e.g.:
+"No meeting discussion could be made out — the recording is mostly silence or background noise. Please record again, closer to the speakers and in a quieter spot."
+
+Whenever you extracted any real content, set "hasContent": true.
 
 ---
 

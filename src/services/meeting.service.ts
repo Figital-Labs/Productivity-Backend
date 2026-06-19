@@ -2,10 +2,17 @@ import { enqueueMeeting } from "../jobs/queue.js";
 import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { AppError, ConflictError, NotFoundError } from "../lib/errors.js";
+import { log } from "../lib/logger.js";
 import { buildMeetingIntentPrompt } from "../lib/prompts/meeting-intent.js";
 import type { MeetingAttendee } from "../lib/prompts/meeting-intent.js";
 import { storage } from "../lib/storage/index.js";
-import { buildMediaKey, extFromMime } from "../lib/storage/keys.js";
+import type { PresignedUpload } from "../lib/storage/index.js";
+import {
+  buildMediaKey,
+  filenameFromKey,
+  isSupportedMediaMime,
+  mediaKeyPrefix,
+} from "../lib/storage/keys.js";
 import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
 import type { InlineMedia } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
@@ -46,11 +53,25 @@ export interface EnqueueMeetingResult {
 }
 
 export interface ProcessMeetingInputs {
+  /** S3 keys of clips already uploaded directly from the browser (presigned POST). */
+  audioKeys: string[];
+  /** Fallback byte clips — clips whose background upload to S3 didn't finish (CORS off etc.). */
   audioClips: InlineMedia[];
   images: InlineMedia[];
   customPrompt: string | undefined;
   notes: string | undefined;
 }
+
+export interface MeetingMediaItem {
+  key: string;
+  /** Short-lived inline play URL (null if storage can't sign — e.g. the disk dev driver). */
+  url: string | null;
+  /** Short-lived download URL (forces attachment). */
+  downloadUrl: string | null;
+}
+
+// Vertex inline cap is ~100 MB per request; guard below it (only reachable past ~5 h of audio).
+const MAX_INLINE_BYTES = 90 * 1024 * 1024;
 
 /**
  * Sprint 15: validates that all attendee ids exist and belong to the caller's
@@ -117,6 +138,75 @@ export async function getMeeting(caller: AuthenticatedUser, id: string): Promise
   const row = await meetingRepo.findById(id);
   requireOwnership(row, caller.id);
   return hydrate(row);
+}
+
+/**
+ * Audit: presigned GET URLs (inline + download) for every stored clip of a meeting, so the
+ * owner can listen to / download exactly what was recorded when a summary is disputed.
+ * Owner-scoped; URLs are null when the driver can't sign (disk dev driver).
+ */
+export async function getMeetingMedia(
+  caller: AuthenticatedUser,
+  id: string,
+): Promise<MeetingMediaItem[]> {
+  const meeting = await meetingRepo.findById(id);
+  requireOwnership(meeting, caller.id);
+  return Promise.all(
+    meeting.mediaKeys.map(async (key) => ({
+      key,
+      url: await storage.signedGetUrl(key),
+      downloadUrl: await storage.signedGetUrl(key, 900, { downloadFilename: filenameFromKey(key) }),
+    })),
+  );
+}
+
+/**
+ * Direct-to-S3: a presigned POST so the browser uploads a clip straight to S3 as it's recorded.
+ * Owner-scoped; the key is server-generated under the meeting's prefix (the client can't choose
+ * it) and the POST Policy caps size + content-type. Returns 503 when the driver can't presign —
+ * the client then falls back to a byte upload through `/process`.
+ */
+export async function presignMeetingMedia(
+  caller: AuthenticatedUser,
+  id: string,
+  contentType: string,
+): Promise<PresignedUpload> {
+  const meeting = await meetingRepo.findById(id);
+  requireOwnership(meeting, caller.id);
+  if (meeting.processedAt !== null) {
+    throw new ConflictError(
+      "MEETING_ALREADY_PROCESSED",
+      "This meeting has already been processed.",
+    );
+  }
+  const baseType = contentType.split(";")[0]?.trim() ?? "";
+  if (!isSupportedMediaMime(baseType)) {
+    throw new AppError("UNSUPPORTED_MEDIA_TYPE", 400, `Unsupported media type "${contentType}".`);
+  }
+  const key = buildMediaKey("meetings", caller.orgId, id, baseType);
+  const presigned = await storage.createPresignedUpload(key, baseType);
+  if (presigned === null) {
+    throw new AppError("STORAGE_NOT_CONFIGURED", 503, "Direct upload is not available.");
+  }
+  return presigned;
+}
+
+/**
+ * Discard cleanup: delete a single clip the user removed after it uploaded. Owner-scoped and
+ * prefix-validated so a caller can only delete objects under their own meeting.
+ */
+export async function deleteMeetingMedia(
+  caller: AuthenticatedUser,
+  id: string,
+  key: string,
+): Promise<void> {
+  const meeting = await meetingRepo.findById(id);
+  requireOwnership(meeting, caller.id);
+  if (!key.startsWith(mediaKeyPrefix("meetings", caller.orgId, id))) {
+    throw new AppError("INVALID_MEDIA_KEY", 400, "Key does not belong to this meeting.");
+  }
+  await storage.delete(key);
+  log.info("meeting", "media deleted", { meetingId: id, userId: caller.id, key });
 }
 
 export async function createMeeting(
@@ -187,13 +277,14 @@ export async function softDeleteMeeting(caller: AuthenticatedUser, id: string): 
  * the keys. The bytes leave the web process here; the worker re-reads them for the Vertex
  * call (Gemini can't read `s3://` directly — see ADR-0025 / Appendix A in the plan).
  */
-async function uploadMedia(
-  caller: { id: string; orgId: string },
+async function uploadMeetingMedia(
+  orgId: string,
+  meetingId: string,
   items: InlineMedia[],
 ): Promise<string[]> {
   const keys: string[] = [];
   for (const item of items) {
-    const key = buildMediaKey(caller.orgId, caller.id, extFromMime(item.mimeType));
+    const key = buildMediaKey("meetings", orgId, meetingId, item.mimeType);
     await storage.upload(key, item.buffer, {
       contentType: item.mimeType,
       contentLength: item.buffer.length,
@@ -232,9 +323,9 @@ export async function enqueueProcessing(
     return { jobId: active.id, meetingId: id, status: active.status };
   }
 
-  // Processability gate — must have at least one of audio / notes / images.
+  // Processability gate — must have at least one of audio (key or bytes) / notes / images.
   const effectiveNotes = inputs.notes ?? existing.notes ?? undefined;
-  const hasAudio = inputs.audioClips.length > 0;
+  const hasAudio = inputs.audioKeys.length > 0 || inputs.audioClips.length > 0;
   const hasImages = inputs.images.length > 0;
   const hasNotes = effectiveNotes !== undefined && effectiveNotes.trim().length > 0;
   if (!hasAudio && !hasImages && !hasNotes) {
@@ -243,6 +334,14 @@ export async function enqueueProcessing(
       400,
       "Meeting must include at least one audio clip, image, or notes before processing.",
     );
+  }
+
+  // Anti-tamper: every direct-upload key must live under THIS meeting's prefix.
+  const prefix = mediaKeyPrefix("meetings", caller.orgId, id);
+  for (const key of inputs.audioKeys) {
+    if (!key.startsWith(prefix)) {
+      throw new AppError("INVALID_MEDIA_KEY", 400, "An audio key does not belong to this meeting.");
+    }
   }
 
   // Validate attendees up-front so a bad request fails at enqueue time, not in the worker.
@@ -254,9 +353,15 @@ export async function enqueueProcessing(
     await meetingRepo.update(id, { notes: inputs.notes });
   }
 
-  // Offload the bytes to S3, then create the durable status row + enqueue the work.
-  const audioKeys = await uploadMedia(caller, inputs.audioClips);
-  const imageKeys = await uploadMedia(caller, inputs.images);
+  // Direct-uploaded clips are used as-is; only the byte-FALLBACK clips (CORS off / upload didn't
+  // finish) are uploaded server-side here. Either way the meeting ends up holding every key.
+  const fallbackAudioKeys = await uploadMeetingMedia(caller.orgId, id, inputs.audioClips);
+  const imageKeys = await uploadMeetingMedia(caller.orgId, id, inputs.images);
+  const audioKeys = [...inputs.audioKeys, ...fallbackAudioKeys];
+  const allKeys = [...audioKeys, ...imageKeys];
+
+  // Durable audit trail on the meeting (powers the Media tab) — store-then-process.
+  await meetingRepo.updateMediaKeys(id, allKeys);
 
   const job = await jobRepo.create({
     orgId: caller.orgId,
@@ -264,7 +369,16 @@ export async function enqueueProcessing(
     kind: "meeting",
     targetType: "meeting",
     targetId: id,
-    mediaKeys: [...audioKeys, ...imageKeys],
+    mediaKeys: allKeys,
+  });
+
+  log.info("meeting", "enqueued", {
+    meetingId: id,
+    userId: caller.id,
+    jobId: job.id,
+    directKeys: inputs.audioKeys.length,
+    fallbackClips: inputs.audioClips.length,
+    images: inputs.images.length,
   });
 
   try {
@@ -276,7 +390,9 @@ export async function enqueueProcessing(
     });
   } catch (err) {
     // Enqueue failed (queue/DB hiccup) — mark the row so the FE doesn't poll forever.
-    await jobRepo.markFailed(job.id, err instanceof Error ? err.message : String(err));
+    const message = err instanceof Error ? err.message : String(err);
+    await jobRepo.markFailed(job.id, message);
+    log.error("meeting", "enqueue failed", { meetingId: id, jobId: job.id, message });
     throw err;
   }
 
@@ -324,14 +440,35 @@ export async function runProcessing(
     ...anchors,
   });
 
+  const allMedia = [...media.audioClips, ...media.images];
+  const totalBytes = allMedia.reduce((n, m) => n + m.buffer.length, 0);
+  if (totalBytes > MAX_INLINE_BYTES) {
+    log.warn("meeting", "payload too large", { meetingId, userId: caller.id, bytes: totalBytes });
+    throw new AppError(
+      "MEETING_PAYLOAD_TOO_LARGE",
+      413,
+      "This session is too long to process at once. Please split it into shorter meetings.",
+    );
+  }
+
+  log.info("meeting", "ai input", {
+    meetingId,
+    userId: caller.id,
+    clips: media.audioClips.length,
+    images: media.images.length,
+    bytes: totalBytes,
+    notesLen: meeting.notes?.length ?? 0,
+  });
+
   const aiResponse = await generateStructured({
     model: GEMINI_FLASH_MODEL,
     prompt,
     schema: meetingIntentResponseSchema,
-    media: [...media.audioClips, ...media.images],
+    media: allMedia,
     temperature: AI_TEMPERATURE.meeting,
     thinkingBudget: AI_THINKING_BUDGET.meeting,
     timeoutMs: AI_TIMEOUT_MS.meeting,
+    label: "meeting",
     onRaw: logRaw("meeting", caller.id),
   });
 
@@ -363,6 +500,13 @@ export async function runProcessing(
     customPrompt: media.customPrompt,
     actions: persistedActions,
     recommendations: allRecommendations,
+  });
+
+  log.info("meeting", "processed", {
+    meetingId: meeting.id,
+    userId: caller.id,
+    hasContent: aiResponse.hasContent,
+    recommendations: allRecommendations.length,
   });
 }
 

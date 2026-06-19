@@ -4,7 +4,9 @@ import type { InlineMedia } from "../lib/vertex.js";
 import { idParamSchema } from "../schemas/common.js";
 import {
   createMeetingInputSchema,
+  deleteMediaInputSchema,
   patchRecommendationStatusSchema,
+  presignMediaInputSchema,
   processMeetingInputSchema,
   updateMeetingInputSchema,
 } from "../schemas/meeting.schema.js";
@@ -19,6 +21,12 @@ export async function getMeeting(req: Request, res: Response): Promise<void> {
   const { id } = idParamSchema.parse(req.params);
   const meeting = await meetingService.getMeeting(req.user, id);
   res.status(200).json(meeting);
+}
+
+export async function getMeetingMedia(req: Request, res: Response): Promise<void> {
+  const { id } = idParamSchema.parse(req.params);
+  const media = await meetingService.getMeetingMedia(req.user, id);
+  res.status(200).json({ media });
 }
 
 export async function createMeeting(req: Request, res: Response): Promise<void> {
@@ -78,11 +86,45 @@ export async function processMeeting(req: Request, res: Response): Promise<void>
     mimeType: f.mimetype,
   }));
 
+  // Clips the browser already uploaded straight to S3 (presigned). Bytes above are the
+  // fallback for clips whose direct upload didn't happen (CORS off / failed).
+  const audioKeys = parseMediaKeys((req.body as { mediaKeys?: unknown }).mediaKeys);
+
   const result = await meetingService.enqueueProcessing(req.user, id, {
+    audioKeys,
     audioClips,
     images,
     customPrompt: input.customPrompt,
     notes: input.notes,
   });
   res.status(202).json(result);
+}
+
+/** Parse the multipart `mediaKeys` field (a JSON array of S3 keys) safely. */
+function parseMediaKeys(raw: unknown): string[] {
+  if (typeof raw !== "string" || raw.length === 0) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      const keys = parsed.filter((k): k is string => typeof k === "string");
+      if (keys.length === parsed.length) return keys;
+    }
+  } catch {
+    // malformed → treat as none (fall back to byte clips)
+  }
+  return [];
+}
+
+export async function presignMeetingMedia(req: Request, res: Response): Promise<void> {
+  const { id } = idParamSchema.parse(req.params);
+  const input = presignMediaInputSchema.parse((req.body as unknown) ?? {});
+  const presigned = await meetingService.presignMeetingMedia(req.user, id, input.contentType);
+  res.status(200).json(presigned);
+}
+
+export async function deleteMeetingMedia(req: Request, res: Response): Promise<void> {
+  const { id } = idParamSchema.parse(req.params);
+  const input = deleteMediaInputSchema.parse((req.body as unknown) ?? {});
+  await meetingService.deleteMeetingMedia(req.user, id, input.key);
+  res.status(204).send();
 }

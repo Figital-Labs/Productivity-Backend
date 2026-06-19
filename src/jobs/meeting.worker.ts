@@ -9,6 +9,7 @@
 import type { Job, PgBoss } from "pg-boss";
 
 import { env } from "../config/env.js";
+import { errInfo, log } from "../lib/logger.js";
 import { storage } from "../lib/storage/index.js";
 import type { InlineMedia } from "../lib/vertex.js";
 import * as jobRepo from "../repositories/job.repository.js";
@@ -29,22 +30,40 @@ async function downloadAll(keys: string[]): Promise<InlineMedia[]> {
 async function processOne(job: Job<MeetingJobData>): Promise<void> {
   const { processingJobId, audioKeys, imageKeys, customPrompt } = job.data;
   const row = await jobRepo.findById(processingJobId);
-  if (!row) return; // status row gone (deleted?) — nothing to do; don't fail the batch.
+  if (!row) {
+    // status row gone (deleted?) — nothing to do; don't fail the batch.
+    log.warn("worker", "job row missing", { jobId: processingJobId });
+    return;
+  }
 
+  const ctx = { jobId: processingJobId, meetingId: row.targetId, userId: row.userId };
+  log.info("worker", "processing", {
+    ...ctx,
+    audioKeys: audioKeys.length,
+    imageKeys: imageKeys.length,
+  });
   await jobRepo.markProcessing(processingJobId);
   try {
     const audioClips = await downloadAll(audioKeys);
     const images = await downloadAll(imageKeys);
+    log.debug("worker", "media downloaded", {
+      ...ctx,
+      clips: audioClips.length,
+      images: images.length,
+    });
     await meetingService.runProcessing(
       row.targetId,
       { id: row.userId, orgId: row.orgId },
       { audioClips, images, customPrompt },
     );
     await jobRepo.markSucceeded(processingJobId);
+    log.info("worker", "succeeded", ctx);
   } catch (err) {
     // Isolate the failure to this job (the FE sees it via the ProcessingJob row) and don't
     // rethrow, so a sibling job in the same batch still completes.
-    await jobRepo.markFailed(processingJobId, err instanceof Error ? err.message : String(err));
+    const { message, stack } = errInfo(err);
+    await jobRepo.markFailed(processingJobId, message);
+    log.error("worker", "failed", { ...ctx, message, stack });
   }
 }
 
