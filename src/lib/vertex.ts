@@ -1,9 +1,11 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, MediaModality } from "@google/genai";
+import type { GenerateContentResponse } from "@google/genai";
 import { z } from "zod";
 
 import { env } from "../config/env.js";
 
 import { UpstreamError } from "./errors.js";
+import { log } from "./logger.js";
 
 /**
  * Single GoogleGenAI client for the lifetime of the process. Constructed with
@@ -39,6 +41,8 @@ interface CommonGenOptions {
   timeoutMs?: number;
   /** Called with the raw model text BEFORE parsing — for logging/persistence. */
   onRaw?: (raw: string) => void;
+  /** Surface label for logs (e.g. "meeting", "voice") — pure observability. */
+  label?: string;
 }
 
 export interface GenerateStructuredOptions<S extends z.ZodType> extends CommonGenOptions {
@@ -71,6 +75,33 @@ const RECOVERABLE_CODES = new Set([
 ]);
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** `[ai-meta]` — finishReason + token usage (incl. audio tokens) for cost/latency tracing. */
+function logMeta(
+  surface: string,
+  response: GenerateContentResponse,
+  durationMs: number,
+  outputLen: number,
+): void {
+  const usage = response.usageMetadata;
+  const audioTokens = usage?.promptTokensDetails?.find(
+    (d) => d.modality === MediaModality.AUDIO,
+  )?.tokenCount;
+  log.info("ai", "done", {
+    surface,
+    durationMs,
+    finishReason: response.candidates?.[0]?.finishReason ?? "?",
+    promptTokens: usage?.promptTokenCount,
+    candidateTokens: usage?.candidatesTokenCount,
+    audioTokens,
+    outputLen,
+  });
+}
+
+/** Total inline media bytes — flags how heavy the request body is. */
+function mediaBytes(media?: InlineMedia[]): number {
+  return (media ?? []).reduce((n, m) => n + m.buffer.length, 0);
+}
 
 function buildParts(prompt: string, media?: InlineMedia[]): GeminiPart[] {
   const parts: GeminiPart[] = [{ text: prompt }];
@@ -146,8 +177,16 @@ export async function generateStructured<S extends z.ZodType>(
     responseMimeType: "application/json",
     responseJsonSchema: z.toJSONSchema(opts.schema),
   });
+  const surface = opts.label ?? "structured";
+  log.debug("ai", "request", {
+    surface,
+    model: opts.model,
+    clips: opts.media?.length ?? 0,
+    bytes: mediaBytes(opts.media),
+  });
 
   return withRetry(async () => {
+    const startedAt = Date.now();
     const response = await withTimeout(
       ai.models.generateContent({ model: opts.model, contents: [{ role: "user", parts }], config }),
       opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -155,6 +194,7 @@ export async function generateStructured<S extends z.ZodType>(
 
     const text = response.text;
     if (typeof text !== "string" || text.length === 0) {
+      log.warn("ai", "empty response", { surface });
       throw new UpstreamError("AI_EMPTY_RESPONSE", "Vertex returned no text content.");
     }
     opts.onRaw?.(text);
@@ -163,6 +203,7 @@ export async function generateStructured<S extends z.ZodType>(
     try {
       parsed = JSON.parse(text);
     } catch {
+      log.warn("ai", "invalid JSON", { surface, rawLen: text.length });
       throw new UpstreamError("AI_INVALID_JSON", "Vertex response was not valid JSON.", {
         raw: text,
       });
@@ -170,11 +211,17 @@ export async function generateStructured<S extends z.ZodType>(
 
     const result = opts.schema.safeParse(parsed);
     if (!result.success) {
+      log.warn("ai", "schema mismatch", {
+        surface,
+        rawLen: text.length,
+        issues: result.error.issues.length,
+      });
       throw new UpstreamError("AI_SCHEMA_MISMATCH", "Vertex response did not match the schema.", {
         raw: text,
         issues: result.error.issues as unknown as Record<string, unknown>,
       });
     }
+    logMeta(surface, response, Date.now() - startedAt, text.length);
     return result.data;
   }, opts.maxRetries ?? DEFAULT_MAX_RETRIES);
 }
@@ -188,8 +235,11 @@ export async function generateStructured<S extends z.ZodType>(
 export async function generateText(opts: GenerateTextOptions): Promise<string> {
   const parts = buildParts(opts.prompt, opts.media);
   const config = buildConfig(opts, {});
+  const surface = opts.label ?? "text";
+  log.debug("ai", "request", { surface, model: opts.model, bytes: mediaBytes(opts.media) });
 
   return withRetry(async () => {
+    const startedAt = Date.now();
     const response = await withTimeout(
       ai.models.generateContent({
         model: opts.model,
@@ -201,9 +251,11 @@ export async function generateText(opts: GenerateTextOptions): Promise<string> {
 
     const text = response.text;
     if (typeof text !== "string" || text.length === 0) {
+      log.warn("ai", "empty response", { surface });
       throw new UpstreamError("AI_EMPTY_RESPONSE", "Vertex returned no text content.");
     }
     opts.onRaw?.(text);
+    logMeta(surface, response, Date.now() - startedAt, text.length);
     return text;
   }, opts.maxRetries ?? DEFAULT_MAX_RETRIES);
 }
