@@ -1,6 +1,12 @@
 import prisma from "../lib/prisma.js";
 import type { Scope } from "../lib/resolve-scope.js";
-import { dayBoundsInTz, formatDateYmd, parseDateString, todayInUserTz } from "../utils/date.js";
+import {
+  dayBoundsInTz,
+  extractHourInTimezone,
+  formatDateYmd,
+  parseDateString,
+  todayInUserTz,
+} from "../utils/date.js";
 
 import { consistencyForUsers, userIdsInScope } from "./dashboard-rollup.service.js";
 
@@ -1168,4 +1174,88 @@ export async function getScheduleAdherence(
   });
 
   return { summary, departments, rows, totalUsers: agg.size, trend, windowDays: days };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// PRODUCTIVE HOURS — when the team actually completes work, bucketed by the hour
+// of day on each user's OWN clock. Twin to the schedule heatmap, but driven by
+// `completedAt` (real throughput) rather than scheduled slots. Aggregate and
+// timezone-correct by construction; deliberately NOT per-person (team insight,
+// "when does work ship", not individual surveillance).
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface ProductiveHourBucket {
+  hour: number; // 0–23, on the completing user's local clock
+  completedCount: number; // tasks completed in this hour across the team + window
+  peopleCompleted: number; // distinct people who completed ≥1 task in this hour
+}
+
+export interface ProductiveHoursResult {
+  byHour: ProductiveHourBucket[]; // always 24 entries → stable chart axis
+  totalCompleted: number;
+  peakHour: number | null; // busiest completion hour, or null when there's no data
+  windowDays: number;
+}
+
+export async function getProductiveHours(
+  scope: Scope,
+  days: number,
+): Promise<ProductiveHoursResult> {
+  const byHourEmpty = (): ProductiveHourBucket[] =>
+    Array.from({ length: 24 }, (_, hour) => ({ hour, completedCount: 0, peopleCompleted: 0 }));
+
+  const userIds = await userIdsInScope(scope);
+  if (userIds.length === 0) {
+    return { byHour: byHourEmpty(), totalCompleted: 0, peakHour: null, windowDays: days };
+  }
+
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, timezone: true },
+  });
+  const tzMap = new Map(users.map((u) => [u.id, u.timezone]));
+
+  const end = todayInUserTz(DEFAULT_TIMEZONE);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - (days - 1));
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      assigneeId: { in: userIds },
+      targetDate: { gte: startOfDay(start), lte: endOfDay(end) },
+      completed: true,
+      completedAt: { not: null },
+      deletedAt: null,
+    },
+    select: { assigneeId: true, completedAt: true },
+  });
+
+  const agg = new Map<number, { count: number; people: Set<string> }>();
+  for (const t of tasks) {
+    if (t.completedAt === null) continue;
+    const tz = tzMap.get(t.assigneeId) ?? DEFAULT_TIMEZONE;
+    const hour = extractHourInTimezone(t.completedAt, tz);
+    const bucket = agg.get(hour) ?? { count: 0, people: new Set<string>() };
+    bucket.count += 1;
+    bucket.people.add(t.assigneeId);
+    agg.set(hour, bucket);
+  }
+
+  const byHour = byHourEmpty().map((slot) => {
+    const bucket = agg.get(slot.hour);
+    return bucket
+      ? { hour: slot.hour, completedCount: bucket.count, peopleCompleted: bucket.people.size }
+      : slot;
+  });
+
+  let peakHour: number | null = null;
+  let peakCount = 0;
+  for (const b of byHour) {
+    if (b.completedCount > peakCount) {
+      peakCount = b.completedCount;
+      peakHour = b.hour;
+    }
+  }
+
+  return { byHour, totalCompleted: tasks.length, peakHour, windowDays: days };
 }

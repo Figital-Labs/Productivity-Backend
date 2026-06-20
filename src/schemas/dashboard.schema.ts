@@ -149,6 +149,12 @@ export const scheduleAdherenceQuerySchema = z.object({
 });
 export type ScheduleAdherenceQuery = z.infer<typeof scheduleAdherenceQuerySchema>;
 
+/** `GET /dashboard/analytics/productive-hours` — team task completions by hour-of-day. */
+export const productiveHoursQuerySchema = z.object({
+  range: z.enum(["7d", "30d"]).default("7d"),
+});
+export type ProductiveHoursQuery = z.infer<typeof productiveHoursQuerySchema>;
+
 /** `PATCH /dashboard/groups/:id/members/:userId` — flip lead / canManage. */
 export const patchGroupMemberSchema = z
   .object({

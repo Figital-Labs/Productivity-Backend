@@ -22,6 +22,7 @@ import {
   personDayQuerySchema,
   planAccuracyQuerySchema,
   planVsClosureQuerySchema,
+  productiveHoursQuerySchema,
   scheduleAdherenceQuerySchema,
   scheduleHeatmapQuerySchema,
   taskFlowQuerySchema,
@@ -234,6 +235,13 @@ export async function scheduleAdherence(req: Request, res: Response): Promise<vo
   const scope = await resolveScope(req.user);
   const days = query.range === "30d" ? 30 : 7;
   res.json(await analyticsService.getScheduleAdherence(scope, days));
+}
+
+export async function productiveHours(req: Request, res: Response): Promise<void> {
+  const query = productiveHoursQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  const days = query.range === "30d" ? 30 : 7;
+  res.json(await analyticsService.getProductiveHours(scope, days));
 }
 
 export async function patchGroupMember(req: Request, res: Response): Promise<void> {
