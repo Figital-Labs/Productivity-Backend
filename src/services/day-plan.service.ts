@@ -1,4 +1,4 @@
-import { ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../lib/errors.js";
 import { resolveScope } from "../lib/resolve-scope.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as dayPlanRepo from "../repositories/day-plan.repository.js";
@@ -30,6 +30,10 @@ function snapshotTasks(
     targetDate: formatDateYMD(t.targetDate),
     ...(t.priority !== null && { priority: t.priority }),
     ...(t.notes !== null && { notes: t.notes }),
+    ...(t.scheduledStartMinute !== null && { scheduledStartMinute: t.scheduledStartMinute }),
+    ...(t.scheduledDurationMinutes !== null && {
+      scheduledDurationMinutes: t.scheduledDurationMinutes,
+    }),
   }));
 }
 
@@ -38,6 +42,12 @@ export async function submitDayPlan(
   input: SubmitDayPlanInput,
 ): Promise<dayPlanRepo.DayPlanSubmission> {
   const date = input.date ? parseDateString(input.date) : todayInUserTz(DEFAULT_TIMEZONE);
+
+  // A plan can only be submitted for today (or a past catch-up) — never a future date.
+  // The client also hides the button for future dates; this is the server-side guard.
+  if (date.getTime() > todayInUserTz(DEFAULT_TIMEZONE).getTime()) {
+    throw new ValidationError("You can only submit today's day plan, not a future date.");
+  }
 
   const existing = await dayPlanRepo.findByUserAndDate(user.id, date);
   if (existing) {
