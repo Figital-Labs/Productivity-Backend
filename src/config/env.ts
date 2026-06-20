@@ -82,6 +82,10 @@ const EnvSchema = z.object({
     .string()
     .default("true")
     .transform((v) => v !== "false"),
+  // Day-timeline overlap policy. `prevent` (default) cascades colliding tasks so only one
+  // runs at a time; `allow` permits concurrent tasks (rendered side-by-side). One flip
+  // switches the whole product; resolved centrally in scheduling.service (per-org later).
+  OVERLAP_POLICY: z.enum(["prevent", "allow"]).default("prevent"),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -143,6 +147,7 @@ export const env = {
   s3: s3Config,
   workerConcurrency: parsed.data.WORKER_CONCURRENCY,
   runWorkerInProcess: parsed.data.RUN_WORKER_IN_PROCESS,
+  overlapPolicy: parsed.data.OVERLAP_POLICY,
 } as const;
 
 export type Env = typeof env;

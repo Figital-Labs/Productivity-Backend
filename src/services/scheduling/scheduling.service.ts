@@ -4,6 +4,7 @@
  * result. All multi-row writes happen in one Serializable transaction (with a
  * single retry) so concurrent creates can't double-book the same minute.
  */
+import { env } from "../../config/env.js";
 import { ForbiddenError, NotFoundError } from "../../lib/errors.js";
 import prisma from "../../lib/prisma.js";
 import type { AuthenticatedUser } from "../../middleware/auth.js";
@@ -13,9 +14,18 @@ import { canAccessTask } from "../../utils/auth.js";
 import {
   DEFAULT_DURATION_MINUTES,
   findEarliestFreeSlot,
+  type OverlapPolicy,
   placeWithCascade,
   type Slot,
 } from "./engine.js";
+
+/**
+ * Single source of truth for the overlap policy. Global config today; promoting it
+ * to a per-organization setting later means changing only this function.
+ */
+function overlapPolicy(): OverlapPolicy {
+  return env.overlapPolicy;
+}
 
 // Interactive-transaction client type, derived from the (last) `$transaction`
 // overload so we never hand-maintain the ITXClientDenyList.
@@ -148,6 +158,7 @@ export async function scheduleTask(
       rowsToSlots(siblings),
       { id: taskId, start: startMinute, duration },
       hours,
+      overlapPolicy(),
     );
 
     const task = await tx.task.update({

@@ -135,4 +135,31 @@ test("moving an existing task excludes its own old slot", () => {
   assert.deepEqual(r.moved, [{ id: "a", start: 600 }]);
 });
 
+// ── placeWithCascade — overlap policy "allow" ────────────────────────────
+test("allow policy places the candidate without cascading", () => {
+  const r = placeWithCascade([slot("a", 540, 30)], slot("x", 540, 30), HOURS, "allow");
+  assert.deepEqual(r.placed, { id: "x", start: 540, duration: 30 });
+  assert.deepEqual(r.moved, []); // a is left overlapping, untouched
+  assert.deepEqual(r.overflow, []);
+});
+
+test("allow policy permits a true overlap (sibling not displaced)", () => {
+  // x (540–600) overlaps a (570–600); under "allow" a stays put.
+  const r = placeWithCascade([slot("a", 570, 30)], slot("x", 540, 60), HOURS, "allow");
+  assert.deepEqual(r.moved, []);
+  assert.deepEqual(r.overflow, []);
+});
+
+test("allow policy still snaps and clamps the candidate", () => {
+  const r = placeWithCascade([], slot("x", 547, 30), HOURS, "allow");
+  assert.equal(r.placed.start, 540); // 547 → snap 540
+  const past = placeWithCascade([], slot("y", 1080, 30), HOURS, "allow");
+  assert.equal(past.placed.start, 1050); // clamped to last fitting start
+});
+
+test("policy defaults to prevent (cascades) when omitted", () => {
+  const r = placeWithCascade([slot("a", 540, 30)], slot("x", 540, 30), HOURS);
+  assert.deepEqual(r.moved, [{ id: "a", start: 570 }]);
+});
+
 console.log(`\n${passed.toString()} engine checks passed.`);

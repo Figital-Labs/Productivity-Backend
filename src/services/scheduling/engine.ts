@@ -22,6 +22,16 @@ export interface WorkingHours {
   workEnd: number;
 }
 
+/**
+ * Whether concurrent tasks are allowed.
+ *  - `prevent` (default): a drop that collides cascades the siblings later so only
+ *    one task runs at a time.
+ *  - `allow`: the task is placed at its requested (snapped + clamped) slot and may
+ *    overlap; no displacement. The UI lays overlapping blocks out side-by-side.
+ * Flipping this is the only change needed to switch the product between the two.
+ */
+export type OverlapPolicy = "prevent" | "allow";
+
 export interface PlacementResult {
   /** The dropped/created task at its final (snapped + clamped) position. */
   placed: { id: string; start: number; duration: number };
@@ -93,14 +103,24 @@ export function findEarliestFreeSlot(
  *
  * `candidate.id` is excluded from `existing` automatically, so this is safe to
  * call when moving a task that's already part of the day.
+ *
+ * Under `policy === "allow"` the candidate is simply snapped + clamped and placed
+ * as-is (no cascade, no overflow) — overlaps are permitted and rendered
+ * side-by-side by the client.
  */
 export function placeWithCascade(
   existing: Slot[],
   candidate: Slot,
   hours: WorkingHours,
+  policy: OverlapPolicy = "prevent",
 ): PlacementResult {
   const start = clampToHours(snap(candidate.start), candidate.duration, hours);
   const placed = { id: candidate.id, start, duration: candidate.duration };
+
+  // Allow overlaps: place at the requested slot, displace nothing.
+  if (policy === "allow") {
+    return { placed, moved: [], overflow: [] };
+  }
 
   const others = existing.filter((s) => s.id !== candidate.id).sort((a, b) => a.start - b.start);
 
