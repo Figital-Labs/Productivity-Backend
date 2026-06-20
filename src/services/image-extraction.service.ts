@@ -1,4 +1,3 @@
-import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
 import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { truncateNotesForContext } from "../lib/notes-context.js";
@@ -6,7 +5,6 @@ import {
   buildImageExtractionPrompt,
   type PendingTaskContext,
 } from "../lib/prompts/image-extraction.js";
-import { storeCaptureMedia } from "../lib/store-media.js";
 import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as imageRepo from "../repositories/image.repository.js";
@@ -35,11 +33,18 @@ export interface ImageProcessResult {
   recommendations: ImageRecommendation[];
 }
 
-export async function processImage(
+/**
+ * Consumer side of image capture (async pipeline, ADR-0025) — twin of `runVoiceProcessing`. The
+ * image already lives in S3 and the `ImageExtraction` row was pre-created at enqueue (holding the
+ * image key); the worker downloads the bytes and calls this to run OCR/extraction via Vertex,
+ * dispatch the high-confidence actions into real tasks, and fill the row.
+ */
+export async function runImageProcessing(
   user: AuthenticatedUser,
   image: ImageInput,
-  input: SubmitImageInput = {},
-): Promise<ImageProcessResult> {
+  input: SubmitImageInput,
+  extractionId: string,
+): Promise<void> {
   const today = input.targetDate
     ? parseDateString(input.targetDate)
     : todayInUserTz(DEFAULT_TIMEZONE);
@@ -56,7 +61,6 @@ export async function processImage(
     };
   });
 
-  // Run AI FIRST, then create the row — so a failed/empty call leaves no orphan extraction.
   const aiResponse = await generateStructured({
     model: GEMINI_FLASH_MODEL,
     prompt: buildImageExtractionPrompt({
@@ -72,37 +76,20 @@ export async function processImage(
     onRaw: logRaw("image", user.id),
   });
 
-  // Audit copy to S3 (best-effort, after AI so a storage hiccup never fails the result).
-  const imageUrl = await storeCaptureMedia("image", user.orgId, user.id, image);
-
-  const extraction = await imageRepo.create({
-    userId: user.id,
-    extractedText: aiResponse.extractedText,
-    actions: [] as InputJsonValue,
-    recommendations: [] as InputJsonValue,
-    ...(imageUrl !== null ? { imageUrl } : {}),
-  });
-
   const persistedActions: PersistedAiAction[] = [];
   for (const action of aiResponse.actions) {
     persistedActions.push(
       await dispatchAiAction(user, action, {
         sourceType: "image",
-        sourceId: extraction.id,
+        sourceId: extractionId,
         today,
       }),
     );
   }
 
-  await imageRepo.update(extraction.id, {
-    actions: persistedActions,
-    recommendations: aiResponse.recommendations,
-  });
-
-  return {
-    imageExtractionId: extraction.id,
+  await imageRepo.update(extractionId, {
     extractedText: aiResponse.extractedText,
     actions: persistedActions,
     recommendations: aiResponse.recommendations,
-  };
+  });
 }

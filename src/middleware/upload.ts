@@ -62,6 +62,14 @@ export const imageUpload = createUpload({
   maxFileSizeBytes: TEN_MB,
 });
 
+// Voice/image capture byte-fallback (ADR-0025): one `file` field that may be audio OR image (the
+// `surface` arrives as a sibling form field). Union allow-list; the service validates surface↔type.
+// A no-op on the JSON (direct-to-S3 key) path — multer only acts on multipart requests.
+export const captureUpload = createUpload({
+  allowedMimeTypes: [...AUDIO_MIME_TYPES, ...IMAGE_MIME_TYPES],
+  maxFileSizeBytes: TEN_MB,
+});
+
 export const multiModalUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: TEN_MB },

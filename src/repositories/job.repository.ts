@@ -34,6 +34,19 @@ export function findActiveByTarget(
   });
 }
 
+/**
+ * Active (queued|processing) job that already owns this media key — makes capture enqueue
+ * idempotent: a retried `/captures/process` for the same uploaded object returns the existing
+ * job instead of starting a second. (Captures have no parent resource to dedup by, so we dedup
+ * on the S3 key itself.)
+ */
+export function findActiveByMediaKey(key: string): Promise<ProcessingJob | null> {
+  return prisma.processingJob.findFirst({
+    where: { mediaKeys: { has: key }, status: { in: ["queued", "processing"] } },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 export function markProcessing(id: string): Promise<ProcessingJob> {
   return prisma.processingJob.update({
     where: { id },

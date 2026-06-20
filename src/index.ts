@@ -1,5 +1,6 @@
 import { createApp } from "./app.js";
 import { env } from "./config/env.js";
+import { registerCaptureWorker } from "./jobs/capture.worker.js";
 import { registerMeetingWorker } from "./jobs/meeting.worker.js";
 import { startQueue, stopQueue } from "./jobs/queue.js";
 import prisma from "./lib/prisma.js";
@@ -21,9 +22,12 @@ async function main(): Promise<void> {
   // Set RUN_WORKER_IN_PROCESS=false to split the worker out (run src/worker.ts).
   if (env.runWorkerInProcess) {
     startQueue()
-      .then((boss) => registerMeetingWorker(boss))
+      .then(async (boss) => {
+        await registerMeetingWorker(boss);
+        await registerCaptureWorker(boss);
+      })
       .then(() => {
-        console.log("Meeting worker consuming jobs in-process.");
+        console.log("Meeting + capture workers consuming jobs in-process.");
       })
       .catch((err: unknown) => {
         console.error("[queue] failed to start in-process worker:", err);

@@ -1,9 +1,7 @@
-import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
 import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { truncateNotesForContext } from "../lib/notes-context.js";
 import { buildVoiceIntentPrompt, type PendingTaskContext } from "../lib/prompts/voice-intent.js";
-import { storeCaptureMedia } from "../lib/store-media.js";
 import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as taskRepo from "../repositories/task.repository.js";
@@ -33,11 +31,20 @@ export interface VoiceProcessResult {
   recommendations: VoiceRecommendation[];
 }
 
-export async function processVoice(
+/**
+ * Consumer side of voice capture (async pipeline, ADR-0025). The clip already lives in S3 and the
+ * `VoiceInteraction` row was pre-created at enqueue (holding the audio key) — this runs in the
+ * pg-boss worker: it downloads context, runs Vertex extraction, dispatches the high-confidence
+ * actions into real tasks (sourceId = the interaction row), and fills the row with
+ * transcript/actions/recommendations. No S3 write here — the presigned upload is the source of
+ * truth, so a storage hiccup can't happen at this stage.
+ */
+export async function runVoiceProcessing(
   user: AuthenticatedUser,
   audio: AudioInput,
-  input: SubmitVoiceInput = {},
-): Promise<VoiceProcessResult> {
+  input: SubmitVoiceInput,
+  interactionId: string,
+): Promise<void> {
   const today = input.targetDate
     ? parseDateString(input.targetDate)
     : todayInUserTz(DEFAULT_TIMEZONE);
@@ -54,7 +61,6 @@ export async function processVoice(
     };
   });
 
-  // Run AI FIRST, then create the row — so a failed/empty call leaves no orphan interaction.
   const aiResponse = await generateStructured({
     model: GEMINI_FLASH_MODEL,
     prompt: buildVoiceIntentPrompt({
@@ -70,40 +76,22 @@ export async function processVoice(
     onRaw: logRaw("voice", user.id),
   });
 
-  // Audit copy to S3 (best-effort, after AI so a storage hiccup never fails the result).
-  const audioUrl = await storeCaptureMedia("voice", user.orgId, user.id, audio);
-
-  // Row created post-AI; tasks still carry sourceId = this row's id.
-  const interaction = await voiceRepo.create({
-    userId: user.id,
-    transcript: aiResponse.transcript,
-    actions: [] as InputJsonValue,
-    recommendations: [] as InputJsonValue,
-    ...(audioUrl !== null ? { audioUrl } : {}),
-  });
-
   const persistedActions: PersistedAiAction[] = [];
   for (const action of aiResponse.actions) {
     persistedActions.push(
       await dispatchAiAction(user, action, {
         sourceType: "voice",
-        sourceId: interaction.id,
+        sourceId: interactionId,
         today,
       }),
     );
   }
 
-  await voiceRepo.update(interaction.id, {
-    actions: persistedActions,
-    recommendations: aiResponse.recommendations,
-  });
-
-  return {
-    voiceInteractionId: interaction.id,
+  await voiceRepo.update(interactionId, {
     transcript: aiResponse.transcript,
     actions: persistedActions,
     recommendations: aiResponse.recommendations,
-  };
+  });
 }
 
 export type { VoiceIntentResponse };

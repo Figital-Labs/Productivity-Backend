@@ -1,5 +1,5 @@
 /**
- * pg-boss job queue (ADR-0025). Backs async meeting processing on the EXISTING Postgres —
+ * pg-boss job queue (ADR-0025). Backs async meeting + capture processing on the EXISTING Postgres —
  * no Redis. One PgBoss instance per process (singleton, like `prisma`). For our deploy the
  * web process starts BOTH the HTTP server and this consumer in-process (single process on
  * EC2); `src/worker.ts` remains an alternate entrypoint for a future dedicated-worker split.
@@ -16,6 +16,7 @@ import { AI_TIMEOUT_MS } from "../lib/ai-config.js";
 import { errInfo, log } from "../lib/logger.js";
 
 export const MEETING_QUEUE = "process-meeting";
+export const CAPTURE_QUEUE = "process-capture";
 
 export interface MeetingJobData {
   processingJobId: string;
@@ -24,9 +25,25 @@ export interface MeetingJobData {
   customPrompt?: string;
 }
 
+/**
+ * Voice / image task-capture job. A single short clip or image already lives in S3 under `key`;
+ * the worker downloads it, runs the same Vertex extraction the old synchronous endpoints did, and
+ * fills in the pre-created interaction row (`interactionId`). `targetDate` anchors the AI's TODAY
+ * and the dispatcher's default date.
+ */
+export interface CaptureJobData {
+  processingJobId: string;
+  surface: "voice" | "image";
+  key: string;
+  interactionId: string;
+  targetDate?: string;
+}
+
 // Visibility timeout must exceed the longest AI call (meeting ceiling) so pg-boss never
 // treats an in-flight job as stalled. +120s headroom for S3 download + DB writes.
 const MEETING_EXPIRE_SECONDS = Math.ceil(AI_TIMEOUT_MS.meeting / 1000) + 120;
+// Captures use the (shorter) media ceiling; same +120s headroom for download + dispatch writes.
+const CAPTURE_EXPIRE_SECONDS = Math.ceil(AI_TIMEOUT_MS.media / 1000) + 120;
 
 // Fail fast on a transaction-pooler URL — pg-boss silently misbehaves on it.
 if (env.directDatabaseUrl.includes("-pooler")) {
@@ -52,6 +69,7 @@ export function startQueue(): Promise<PgBoss> {
     });
     await boss.start();
     await boss.createQueue(MEETING_QUEUE);
+    await boss.createQueue(CAPTURE_QUEUE);
     return boss;
   })();
   return startPromise;
@@ -61,6 +79,12 @@ export function startQueue(): Promise<PgBoss> {
 export async function enqueueMeeting(data: MeetingJobData): Promise<void> {
   const started = await startQueue();
   await started.send(MEETING_QUEUE, data, { expireInSeconds: MEETING_EXPIRE_SECONDS });
+}
+
+/** Producer side: enqueue a voice/image capture for out-of-band processing. */
+export async function enqueueCapture(data: CaptureJobData): Promise<void> {
+  const started = await startQueue();
+  await started.send(CAPTURE_QUEUE, data, { expireInSeconds: CAPTURE_EXPIRE_SECONDS });
 }
 
 /** Stop the queue (drains in-flight work) — called from the in-process graceful shutdown. */

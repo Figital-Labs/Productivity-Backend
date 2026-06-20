@@ -4,6 +4,7 @@
  * processing out-of-band, reusing the `prisma` + `storage` singletons. Run alongside the
  * web process (two process types against the same Postgres).
  */
+import { registerCaptureWorker } from "./jobs/capture.worker.js";
 import { registerMeetingWorker } from "./jobs/meeting.worker.js";
 import { startQueue } from "./jobs/queue.js";
 import prisma from "./lib/prisma.js";
@@ -12,7 +13,8 @@ async function main(): Promise<void> {
   await prisma.$connect();
   const boss = await startQueue();
   await registerMeetingWorker(boss);
-  console.log("Worker started — consuming meeting AI jobs.");
+  await registerCaptureWorker(boss);
+  console.log("Worker started — consuming meeting + capture AI jobs.");
 
   let shuttingDown = false;
   const shutdown = (signal: string): void => {
