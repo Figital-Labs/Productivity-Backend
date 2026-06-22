@@ -344,7 +344,15 @@ export async function getPersonProfile(
 }
 
 export interface PersonDay {
-  user: { id: string; name: string };
+  // Sprint 20: working hours + tz so the manager's read-only day timeline
+  // renders against the REPORT's window, not the viewer's.
+  user: {
+    id: string;
+    name: string;
+    workStartMinute: number;
+    workEndMinute: number;
+    timezone: string;
+  };
   date: string;
   dayPlan: { id: string; submittedAt: string } | null;
   dayClosure: { id: string; status: "draft" | "submitted"; submittedAt: string } | null;
@@ -358,7 +366,14 @@ export async function getPersonDay(
 ): Promise<PersonDay> {
   const target = await prisma.user.findUnique({
     where: { id: targetId },
-    select: { id: true, name: true, orgId: true },
+    select: {
+      id: true,
+      name: true,
+      orgId: true,
+      workStartMinute: true,
+      workEndMinute: true,
+      timezone: true,
+    },
   });
   if (!target) throw new NotFoundError("User", targetId);
   if (!actor.isSuperAdmin && target.orgId !== actor.orgId) {
@@ -383,7 +398,13 @@ export async function getPersonDay(
   ]);
 
   return {
-    user: { id: target.id, name: target.name },
+    user: {
+      id: target.id,
+      name: target.name,
+      workStartMinute: target.workStartMinute,
+      workEndMinute: target.workEndMinute,
+      timezone: target.timezone,
+    },
     date: dateStr ?? date.toISOString().slice(0, 10),
     dayPlan: plan ? { id: plan.id, submittedAt: plan.submittedAt.toISOString() } : null,
     dayClosure: closure

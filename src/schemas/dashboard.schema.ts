@@ -134,6 +134,27 @@ export const meetingsAnalyticsQuerySchema = z.object({
 });
 export type MeetingsAnalyticsQuery = z.infer<typeof meetingsAnalyticsQuerySchema>;
 
+/** `GET /dashboard/analytics/schedule-heatmap?date=` — per-person hourly load. */
+export const scheduleHeatmapQuerySchema = z.object({
+  date: dateStringSchema.optional(),
+  // When present, return that department's per-person grid (drill-down). Absent
+  // = team-wide availability curve only. "__none__" = the no-department bucket.
+  departmentId: z.string().optional(),
+});
+export type ScheduleHeatmapQuery = z.infer<typeof scheduleHeatmapQuerySchema>;
+
+/** `GET /dashboard/analytics/schedule-adherence` — scheduled-vs-done, on-time. */
+export const scheduleAdherenceQuerySchema = z.object({
+  range: z.enum(["7d", "30d"]).default("7d"),
+});
+export type ScheduleAdherenceQuery = z.infer<typeof scheduleAdherenceQuerySchema>;
+
+/** `GET /dashboard/analytics/productive-hours` — team task completions by hour-of-day. */
+export const productiveHoursQuerySchema = z.object({
+  range: z.enum(["7d", "30d"]).default("7d"),
+});
+export type ProductiveHoursQuery = z.infer<typeof productiveHoursQuerySchema>;
+
 /** `PATCH /dashboard/groups/:id/members/:userId` — flip lead / canManage. */
 export const patchGroupMemberSchema = z
   .object({

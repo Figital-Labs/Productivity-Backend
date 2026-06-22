@@ -95,10 +95,10 @@ export const patchRecommendationStatusSchema = z.object({
 export type PatchRecommendationStatusInput = z.infer<typeof patchRecommendationStatusSchema>;
 
 export const meetingIntentResponseSchema = z.object({
-  // Hotfix: false ONLY when the recording had no usable speech (pure silence/noise).
-  // The service then returns the explanatory `summary` WITHOUT marking the meeting
-  // processed, so the user can re-record and retry. Defaults true so the model may
-  // omit it on the happy path.
+  // false ONLY when the recording had no usable speech (pure silence/noise). We do NOT branch
+  // on it — the meeting processes normally and the model's explanatory `summary` IS the result —
+  // but keeping it in the schema makes the model reliably emit that explanation. Defaults true so
+  // the model may omit it on the happy path.
   hasContent: z.boolean().default(true),
   summary: z.string(),
   actions: z.array(meetingActionSchema),

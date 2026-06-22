@@ -77,6 +77,20 @@ export function dayBoundsInTz(calendarDate: Date, timezone: string): { start: Da
   return { start, end };
 }
 
+/**
+ * Hour-of-day (0–23) of a timestamp as observed in the given IANA timezone. Used to
+ * bucket task completions into "productive hours" on each user's own local clock.
+ */
+export function extractHourInTimezone(instant: Date, timezone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(instant);
+  const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+  return hour % 24; // some engines emit "24" for midnight
+}
+
 function calendarDateInTz(instant: Date, timezone: string): Date {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,

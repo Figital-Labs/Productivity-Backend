@@ -36,4 +36,8 @@ export type TaskSnapshotEntry = {
   targetDate: string;
   priority?: string;
   notes?: string;
+  // Sprint 21: the planned time slot, captured so a later view can compare
+  // "planned vs actual" without re-deriving it. Absent = the task was Unscheduled.
+  scheduledStartMinute?: number;
+  scheduledDurationMinutes?: number;
 };

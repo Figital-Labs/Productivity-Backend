@@ -4,6 +4,7 @@ import type { Priority } from "../schemas/common.js";
 import type { VoiceAction } from "../schemas/voice-intent.schema.js";
 import { parseDateString } from "../utils/date.js";
 
+import { autoScheduleOnCreate } from "./scheduling/scheduling.service.js";
 import * as taskService from "./task.service.js";
 
 /**
@@ -93,6 +94,8 @@ export async function dispatchAiAction(
         ...(action.notes !== undefined && { notes: action.notes }),
         ...(action.priority !== undefined && { priority: action.priority }),
       });
+      // Sprint 19: AI-captured tasks auto-schedule like manual ones.
+      await autoScheduleOnCreate(created);
       return {
         type: "created",
         taskId: created.id,

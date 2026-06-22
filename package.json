@@ -6,8 +6,10 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "worker": "tsx watch src/worker.ts",
     "build": "prisma generate && tsc",
     "start": "node dist/index.js",
+    "worker:start": "node dist/worker.js",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
@@ -19,6 +21,7 @@
     "format:check": "prettier --check \"src/**/*.{ts,json}\" \"*.{ts,js,json,md}\"",
     "typecheck": "tsc --noEmit",
     "eval": "tsx eval/run.ts",
+    "test:engine": "tsx src/services/scheduling/engine.spec.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "prepare": "husky || true"
   },
@@ -57,9 +60,9 @@
     "typescript-eslint": "^8.59.4"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1071.0",
-    "@aws-sdk/s3-presigned-post": "^3.1071.0",
-    "@aws-sdk/s3-request-presigner": "^3.1071.0",
+    "@aws-sdk/client-s3": "^3.1070.0",
+    "@aws-sdk/s3-presigned-post": "^3.1072.0",
+    "@aws-sdk/s3-request-presigner": "^3.1070.0",
     "@google/genai": "^2.5.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
@@ -67,6 +70,7 @@
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
+    "pg-boss": "^12.19.1",
     "zod": "^4.4.3"
   }
 }

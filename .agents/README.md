@@ -8,7 +8,7 @@ tags: [meta, entry-point]
 
 # `.agents/` — Documentation for Agents (and Humans)
 
-**Agents starting a session: read this file first. Then read [STATE.md](./STATE.md) to see what's active.** Everything else is loaded on-demand based on what you're working on.
+**Agents starting a session: read this file first, then [PRODUCT.md](./PRODUCT.md) → [ARCHITECTURE.md](./ARCHITECTURE.md) → [GOTCHAS.md](./GOTCHAS.md) → [DEVELOPMENT.md](./DEVELOPMENT.md).** Everything else is loaded on-demand. (PRODUCT/ARCHITECTURE refreshed 2026-06-11; SCOPE/STATE are superseded for *current* state — see below.)
 
 This directory is the persistent memory of the backend project. It is designed for **multiple agents collaborating** on this codebase — sequentially or in parallel — without losing context or stepping on each other.
 
@@ -17,14 +17,14 @@ This directory is the persistent memory of the backend project. It is designed f
 ## How To Use These Docs (Decision Tree)
 
 ```
-Starting a new session?           → README.md (you are here) → STATE.md
+Starting a new session?            → README.md (here) → PRODUCT.md → ARCHITECTURE.md
 Need product context?              → PRODUCT.md
-Need to know what's in/out?        → SCOPE.md
-Designing code, need to know why?  → decisions/ (find the relevant ADR)
-Writing code, need conventions?    → CONVENTIONS.md
-Confused by a term?                → GLOSSARY.md
+Footguns / why is it like this?    → GOTCHAS.md  (read before meetings / hierarchy / AI work)
+How do I build / run / eval?       → DEVELOPMENT.md
 Need the schema or endpoints?      → ARCHITECTURE.md
-Working on a sprint?               → sprints/NN-name.md
+Writing code, need conventions?    → DEVELOPMENT.md (+ CONVENTIONS.md, GLOSSARY.md)
+Designing code, need to know why?  → decisions/ (find the relevant ADR)
+Working on a sprint (historical)?  → sprints/NN-name.md
 Adding a new decision?             → decisions/00NN-slug.md (next sequence number)
 ```
 
@@ -35,10 +35,12 @@ Adding a new decision?             → decisions/00NN-slug.md (next sequence num
 | File / Folder | What it holds | When to read | When to update |
 |---|---|---|---|
 | `README.md` | This map. How to use the docs. | First, every session. | Rarely (only if doc structure changes). |
-| `STATE.md` | Live state: current sprint, blockers, recent changes. | After README, every session. | After every sprint, every blocker, every milestone. |
-| `PRODUCT.md` | What we're building, user journey, future vision. | When you need product context. | When the product vision changes (rare). |
-| `SCOPE.md` | What's in/out of POC. "When to revisit" criteria for deferrals. | When deciding if something belongs in this PR. | When scope changes (also rare). |
-| `ARCHITECTURE.md` | Data model, API surface, folder structure, AI flows. | When implementing a feature. | When schema/endpoints/structure change. |
+| `PRODUCT.md` | What KIMS is, users, the core loop. (Refreshed 2026-06-11.) | When you need product context. | When the product changes. |
+| `ARCHITECTURE.md` | Data model, API surface, AI layer. (Refreshed 2026-06-11.) | When implementing a feature. | When schema/endpoints/structure change. |
+| `GOTCHAS.md` | Footguns + key decisions (meetings, hierarchy, AI). | Before debugging those areas. | When a new footgun/decision emerges. |
+| `DEVELOPMENT.md` | Commands, env, conventions, working rules. | Before building/running code. | When workflow/conventions change. |
+| `STATE.md` | ⚠️ SUPERSEDED for current state — historical sprint log / changelog only. | For build history. | Append-only changelog. |
+| `SCOPE.md` | ⚠️ SUPERSEDED — its "deferred" items (meetings, hierarchy, analytics) are now built. | — | — |
 | `CONVENTIONS.md` | Code style, commit style, working patterns. | Before writing any code. | When we adopt a new pattern. |
 | `GLOSSARY.md` | Stable terms. Prevents drift. | When you see an unfamiliar term. | When a new term enters our vocabulary. |
 | `decisions/` | ADRs — one file per architectural decision. Stable IDs (`ADR-NNNN`). | When wondering *why* something is designed a certain way. | New decision → new file (next sequence number). Decision changes → new ADR that supersedes the old one. **Never edit an accepted ADR.** |
@@ -122,9 +124,9 @@ That file is the approved plan (signed off by the user). These `.agents/` docs a
 
 Take 10 minutes. Read in this order:
 1. **README.md** (this file) — 2 min
-2. **STATE.md** — 1 min, tells you what's active
-3. **PRODUCT.md** — 3 min, gives you product context
-4. **SCOPE.md** — 2 min, sets the boundaries
-5. **GLOSSARY.md** — 1 min, just skim for terms you'll see
+2. **PRODUCT.md** — what KIMS is now (multi-tenant hospital team-ops)
+3. **ARCHITECTURE.md** — data model + API surface + AI layer
+4. **GOTCHAS.md** — the footguns (don't skip)
+5. **DEVELOPMENT.md** — commands, conventions, working rules
 
-That's enough to start working productively. Load decisions/ADRs and ARCHITECTURE.md on demand when you need them.
+That's enough to start working productively. Load decisions/ADRs on demand when you need them.

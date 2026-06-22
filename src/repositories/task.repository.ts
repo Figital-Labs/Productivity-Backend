@@ -2,7 +2,10 @@ import type { TaskGetPayload } from "../generated/prisma/models/Task.js";
 import prisma from "../lib/prisma.js";
 import { omitUndefined } from "../utils/object.js";
 
-const taskWithCreator = {
+// Exported so the scheduling service can persist slot changes inside its own
+// transaction while returning the same `creator`-hydrated payload as every
+// other task response.
+export const taskWithCreator = {
   include: { creator: { select: { id: true, name: true } } },
 } as const;
 
@@ -144,7 +147,20 @@ export function create(data: CreateTaskData): Promise<Task> {
 }
 
 export function update(id: string, patch: UpdateTaskData): Promise<Task> {
-  return prisma.task.update({ ...taskWithCreator, where: { id }, data: omitUndefined(patch) });
+  // Sprint 20: keep `completedAt` in lockstep with `completed` for every caller
+  // (toggle, AI "completed" action, day-closure status sync) — set on the
+  // true-transition, clear on un-complete. Untouched when `completed` is absent.
+  const completedAtPatch =
+    patch.completed === true
+      ? { completedAt: new Date() }
+      : patch.completed === false
+        ? { completedAt: null }
+        : {};
+  return prisma.task.update({
+    ...taskWithCreator,
+    where: { id },
+    data: { ...omitUndefined(patch), ...completedAtPatch },
+  });
 }
 
 export function softDelete(id: string): Promise<Task> {

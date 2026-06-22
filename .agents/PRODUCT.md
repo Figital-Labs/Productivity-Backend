@@ -1,138 +1,75 @@
 ---
 id: PRODUCT
-title: Product Overview, User Journey, Future Vision
+title: Product Overview — what KIMS is, who uses it, the core loop
 status: stable
-date: 2026-05-22
+date: 2026-06-11
 tags: [product, overview]
-related: [SCOPE, ARCHITECTURE]
+related: [ARCHITECTURE, GOTCHAS]
 ---
 
 # Product
 
-## What This Product Is
+> Refreshed 2026-06-11. The earlier version framed this as a single-user to-do POC with
+> multi-tenancy/hierarchy/meetings as "future vision." **That future is now the present** —
+> all of it is built. This doc describes the product as it actually is.
 
-A **daily work tracker with voice and AI**. Picture a smart to-do app built around two daily rituals:
+## What KIMS is
+A **multi-tenant team-operations app for hospitals** (white-collar / administrative staff,
+not clinical charting). Hospitals run on messy WhatsApp threads, sticky notes, and verbal
+handoffs. KIMS replaces that with a structured daily loop where the **AI does the typing**:
+staff capture work by voice / photo / text in their own words (Hinglish included) and the
+system turns it into structured, trackable tasks.
 
-- **Morning** — the user opens the app and creates the day's task list. They can dictate it (*"I need to do morning rounds, review patient charts, attend the staff meeting"*), type it, or snap a photo of a handwritten task sheet. Often a mix of all three in one session. AI extracts structured tasks from whatever they give it.
+## The wedge: staff adoption
+The single most important thing. **No staff usage → no data → no product.** Everything
+downstream (manager dashboards, plan-vs-delivery, meeting insights) is worthless if staff
+don't capture their work. So the staff capture experience — fast, forgiving, layman-simple,
+works in spoken Hinglish — is the product's center of gravity. **Layman UX is the biggest
+pain point and the priority.**
 
-- **Through the day** — they add more tasks as new things come up, edit priorities (*"the chart review is now urgent"*), and check items off as they finish. Voice, typed input, or simple checkbox — all of these work, any time of day.
+## The two-sided daily loop
+**Staff (the wedge):** plan → do → close.
+- *Morning:* dictate / photograph / type the day's tasks → AI extracts structured tasks. Submit a **day plan** (snapshot of the commitment).
+- *Through the day:* add/complete/repriotitize by voice, text, image, or tap.
+- *Evening:* record a retrospective → AI maps it to today's tasks (done/partial/missed) + writes warm feedback. Submit a **day closure**.
 
-- **End of day** — they record a retrospective (*"I finished morning rounds, did half the chart review, the staff meeting got pushed"*). AI maps that back to today's tasks (complete / partial / not-done) AND generates a structured feedback summary (achievements, missed items, additions, tips).
+**Managers:** delegate, review, meet, oversee.
+- **Delegate** down a **matrix hierarchy** (a person can report to more than one manager) by voice/text/image or manually.
+- **Review** what each report planned vs delivered.
+- **Meetings** (demo-critical — see below).
+- **Dashboards:** plan/closure consistency, trends, performers, org/department/group rollups.
 
-Plus there's an inbox of AI-generated alerts, a per-user holiday calendar so the app knows when the user isn't working, and a history view to look back at past days.
+## Meetings (demo-critical)
+A manager records a meeting (audio + optional notes/images). The system returns a
+**professional summary** (Fireflies/Otter-grade: TL;DR + Overview / Key Points / Decisions /
+Concerns / Action Items / Open Questions) and **task recommendations** the manager confirms,
+edits, or skips — each can be assigned to an attendee. ALL meeting-derived tasks flow through
+recommendations (manager confirms before any task is created). Attribution is by **spoken
+names** (the model can't reliably tell voices apart — see GOTCHAS). This is the most
+scrutinized demo surface; treat its summary + recommendation quality as load-bearing.
 
----
+## Hierarchy & levels
+Org → departments → context groups (ward/OT/shift/project/personal, with **time-bounded**
+membership for shift coverage). Users have a numeric **`level`** (100/200/300…) — this is
+**internal bookkeeping for authorization gates only; never expose it in the UI.** A manager
+can delegate to / see anyone in their report subtree below their level.
 
-## What's Built Already (The Frontend)
+## Two principles that govern every change
+1. **AI is sugar on conventional CRUD.** Every AI action ultimately calls the same
+   repository methods manual CRUD uses. AI decides *what* to do; boring code does it. So the
+   app is fully usable by type-and-tap; the AI never bypasses validation or the data model;
+   if the AI is wrong the user fixes it manually. (ADR-0006.)
+2. **Transparency = first person, never "AI".** User-facing copy and reasoning say "we" /
+   the app / the company did it ("we created these 3 tasks"). **Never surface "AI" as the
+   actor**, never leak internals (ids, "attendees list", rule numbers). This is a deliberate
+   trust/positioning choice, not an oversight.
 
-A separate team owns the frontend. It's a React + Vite app at [d:\gig_project\Task-List\](../../Task-List/). It looks complete — every screen clicks through, the AI even works because it calls Google's Gemini API directly from the browser. **But nothing is real yet:**
+## Stage & priorities
+POC/MVP, deployed on **Render free tier** (512MB / 0.1 vCPU — memory and the synchronous
+meeting request both matter; see GOTCHAS). Founder priority order: **fixing/improving
+existing features > adding new ones**; new capability only if it breaks nothing. Admin/org
+management is lowest priority.
 
-- The microphone button changes color but doesn't actually record audio.
-- "Submit Day Plan" waits 1.5 seconds and shows a popup. Nothing saves.
-- Refreshing the page wipes all data.
-- The Gemini API key is sitting in the browser code where anyone can steal it.
-
----
-
-## What We're Building (The Backend)
-
-The server program that lives behind the frontend. Our POC scope:
-
-1. **Save things.** Tasks, notes, alerts, holidays, submissions — all persisted in Postgres so they survive a reload.
-2. **Handle voice.** Frontend uploads audio, our server sends it to Gemini (via Vertex AI) for transcription + task extraction, returns structured tasks.
-3. **Handle images.** Same flow for handwritten task sheet OCR and proof-of-work photos.
-4. **Handle day closure.** Compare planned tasks vs actual work via AI, generate structured feedback.
-5. **Keep AI credentials safe.** All Vertex calls move to the server. The browser never sees the key.
-6. **Support basic login.** The backend now supports email/password signup and JWT login so frontend teammates can test multiple accounts without sharing a trusted user-id header.
-
-For the full in/out breakdown see [SCOPE.md](./SCOPE.md).
-
----
-
-## User Journey (Day In The Life)
-
-This is how a user actually uses the app over a day. Every backend endpoint exists to support some part of this:
-
-### 08:00 — Morning task creation
-User opens app, taps mic.
-> *"Today I need to do morning rounds, review patient charts, and attend the staff meeting at 2pm."*
-
-They also snap a photo of a sticky note with two more items.
-
-**Backend:** receives audio + image, sends both to Gemini in one multimodal call. Gemini returns extracted tasks. Backend creates them in DB. Returns the list to the frontend.
-
-### 11:00 — Mid-day additions and edits
-User taps mic again.
-> *"Add: call Dr. Smith. Also, the chart review is now urgent."*
-
-**Backend:**
-1. Gets audio + the current pending tasks (top N) for context.
-2. Gemini classifies intent per phrase:
-   - *"Add: call Dr. Smith"* → CREATE new task.
-   - *"chart review is urgent"* → UPDATE priority of existing task.
-3. Backend executes both via the same repository methods CRUD uses.
-
-### 13:30 — Manual task completion
-User finishes morning rounds. Taps the checkbox next to that task.
-
-**Backend:** standard `PATCH /tasks/:id { completed: true }`. No AI involved. Same primitive the AI flow above ultimately calls.
-
-### 19:00 — Day closure
-User opens Day Closure. Taps mic (or types).
-> *"I finished morning rounds. Got halfway through the chart review. The staff meeting got pushed to tomorrow. I also did emergency triage at 3pm — that wasn't planned."*
-
-If they recorded voice, the FE first calls `POST /transcribe` to get the text, then sends that text as `commentary`.
-
-**Backend — Phase 1 (Review):**
-1. Receives the narrative text in `commentary` alongside today's live task list.
-2. Sends both to Gemini. AI acts as a Personal Assistant — warm, not an auditor.
-3. Gets back structured feedback (`achievements`, `missed`, `partial`, `additions`, `tips: []`, `summary`) plus `taskActions` (which tasks to auto-mark done/partial).
-4. Dispatches `taskActions` → marks "Morning rounds" completed, "Chart review" partial.
-5. Creates a completed task for "Emergency triage at 3pm" (it's in `additions` — ad-hoc work not on the plan).
-6. Persists a `status='draft'` row with the AI feedback and the narrative.
-7. Returns `{ dayClosureId, status, reviewedAt, aiFeedback }` to the FE.
-
-FE shows the feedback. User can manually adjust any pill states the AI got wrong.
-
-**Backend — Phase 2 (Submit):**
-User clicks Submit (optionally adding a note to management). Backend flips the row to `status='submitted'`. No second AI call — the feedback snapshot from review is preserved.
-
----
-
-## The Critical Principle
-
-> **AI is sugar on conventional CRUD.**
-
-Every AI-driven action ultimately calls the same repository methods that the manual CRUD endpoints use. AI decides *what to do*; boring repository code does it.
-
-This means:
-- A user who never uses voice can still use the app fully via type-and-tap.
-- The AI never bypasses validation, never writes outside the normal data model.
-- If the AI is wrong, the user can correct manually using the same endpoints.
-- Tests, observability, and debugging all happen at the CRUD layer — the AI layer is a thin wrapper.
-
-See [ADR-0006](./decisions/0006-ai-sugar-on-crud.md) for the full reasoning.
-
----
-
-## Future Vision (Not Built, But Designed For)
-
-The product is likely going to graduate into a **hospital staff productivity tool**. In that world:
-
-- **Multi-tenant**: multiple orgs (hospitals), each with their own users.
-- **Hierarchy**: managers (e.g., head nurses, department heads) maintain their staff, assign tasks, and review their staff's day closures.
-- **Manager review flow**: managers see what their staff planned vs delivered each day.
-- **Compliance**: hospital data is sensitive (PHI) and will need real protections.
-- **Auth**: production authentication, probably Google OAuth or hospital SSO.
-
-**None of this is being built for the POC.** But every architectural choice — schema columns, code structure, layering — is designed so that adding these later is *additive*, not a rewrite.
-
-Most importantly: every owned entity has a `userId` foreign key from day 1. Basic JWT auth now turns login into a concrete `req.user`; future production auth can replace the credential provider while keeping the downstream scoping contract.
-
----
-
-## Who's Doing What
-
-- **Frontend team** (separate, not in this repo) — owns [Task-List/](../../Task-List/). We don't touch their code. We just provide an API.
-- **Backend team** (us) — owns this repo. Provides the API. Owns the database. Owns the AI integration.
-- **The client** — a (likely hospital) organization that will see the POC and decide whether to fund the real product.
+## Repos & ownership
+- **Backend** (this repo) — API, DB, AI integration.
+- **Frontend** `Task-List/` — React/Vite; **active multi-author workspace**, edited in parallel; don't assume transient breakage is intended, and don't sweep unrelated changes into your work.

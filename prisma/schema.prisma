@@ -26,6 +26,10 @@ model User {
   canManageUsers Boolean  @default(false)
   org            Organization @relation(fields: [orgId], references: [id])
   timezone     String   @default("Asia/Kolkata")
+  // Sprint 19: per-user working hours as minutes from local midnight — the
+  // window the day-timeline schedules tasks into. Defaults to 09:00–18:00.
+  workStartMinute Int    @default(540)
+  workEndMinute   Int    @default(1080)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -73,9 +77,18 @@ model Task {
   creatorId  String
   title      String
   targetDate DateTime  @db.Date
+  // Sprint 19: intra-day time-slot scheduling. Minutes from local midnight on
+  // the targetDate day (0–1439); null = Unscheduled. Duration defaults to 30
+  // when scheduled. Wall-clock = targetDate (local date) + minute offset, so no
+  // UTC/DST math is needed and overlap is a pure integer-interval comparison.
+  scheduledStartMinute     Int?
+  scheduledDurationMinutes Int?
   priority   String?
   completed  Boolean   @default(false)
   isPartial  Boolean   @default(false)
+  // Sprint 20: stamped when a task transitions to completed (cleared on un-complete).
+  // Gives a real "done at" signal for schedule-adherence analytics.
+  completedAt DateTime?
   notes      String?
   aiFeedback String?
   sourceType String
@@ -93,6 +106,7 @@ model Task {
   @@index([assigneeId, targetDate])
   @@index([assigneeId, deletedAt])
   @@index([groupId, targetDate])
+  @@index([assigneeId, targetDate, scheduledStartMinute])
 }
 
 model TaskMedia {
@@ -237,8 +251,8 @@ model UnifiedInteraction {
 // Sprint 15: meetings. The meeting creator is `userId`. `attendeeIds` is a
 // loose String[] of User.ids (no FK enforcement at schema level — POC scope;
 // service-layer validates same-org membership at create time). Audio bytes
-// flow through Vertex inline; Wave 2 also persists each clip to S3 (mediaKeys) as a
-// durable audit trail. The model stores agenda, typed notes, AI
+// are never persisted; they live client-side until the user clicks Send-to-AI,
+// then flow through Vertex inline. The model stores agenda, typed notes, AI
 // summary, dispatched actions (PersistedMeetingAction[]), and recommendations
 // — same JSON pattern as VoiceInteraction.actions etc.
 model Meeting {
@@ -254,10 +268,7 @@ model Meeting {
   customPrompt    String?
   actions         Json      @default("[]") // PersistedMeetingAction[] post-process
   recommendations Json      @default("[]") // MeetingRecommendation[] post-process
-  // Wave 2: S3 object keys for every audio clip / uploaded file sent for processing,
-  // in send order. Durable audit trail — presigned at read time (GET /meetings/:id/media).
-  // Populated even when the result was no-content, so a "bad summary" complaint is auditable.
-  mediaKeys       String[]  @default([])
+  mediaKeys       String[]  @default([]) // S3 keys (audio + image) — durable audit trail
   processedAt     DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -373,4 +384,27 @@ model Organization {
   users       User[]
   departments Department[]
   groups      ContextGroup[]
+}
+
+/// ADR-0025: async media-processing status. One row per meeting "Send to AI" run.
+/// pg-boss (on this same Postgres) owns the queue mechanics; this row is the durable,
+/// frontend-facing status that GET /jobs/:id polls while a worker processes out-of-band.
+/// `userId`/`orgId` are loose scalars (no FK) — same posture as Meeting.attendeeIds.
+model ProcessingJob {
+  id         String    @id @default(cuid())
+  orgId      String
+  userId     String
+  kind       String // "meeting" (generic so voice/image can reuse later)
+  status     String    @default("queued") // queued | processing | succeeded | failed
+  targetType String // "meeting"
+  targetId   String // the meeting id; the FE re-fetches GET /meetings/:id on success
+  mediaKeys  String[] // S3 keys (audio then image) — durable record for audit / retry
+  error      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  @@index([userId, kind, status])
+  @@index([targetType, targetId, status])
 }

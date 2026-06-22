@@ -3,3 +3,6 @@ node_modules
 dist
 generated
 
+
+# local disk storage driver (STORAGE_DRIVER=disk)
+.media-store/

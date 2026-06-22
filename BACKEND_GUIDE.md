@@ -2,8 +2,13 @@
 
 > A single-document reference for the frontend team and product owner. Describes what the backend does, the supported user journeys, every endpoint with example requests, and the parts that are deliberately not built yet.
 
-**Backend version:** POC (Sprints 1-7 complete + text/fusion addendum + Sprint 8 lite JWT auth)
-**Last updated:** 2026-05-22
+**Backend version:** Sprints 1–22 complete — multi-tenant team-ops (hierarchy + delegation, meetings with async AI processing, dashboards/analytics, scheduling, S3 media storage)
+**Last updated:** 2026-06-17
+
+> ℹ️ This guide's endpoint reference is most complete through ~Sprint 8. For features added
+> since (team / meetings / dashboard / scheduling / jobs), the canonical summary is the root
+> [`Wavesprint.md`](../Wavesprint.md); a full endpoint-by-endpoint refresh of this guide is a
+> tracked follow-up.
 
 ---
 

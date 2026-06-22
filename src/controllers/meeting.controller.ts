@@ -68,13 +68,8 @@ export async function patchRecommendationStatus(req: Request, res: Response): Pr
 }
 
 export async function processMeeting(req: Request, res: Response): Promise<void> {
-  // Long-running endpoint — Vertex audio + image fusion can take 30s–2min for
-  // hour-long meetings. Default Node socket timeout is 120s; raise to 300s on
-  // both the request and response so a slow Vertex call doesn't get cut off
-  // mid-stream.
-  req.setTimeout(300_000);
-  res.setTimeout(300_000);
-
+  // ADR-0025: enqueue + return 202 immediately. The (slow) Vertex fusion runs in the
+  // worker out-of-band; the frontend polls GET /jobs/:id. No socket-timeout hack needed.
   const { id } = idParamSchema.parse(req.params);
   const input = processMeetingInputSchema.parse((req.body as unknown) ?? {});
 
@@ -91,16 +86,18 @@ export async function processMeeting(req: Request, res: Response): Promise<void>
     mimeType: f.mimetype,
   }));
 
+  // Clips the browser already uploaded straight to S3 (presigned). Bytes above are the
+  // fallback for clips whose direct upload didn't happen (CORS off / failed).
   const audioKeys = parseMediaKeys((req.body as { mediaKeys?: unknown }).mediaKeys);
 
-  const result = await meetingService.processMeeting(req.user, id, {
+  const result = await meetingService.enqueueProcessing(req.user, id, {
     audioKeys,
     audioClips,
     images,
     customPrompt: input.customPrompt,
     notes: input.notes,
   });
-  res.status(200).json(result);
+  res.status(202).json(result);
 }
 
 /** Parse the multipart `mediaKeys` field (a JSON array of S3 keys) safely. */
@@ -113,7 +110,7 @@ function parseMediaKeys(raw: unknown): string[] {
       if (keys.length === parsed.length) return keys;
     }
   } catch {
-    // malformed → treat as none
+    // malformed → treat as none (fall back to byte clips)
   }
   return [];
 }

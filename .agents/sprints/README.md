@@ -19,6 +19,11 @@ The **detailed sprint file is created right before the sprint starts**, not all 
 
 For the live status of which sprint is active, who owns it, and what's blocking, see [STATE.md](../STATE.md).
 
+> ⚠️ The plan/table below is **historical** (Sprints 1–17, and the numbering predates the
+> dashboard/scheduling work). The canonical wave/sprint log — including **Sprints 18–22**
+> (KIMS onboarding, scheduling, manager insights, media pipeline) — is the root
+> [`Wavesprint.md`](../../../Wavesprint.md). Detail files here exist only up to Sprint 17.
+
 ---
 
 ## Sprint Plan (Overview)

@@ -1,6 +1,12 @@
 import prisma from "../lib/prisma.js";
 import type { Scope } from "../lib/resolve-scope.js";
-import { formatDateYmd, todayInUserTz } from "../utils/date.js";
+import {
+  dayBoundsInTz,
+  extractHourInTimezone,
+  formatDateYmd,
+  parseDateString,
+  todayInUserTz,
+} from "../utils/date.js";
 
 import { consistencyForUsers, userIdsInScope } from "./dashboard-rollup.service.js";
 
@@ -791,4 +797,465 @@ export async function getMeetingsAnalytics(
     totalActionItems,
     processed,
   };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Sprint 21 — department rollup helper. Maps each user to a single "primary"
+// department (first group membership, ordered deterministically). Used to roll
+// scheduling insights up by department so the manager dashboard stays legible
+// at 100+ people. Users with no department land in the "__none__" bucket.
+// ───────────────────────────────────────────────────────────────────────────
+
+const UNASSIGNED_DEPT = "__none__";
+const NO_DEPT_LABEL = "No department";
+
+async function departmentMapForUsers(
+  orgId: string,
+  userIds: string[],
+): Promise<Map<string, { id: string; name: string }>> {
+  const out = new Map<string, { id: string; name: string }>();
+  if (userIds.length === 0) return out;
+
+  const memberships = await prisma.groupMembership.findMany({
+    where: { validTo: null, userId: { in: userIds }, group: { orgId } },
+    select: { userId: true, group: { select: { departmentId: true } } },
+    orderBy: [{ validFrom: "asc" }, { groupId: "asc" }],
+  });
+
+  const deptIds = [
+    ...new Set(
+      memberships
+        .map((m) => m.group.departmentId)
+        .filter((id): id is string => id !== null && id !== ""),
+    ),
+  ];
+  const depts =
+    deptIds.length > 0
+      ? await prisma.department.findMany({
+          where: { id: { in: deptIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+  const deptName = new Map(depts.map((d) => [d.id, d.name]));
+
+  for (const m of memberships) {
+    if (out.has(m.userId)) continue; // first membership wins → stable primary dept
+    const did = m.group.departmentId;
+    if (did !== null && did !== "" && deptName.has(did)) {
+      out.set(m.userId, { id: did, name: deptName.get(did) ?? NO_DEPT_LABEL });
+    }
+  }
+  return out;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Sprint 20/21 — SCHEDULE HEATMAP — when is the team busy on a given day.
+// Top level returns a team availability CURVE (how many people are busy each
+// hour) — one row, scales to any headcount. Pass a departmentId to drill into
+// that team's per-person grid. Buckets each task's minutes into the hour(s) it
+// spans.
+// ───────────────────────────────────────────────────────────────────────────
+
+const SLOT_DEFAULT_DURATION = 30;
+
+export interface HeatmapCell {
+  userId: string;
+  hour: number; // hour-of-day (0–23)
+  scheduledMin: number;
+  taskCount: number;
+}
+
+export interface HeatmapBusyHour {
+  hour: number; // hour-of-day (0–23)
+  peopleBusy: number; // distinct people with a scheduled task overlapping this hour
+  scheduledMin: number; // total minutes booked across the team this hour
+}
+
+export interface HeatmapDeptRef {
+  id: string; // department id, or "__none__"
+  name: string;
+  userCount: number; // people in this dept with scheduled work today
+}
+
+export interface ScheduleHeatmapResult {
+  busyByHour: HeatmapBusyHour[]; // team availability curve (always present)
+  departments: HeatmapDeptRef[]; // drill-down selector options
+  totalUsers: number; // people in scope with scheduled work today
+  // Per-person grid — populated ONLY when a departmentId is requested, so the
+  // payload stays bounded (one team) instead of all 100+ people at once.
+  users: { id: string; name: string }[];
+  hourStart: number; // first hour column (inclusive)
+  hourEnd: number; // last hour column (inclusive)
+  cells: HeatmapCell[];
+  date: string;
+}
+
+export async function getScheduleHeatmap(
+  scope: Scope,
+  dateStr: string | undefined,
+  departmentId?: string,
+): Promise<ScheduleHeatmapResult> {
+  const date = dateStr ? parseDateString(dateStr) : todayInUserTz(DEFAULT_TIMEZONE);
+  const dateOut = formatDateYmd(date);
+  const empty: ScheduleHeatmapResult = {
+    busyByHour: [],
+    departments: [],
+    totalUsers: 0,
+    users: [],
+    hourStart: 9,
+    hourEnd: 17,
+    cells: [],
+    date: dateOut,
+  };
+
+  if (scope.type === "none") return empty;
+  const userIds = await userIdsInScope(scope);
+  if (userIds.length === 0) return empty;
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      assigneeId: { in: userIds },
+      targetDate: date,
+      deletedAt: null,
+      scheduledStartMinute: { not: null },
+    },
+    select: { assigneeId: true, scheduledStartMinute: true, scheduledDurationMinutes: true },
+  });
+  if (tasks.length === 0) return empty;
+
+  const presentIds = [...new Set(tasks.map((t) => t.assigneeId))];
+  const deptMap = await departmentMapForUsers(scope.orgId, presentIds);
+
+  // Department selector options — derived from people who actually have work.
+  const deptBucket = new Map<string, { name: string; users: Set<string> }>();
+  for (const id of presentIds) {
+    const dept = deptMap.get(id);
+    const key = dept?.id ?? UNASSIGNED_DEPT;
+    const bucket = deptBucket.get(key) ?? { name: dept?.name ?? NO_DEPT_LABEL, users: new Set() };
+    bucket.users.add(id);
+    deptBucket.set(key, bucket);
+  }
+  const departments: HeatmapDeptRef[] = [...deptBucket.entries()]
+    .map(([id, b]) => ({ id, name: b.name, userCount: b.users.size }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  // Per-(user, hour) minutes across the whole scope — the source for the curve.
+  const cellMap = new Map<string, HeatmapCell>();
+  let minStart = 24 * 60;
+  let maxEnd = 0;
+  for (const t of tasks) {
+    const start = t.scheduledStartMinute;
+    if (start === null) continue;
+    const end = start + (t.scheduledDurationMinutes ?? SLOT_DEFAULT_DURATION);
+    minStart = Math.min(minStart, start);
+    maxEnd = Math.max(maxEnd, end);
+    let m = start;
+    while (m < end) {
+      const hour = Math.floor(m / 60);
+      const segEnd = Math.min(end, (hour + 1) * 60);
+      const key = `${t.assigneeId}:${hour.toString()}`;
+      const cell = cellMap.get(key) ?? {
+        userId: t.assigneeId,
+        hour,
+        scheduledMin: 0,
+        taskCount: 0,
+      };
+      cell.scheduledMin += segEnd - m;
+      cell.taskCount += 1;
+      cellMap.set(key, cell);
+      m = segEnd;
+    }
+  }
+
+  const hourStart = Math.floor(minStart / 60);
+  const hourEnd = Math.floor((maxEnd - 1) / 60);
+
+  // Collapse the per-person cells into the team availability curve.
+  const hourAgg = new Map<number, { people: Set<string>; min: number }>();
+  for (const cell of cellMap.values()) {
+    const h = hourAgg.get(cell.hour) ?? { people: new Set(), min: 0 };
+    h.people.add(cell.userId);
+    h.min += cell.scheduledMin;
+    hourAgg.set(cell.hour, h);
+  }
+  const busyByHour: HeatmapBusyHour[] = [];
+  for (let hour = hourStart; hour <= hourEnd; hour += 1) {
+    const agg = hourAgg.get(hour);
+    busyByHour.push({
+      hour,
+      peopleBusy: agg?.people.size ?? 0,
+      scheduledMin: agg?.min ?? 0,
+    });
+  }
+
+  // Drill-down grid — only when a department is selected, bounded to that team.
+  let users: { id: string; name: string }[] = [];
+  let cells: HeatmapCell[] = [];
+  if (departmentId !== undefined) {
+    const deptUserIds = presentIds.filter(
+      (id) => (deptMap.get(id)?.id ?? UNASSIGNED_DEPT) === departmentId,
+    );
+    if (deptUserIds.length > 0) {
+      const deptUserSet = new Set(deptUserIds);
+      users = await prisma.user.findMany({
+        where: { id: { in: deptUserIds } },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      });
+      cells = [...cellMap.values()].filter((c) => deptUserSet.has(c.userId));
+    }
+  }
+
+  return {
+    busyByHour,
+    departments,
+    totalUsers: presentIds.length,
+    users,
+    hourStart,
+    hourEnd,
+    cells,
+    date: dateOut,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Sprint 20 — SCHEDULE ADHERENCE — did people do what they scheduled, on time?
+// "on time" = a scheduled task completed on the SAME local day it was planned
+// for (uses `completedAt` vs the target day's bounds — robust to batch EOD
+// completion at the minute level).
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface AdherenceRow {
+  user: { id: string; name: string; role: string };
+  departmentName: string | null;
+  scheduled: number;
+  completed: number;
+  onTime: number;
+}
+
+export interface AdherenceDeptRow {
+  id: string; // department id, or "__none__"
+  name: string;
+  userCount: number;
+  scheduled: number;
+  completed: number;
+  onTime: number;
+}
+
+export interface ScheduleAdherenceResult {
+  summary: { scheduled: number; completed: number; onTime: number; userCount: number };
+  departments: AdherenceDeptRow[]; // per-dept rollup, worst adherence first
+  rows: AdherenceRow[]; // per-person, worst first, capped (see ADHERENCE_ROW_CAP)
+  totalUsers: number; // people with scheduled work (rows may be capped below this)
+  trend: { date: string; scheduled: number; completed: number }[];
+  windowDays: number;
+}
+
+// At 100+ people we never ship the whole roster to the client; the panel leads
+// with the rollup + worst outliers and lets the manager search within this cap.
+const ADHERENCE_ROW_CAP = 200;
+
+export async function getScheduleAdherence(
+  scope: Scope,
+  days: number,
+): Promise<ScheduleAdherenceResult> {
+  const dates = rangeDays(days);
+  const emptyTrend = dates.map((d) => ({ date: formatDateYmd(d), scheduled: 0, completed: 0 }));
+  const empty: ScheduleAdherenceResult = {
+    summary: { scheduled: 0, completed: 0, onTime: 0, userCount: 0 },
+    departments: [],
+    rows: [],
+    totalUsers: 0,
+    trend: emptyTrend,
+    windowDays: days,
+  };
+
+  if (scope.type === "none") return empty;
+  const userIds = await userIdsInScope(scope);
+  if (userIds.length === 0) return empty;
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      assigneeId: { in: userIds },
+      targetDate: { in: dates },
+      deletedAt: null,
+      scheduledStartMinute: { not: null },
+    },
+    select: { assigneeId: true, targetDate: true, completed: true, completedAt: true },
+  });
+  if (tasks.length === 0) return empty;
+
+  const presentIds = [...new Set(tasks.map((t) => t.assigneeId))];
+  const [users, deptMap] = await Promise.all([
+    prisma.user.findMany({
+      where: { id: { in: presentIds } },
+      select: { id: true, name: true, role: true },
+    }),
+    departmentMapForUsers(scope.orgId, presentIds),
+  ]);
+  const userMap = new Map(users.map((u) => [u.id, u]));
+
+  const agg = new Map<string, { scheduled: number; completed: number; onTime: number }>();
+  const trendMap = new Map<string, { scheduled: number; completed: number }>();
+  for (const t of tasks) {
+    const a = agg.get(t.assigneeId) ?? { scheduled: 0, completed: 0, onTime: 0 };
+    a.scheduled += 1;
+    if (t.completed) {
+      a.completed += 1;
+      if (t.completedAt) {
+        const { start, end } = dayBoundsInTz(t.targetDate, DEFAULT_TIMEZONE);
+        if (t.completedAt >= start && t.completedAt <= end) a.onTime += 1;
+      }
+    }
+    agg.set(t.assigneeId, a);
+
+    const ymd = formatDateYmd(t.targetDate);
+    const tr = trendMap.get(ymd) ?? { scheduled: 0, completed: 0 };
+    tr.scheduled += 1;
+    if (t.completed) tr.completed += 1;
+    trendMap.set(ymd, tr);
+  }
+
+  // Scope-wide summary — the single number a manager reads first.
+  const summary = { scheduled: 0, completed: 0, onTime: 0, userCount: agg.size };
+  for (const a of agg.values()) {
+    summary.scheduled += a.scheduled;
+    summary.completed += a.completed;
+    summary.onTime += a.onTime;
+  }
+
+  // Per-department rollup — which team is lagging.
+  const deptAgg = new Map<
+    string,
+    { name: string; scheduled: number; completed: number; onTime: number; users: Set<string> }
+  >();
+  for (const [id, a] of agg) {
+    const dept = deptMap.get(id);
+    const key = dept?.id ?? UNASSIGNED_DEPT;
+    const d = deptAgg.get(key) ?? {
+      name: dept?.name ?? NO_DEPT_LABEL,
+      scheduled: 0,
+      completed: 0,
+      onTime: 0,
+      users: new Set(),
+    };
+    d.scheduled += a.scheduled;
+    d.completed += a.completed;
+    d.onTime += a.onTime;
+    d.users.add(id);
+    deptAgg.set(key, d);
+  }
+  const departments: AdherenceDeptRow[] = [...deptAgg.entries()]
+    .map(([id, d]) => ({
+      id,
+      name: d.name,
+      userCount: d.users.size,
+      scheduled: d.scheduled,
+      completed: d.completed,
+      onTime: d.onTime,
+    }))
+    .sort((x, y) => x.completed / x.scheduled - y.completed / y.scheduled);
+
+  const rows: AdherenceRow[] = [...agg.entries()]
+    .map(([id, a]) => ({
+      user: userMap.get(id) ?? { id, name: "Unknown", role: "staff" },
+      departmentName: deptMap.get(id)?.name ?? null,
+      scheduled: a.scheduled,
+      completed: a.completed,
+      onTime: a.onTime,
+    }))
+    .sort((x, y) => x.completed / x.scheduled - y.completed / y.scheduled) // worst adherence first
+    .slice(0, ADHERENCE_ROW_CAP);
+
+  const trend = dates.map((d) => {
+    const ymd = formatDateYmd(d);
+    const tr = trendMap.get(ymd) ?? { scheduled: 0, completed: 0 };
+    return { date: ymd, scheduled: tr.scheduled, completed: tr.completed };
+  });
+
+  return { summary, departments, rows, totalUsers: agg.size, trend, windowDays: days };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// PRODUCTIVE HOURS — when the team actually completes work, bucketed by the hour
+// of day on each user's OWN clock. Twin to the schedule heatmap, but driven by
+// `completedAt` (real throughput) rather than scheduled slots. Aggregate and
+// timezone-correct by construction; deliberately NOT per-person (team insight,
+// "when does work ship", not individual surveillance).
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface ProductiveHourBucket {
+  hour: number; // 0–23, on the completing user's local clock
+  completedCount: number; // tasks completed in this hour across the team + window
+  peopleCompleted: number; // distinct people who completed ≥1 task in this hour
+}
+
+export interface ProductiveHoursResult {
+  byHour: ProductiveHourBucket[]; // always 24 entries → stable chart axis
+  totalCompleted: number;
+  peakHour: number | null; // busiest completion hour, or null when there's no data
+  windowDays: number;
+}
+
+export async function getProductiveHours(
+  scope: Scope,
+  days: number,
+): Promise<ProductiveHoursResult> {
+  const byHourEmpty = (): ProductiveHourBucket[] =>
+    Array.from({ length: 24 }, (_, hour) => ({ hour, completedCount: 0, peopleCompleted: 0 }));
+
+  const userIds = await userIdsInScope(scope);
+  if (userIds.length === 0) {
+    return { byHour: byHourEmpty(), totalCompleted: 0, peakHour: null, windowDays: days };
+  }
+
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, timezone: true },
+  });
+  const tzMap = new Map(users.map((u) => [u.id, u.timezone]));
+
+  const end = todayInUserTz(DEFAULT_TIMEZONE);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - (days - 1));
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      assigneeId: { in: userIds },
+      targetDate: { gte: startOfDay(start), lte: endOfDay(end) },
+      completed: true,
+      completedAt: { not: null },
+      deletedAt: null,
+    },
+    select: { assigneeId: true, completedAt: true },
+  });
+
+  const agg = new Map<number, { count: number; people: Set<string> }>();
+  for (const t of tasks) {
+    if (t.completedAt === null) continue;
+    const tz = tzMap.get(t.assigneeId) ?? DEFAULT_TIMEZONE;
+    const hour = extractHourInTimezone(t.completedAt, tz);
+    const bucket = agg.get(hour) ?? { count: 0, people: new Set<string>() };
+    bucket.count += 1;
+    bucket.people.add(t.assigneeId);
+    agg.set(hour, bucket);
+  }
+
+  const byHour = byHourEmpty().map((slot) => {
+    const bucket = agg.get(slot.hour);
+    return bucket
+      ? { hour: slot.hour, completedCount: bucket.count, peopleCompleted: bucket.people.size }
+      : slot;
+  });
+
+  let peakHour: number | null = null;
+  let peakCount = 0;
+  for (const b of byHour) {
+    if (b.completedCount > peakCount) {
+      peakCount = b.completedCount;
+      peakHour = b.hour;
+    }
+  }
+
+  return { byHour, totalCompleted: tasks.length, peakHour, windowDays: days };
 }

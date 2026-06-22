@@ -1,5 +1,4 @@
-import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { truncateNotesForContext } from "../lib/notes-context.js";
 import {
@@ -34,11 +33,18 @@ export interface ImageProcessResult {
   recommendations: ImageRecommendation[];
 }
 
-export async function processImage(
+/**
+ * Consumer side of image capture (async pipeline, ADR-0025) — twin of `runVoiceProcessing`. The
+ * image already lives in S3 and the `ImageExtraction` row was pre-created at enqueue (holding the
+ * image key); the worker downloads the bytes and calls this to run OCR/extraction via Vertex,
+ * dispatch the high-confidence actions into real tasks, and fill the row.
+ */
+export async function runImageProcessing(
   user: AuthenticatedUser,
   image: ImageInput,
-  input: SubmitImageInput = {},
-): Promise<ImageProcessResult> {
+  input: SubmitImageInput,
+  extractionId: string,
+): Promise<void> {
   const today = input.targetDate
     ? parseDateString(input.targetDate)
     : todayInUserTz(DEFAULT_TIMEZONE);
@@ -55,14 +61,6 @@ export async function processImage(
     };
   });
 
-  // Create empty row first so created tasks can carry sourceId = this row's id.
-  // Atomicity intentionally skipped for POC (matches the voice flow).
-  const extraction = await imageRepo.create({
-    userId: user.id,
-    actions: [] as InputJsonValue,
-    recommendations: [] as InputJsonValue,
-  });
-
   const aiResponse = await generateStructured({
     model: GEMINI_FLASH_MODEL,
     prompt: buildImageExtractionPrompt({
@@ -73,6 +71,8 @@ export async function processImage(
     media: [{ mimeType: image.mimeType, buffer: image.buffer }],
     temperature: AI_TEMPERATURE.extraction,
     thinkingBudget: AI_THINKING_BUDGET.extraction,
+    timeoutMs: AI_TIMEOUT_MS.media,
+    label: "image",
     onRaw: logRaw("image", user.id),
   });
 
@@ -81,22 +81,15 @@ export async function processImage(
     persistedActions.push(
       await dispatchAiAction(user, action, {
         sourceType: "image",
-        sourceId: extraction.id,
+        sourceId: extractionId,
         today,
       }),
     );
   }
 
-  await imageRepo.update(extraction.id, {
+  await imageRepo.update(extractionId, {
     extractedText: aiResponse.extractedText,
     actions: persistedActions,
     recommendations: aiResponse.recommendations,
   });
-
-  return {
-    imageExtractionId: extraction.id,
-    extractedText: aiResponse.extractedText,
-    actions: persistedActions,
-    recommendations: aiResponse.recommendations,
-  };
 }

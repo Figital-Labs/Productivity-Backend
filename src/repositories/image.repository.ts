@@ -31,6 +31,10 @@ export function update(id: string, patch: UpdateImageExtractionData): Promise<Im
   });
 }
 
+export function findById(id: string): Promise<ImageExtraction | null> {
+  return prisma.imageExtraction.findUnique({ where: { id } });
+}
+
 export function listInRange(userId: string, from?: Date, to?: Date): Promise<ImageExtraction[]> {
   return prisma.imageExtraction.findMany({
     where: {

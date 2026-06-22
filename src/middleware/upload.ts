@@ -25,7 +25,7 @@ function createUpload(opts: UploadOptions): multer.Multer {
   });
 }
 
-const AUDIO_MIME_TYPES = [
+export const AUDIO_MIME_TYPES = [
   "audio/webm",
   "audio/wav",
   "audio/wave",
@@ -38,7 +38,7 @@ const AUDIO_MIME_TYPES = [
   "audio/x-m4a",
 ] as const;
 
-const IMAGE_MIME_TYPES = [
+export const IMAGE_MIME_TYPES = [
   "image/jpeg",
   "image/png",
   "image/webp",
@@ -50,7 +50,7 @@ const IMAGE_MIME_TYPES = [
 // audio and image. Covers ~5 min audio at typical bitrate + standard phone-camera
 // JPEGs. Frontend (FE Sprint 08) caps at the same number for symmetric UX.
 // MulterError.LIMIT_FILE_SIZE → 413 FILE_TOO_LARGE in src/middleware/error.ts.
-const TEN_MB = 10 * 1024 * 1024;
+export const TEN_MB = 10 * 1024 * 1024;
 
 export const voiceUpload = createUpload({
   allowedMimeTypes: AUDIO_MIME_TYPES,
@@ -59,6 +59,14 @@ export const voiceUpload = createUpload({
 
 export const imageUpload = createUpload({
   allowedMimeTypes: IMAGE_MIME_TYPES,
+  maxFileSizeBytes: TEN_MB,
+});
+
+// Voice/image capture byte-fallback (ADR-0025): one `file` field that may be audio OR image (the
+// `surface` arrives as a sibling form field). Union allow-list; the service validates surface↔type.
+// A no-op on the JSON (direct-to-S3 key) path — multer only acts on multipart requests.
+export const captureUpload = createUpload({
+  allowedMimeTypes: [...AUDIO_MIME_TYPES, ...IMAGE_MIME_TYPES],
   maxFileSizeBytes: TEN_MB,
 });
 

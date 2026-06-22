@@ -46,11 +46,20 @@ export class S3Storage implements BlobStorage { ... }
 ## Consequences
 
 - Until S3 credentials land, all storage work stays deferred (same posture as ADR-0009).
-- Required env vars (when S3 is wired): `S3_BUCKET_NAME`, `S3_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (or instance role / web identity in a deployed env).
+- Required env vars (when S3 is wired): bucket / region / access key / secret (or instance role / web identity in a deployed env). **As implemented** the names are the SDK-native `AWS_REGION`, `AWS_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (+ `MEDIA_KEY_PREFIX`) — not the `S3_*` names sketched above. See `src/config/env.ts` (`env.s3`).
 - Vertex AI service account no longer doubles as the storage credential — separate AWS IAM principal needed.
 - `TaskMedia.url` now stores `s3://` URIs (was `gs://`). No existing rows to migrate; the column is empty.
 
 ## Revisit If
 
 - Egress costs balloon → consider R2.
-- Multi-cloud setup is undesirable; reconsider GCS later (would be ADR-0024).
+- Multi-cloud setup is undesirable; reconsider GCS later (would be ADR-0026 — `gs://`
+  is natively readable by Vertex Gemini, saving the worker's S3 download).
+
+## Update (2026-06-17): Implemented
+
+S3 credentials landed; this ADR is **implemented**. The `BlobStorage` interface lives in
+`src/lib/storage/index.ts` with the concrete `S3Storage` in `src/lib/storage/s3.ts`
+(`upload` + `download` today; `signedGetUrl`/`signedPutUrl`/`delete` grow with later
+phases). Meeting media is now persisted to S3 and processed asynchronously — see
+**[ADR-0025](./0025-async-media-processing.md)** and `.agents/media-pipeline.md`.

@@ -1,5 +1,4 @@
-import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { truncateNotesForContext } from "../lib/notes-context.js";
 import { buildVoiceIntentPrompt, type PendingTaskContext } from "../lib/prompts/voice-intent.js";
@@ -32,11 +31,20 @@ export interface VoiceProcessResult {
   recommendations: VoiceRecommendation[];
 }
 
-export async function processVoice(
+/**
+ * Consumer side of voice capture (async pipeline, ADR-0025). The clip already lives in S3 and the
+ * `VoiceInteraction` row was pre-created at enqueue (holding the audio key) — this runs in the
+ * pg-boss worker: it downloads context, runs Vertex extraction, dispatches the high-confidence
+ * actions into real tasks (sourceId = the interaction row), and fills the row with
+ * transcript/actions/recommendations. No S3 write here — the presigned upload is the source of
+ * truth, so a storage hiccup can't happen at this stage.
+ */
+export async function runVoiceProcessing(
   user: AuthenticatedUser,
   audio: AudioInput,
-  input: SubmitVoiceInput = {},
-): Promise<VoiceProcessResult> {
+  input: SubmitVoiceInput,
+  interactionId: string,
+): Promise<void> {
   const today = input.targetDate
     ? parseDateString(input.targetDate)
     : todayInUserTz(DEFAULT_TIMEZONE);
@@ -53,16 +61,6 @@ export async function processVoice(
     };
   });
 
-  // Create the empty row first so AI-created tasks can carry sourceId = this row's id.
-  // Atomicity is intentionally skipped for POC (ADR / sprint plan); if Vertex fails or
-  // an individual dispatch throws, the empty row is left behind. Revisit if it bites.
-  const interaction = await voiceRepo.create({
-    userId: user.id,
-    transcript: "",
-    actions: [] as InputJsonValue,
-    recommendations: [] as InputJsonValue,
-  });
-
   const aiResponse = await generateStructured({
     model: GEMINI_FLASH_MODEL,
     prompt: buildVoiceIntentPrompt({
@@ -73,6 +71,8 @@ export async function processVoice(
     media: [{ mimeType: audio.mimeType, buffer: audio.buffer }],
     temperature: AI_TEMPERATURE.extraction,
     thinkingBudget: AI_THINKING_BUDGET.extraction,
+    timeoutMs: AI_TIMEOUT_MS.media,
+    label: "voice",
     onRaw: logRaw("voice", user.id),
   });
 
@@ -81,24 +81,17 @@ export async function processVoice(
     persistedActions.push(
       await dispatchAiAction(user, action, {
         sourceType: "voice",
-        sourceId: interaction.id,
+        sourceId: interactionId,
         today,
       }),
     );
   }
 
-  await voiceRepo.update(interaction.id, {
+  await voiceRepo.update(interactionId, {
     transcript: aiResponse.transcript,
     actions: persistedActions,
     recommendations: aiResponse.recommendations,
   });
-
-  return {
-    voiceInteractionId: interaction.id,
-    transcript: aiResponse.transcript,
-    actions: persistedActions,
-    recommendations: aiResponse.recommendations,
-  };
 }
 
 export type { VoiceIntentResponse };

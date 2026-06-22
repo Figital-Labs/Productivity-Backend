@@ -31,6 +31,10 @@ export function update(id: string, patch: UpdateVoiceInteractionData): Promise<V
   });
 }
 
+export function findById(id: string): Promise<VoiceInteraction | null> {
+  return prisma.voiceInteraction.findUnique({ where: { id } });
+}
+
 export function listInRange(userId: string, from?: Date, to?: Date): Promise<VoiceInteraction[]> {
   return prisma.voiceInteraction.findMany({
     where: {

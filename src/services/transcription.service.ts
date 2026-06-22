@@ -1,4 +1,4 @@
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
 import { TRANSCRIBE_PROMPT } from "../lib/prompts/transcribe.js";
 import { GEMINI_FLASH_MODEL, generateText } from "../lib/vertex.js";
 
@@ -26,6 +26,8 @@ export async function transcribeAudio(input: TranscribeAudioInput): Promise<Tran
     media: [{ buffer: input.buffer, mimeType: input.mimeType }],
     temperature: AI_TEMPERATURE.transcribe,
     thinkingBudget: AI_THINKING_BUDGET.transcribe,
+    timeoutMs: AI_TIMEOUT_MS.media,
+    label: "transcribe",
   });
   return { transcript: transcript.trim() };
 }
