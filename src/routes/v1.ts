@@ -5,6 +5,7 @@ import { jwtAuth } from "../middleware/auth.js";
 import { activityRouter } from "./activity.routes.js";
 import { authRouter } from "./auth.routes.js";
 import { capturesRouter } from "./captures.routes.js";
+import { configRouter } from "./config.routes.js";
 import { dashboardRouter } from "./dashboard.routes.js";
 import { dayClosureRouter } from "./day-closure.routes.js";
 import { dayPlanRouter } from "./day-plan.routes.js";
@@ -25,6 +26,8 @@ import { usersRouter } from "./users.routes.js";
 export const v1Router = Router();
 
 v1Router.use("/auth", authRouter);
+// Public client config (timing budgets) — mounted BEFORE jwtAuth so the FE can read it pre-login.
+v1Router.use("/config", configRouter);
 v1Router.use(jwtAuth);
 v1Router.use("/tasks", tasksRouter);
 v1Router.use("/notes", notesRouter);

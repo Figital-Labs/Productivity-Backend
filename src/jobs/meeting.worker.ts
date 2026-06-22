@@ -18,12 +18,42 @@ import * as meetingService from "../services/meeting.service.js";
 import { MEETING_QUEUE } from "./queue.js";
 import type { MeetingJobData } from "./queue.js";
 
-async function downloadAll(keys: string[]): Promise<InlineMedia[]> {
-  const media: InlineMedia[] = [];
-  for (const key of keys) {
-    const { data, contentType } = await storage.download(key);
-    media.push({ buffer: data, mimeType: contentType });
+// A long meeting (~5–6 hr) is ~130 small clips. Fetch them with bounded parallelism (faster than
+// sequential, but capped so we don't open 130 S3 sockets or spike memory), and retry each download —
+// one transient S3 blip among 130 must not fail the whole meeting.
+const DOWNLOAD_MAX_ATTEMPTS = 3;
+const DOWNLOAD_PARALLELISM = 4;
+
+async function downloadOne(key: string): Promise<InlineMedia> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= DOWNLOAD_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const { data, contentType } = await storage.download(key);
+      return { buffer: data, mimeType: contentType };
+    } catch (err) {
+      lastErr = err;
+      if (attempt < DOWNLOAD_MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      }
+    }
   }
+  throw lastErr;
+}
+
+async function downloadAll(keys: string[]): Promise<InlineMedia[]> {
+  const media: InlineMedia[] = new Array<InlineMedia>(keys.length);
+  let next = 0;
+  const runLane = async (): Promise<void> => {
+    while (next < keys.length) {
+      const idx = next;
+      next += 1;
+      const key = keys[idx];
+      if (key === undefined) continue;
+      media[idx] = await downloadOne(key);
+    }
+  };
+  const lanes = Math.min(DOWNLOAD_PARALLELISM, keys.length);
+  await Promise.all(Array.from({ length: lanes }, runLane));
   return media;
 }
 
@@ -70,7 +100,7 @@ async function processOne(job: Job<MeetingJobData>): Promise<void> {
 export async function registerMeetingWorker(boss: PgBoss): Promise<void> {
   await boss.work<MeetingJobData>(
     MEETING_QUEUE,
-    { batchSize: env.workerConcurrency },
+    { batchSize: env.meetingWorkerConcurrency },
     async (jobs) => {
       await Promise.all(jobs.map(processOne));
     },

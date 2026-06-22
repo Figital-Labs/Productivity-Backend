@@ -7,6 +7,7 @@
 import { registerCaptureWorker } from "./jobs/capture.worker.js";
 import { registerMeetingWorker } from "./jobs/meeting.worker.js";
 import { startQueue } from "./jobs/queue.js";
+import { reconcileStuckJobs } from "./jobs/reconcile.js";
 import prisma from "./lib/prisma.js";
 
 async function main(): Promise<void> {
@@ -14,6 +15,8 @@ async function main(): Promise<void> {
   const boss = await startQueue();
   await registerMeetingWorker(boss);
   await registerCaptureWorker(boss);
+  // Clear rows orphaned in `processing` by a previous crash/redeploy (FE would poll them forever).
+  await reconcileStuckJobs();
   console.log("Worker started — consuming meeting + capture AI jobs.");
 
   let shuttingDown = false;

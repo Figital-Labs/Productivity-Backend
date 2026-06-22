@@ -67,3 +67,17 @@ export function markFailed(id: string, error: string): Promise<ProcessingJob> {
     data: { status: "failed", finishedAt: new Date(), error },
   });
 }
+
+/**
+ * Fail any job stuck in `processing` since before `startedBefore` — orphans left by a worker that
+ * died mid-job (OOM/crash). Without this the status row never resolves and the FE polls forever.
+ * Callers pass the worst-case (largest) job budget as the cutoff so a legitimately in-flight job is
+ * never killed. Returns the number of rows reset.
+ */
+export async function failStaleProcessing(startedBefore: Date, error: string): Promise<number> {
+  const result = await prisma.processingJob.updateMany({
+    where: { status: "processing", startedAt: { lt: startedBefore } },
+    data: { status: "failed", finishedAt: new Date(), error },
+  });
+  return result.count;
+}

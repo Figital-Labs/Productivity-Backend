@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { env } from "../config/env.js";
 
+import { AI_MAX_RETRIES } from "./ai-config.js";
 import { UpstreamError } from "./errors.js";
 import { log } from "./logger.js";
 
@@ -61,18 +62,18 @@ export interface GenerateTextOptions extends CommonGenOptions {
 type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_MAX_RETRIES = 1;
+// Single source of truth (ai-config) so the queue's visibility budget — which assumes this many
+// attempts — never disagrees with what the AI layer actually does.
+const DEFAULT_MAX_RETRIES = AI_MAX_RETRIES;
 
 /**
- * UpstreamError codes worth retrying — transient model/output failures. Auth,
- * quota and bad-request errors are NOT in here (retrying them is pointless).
+ * UpstreamError codes worth retrying — transient model/OUTPUT failures (they fail fast). Auth,
+ * quota and bad-request errors are NOT in here (retrying them is pointless). `AI_TIMEOUT` is also
+ * deliberately excluded: re-running a hung call rarely helps and, for a 90 MB meeting, would double
+ * the wall-clock/memory/cost. A timeout fails the attempt once; pg-boss `retryLimit` handles a
+ * genuinely crashed worker as a separate, fresh dispatch.
  */
-const RECOVERABLE_CODES = new Set([
-  "AI_EMPTY_RESPONSE",
-  "AI_INVALID_JSON",
-  "AI_SCHEMA_MISMATCH",
-  "AI_TIMEOUT",
-]);
+const RECOVERABLE_CODES = new Set(["AI_EMPTY_RESPONSE", "AI_INVALID_JSON", "AI_SCHEMA_MISMATCH"]);
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 

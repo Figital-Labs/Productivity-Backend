@@ -74,8 +74,22 @@ const EnvSchema = z.object({
   MEDIA_KEY_PREFIX: z.string().default(""),
   // Local folder for STORAGE_DRIVER=disk.
   DISK_STORAGE_DIR: z.string().min(1).default(".media-store"),
-  // Max meeting jobs a single worker handles per poll (ADR-0025).
-  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(3),
+  // Per-poll batch sizes, split by queue (ADR-0025). A single meeting holds ~90 MB (+~120 MB
+  // base64) in RAM while it runs, so its concurrency is kept low to bound the OOM blast radius;
+  // captures are small (≤10 MB) and stay parallel. Size the worker box for
+  // MEETING_WORKER_CONCURRENCY × ~120 MB + headroom. (Replaces the old single WORKER_CONCURRENCY.)
+  MEETING_WORKER_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  CAPTURE_WORKER_CONCURRENCY: z.coerce.number().int().positive().default(3),
+  // Lifetime of a presigned upload URL. Generous so a 10 MB capture finishes even on a slow mobile
+  // link (a 5-min window could expire mid-upload on 2G/3G). Single-use + key-scoped → longer is safe.
+  PRESIGN_UPLOAD_EXPIRY_SECONDS: z.coerce.number().int().positive().default(900),
+  // Per-attempt AI timeout (ms) for the async MEETING worker. We support the p95 long meeting
+  // (~5–6 hr / 90 MB), so this is sized for that worst case. The pg-boss visibility window AND the
+  // frontend poll patience both derive from it (lib/ai-config.jobBudgetSeconds) — one knob, no drift.
+  MEETING_AI_TIMEOUT_MS: z.coerce.number().int().positive().default(800_000),
+  // pg-boss re-dispatches a job whose WORKER DIED (crash/OOM) up to this many times — a fresh
+  // execution per retry. Safe because the visibility window covers a full execution.
+  JOB_RETRY_LIMIT: z.coerce.number().int().nonnegative().default(2),
   // Run the pg-boss consumer inside the web process (single-process deploy). Set to "false"
   // to split it out and run `src/worker.ts` as a dedicated process — a config flip, no code change.
   RUN_WORKER_IN_PROCESS: z
@@ -145,7 +159,11 @@ export const env = {
   diskStorageDir: parsed.data.DISK_STORAGE_DIR,
   // Non-null only under the s3 driver (resolved + validated above).
   s3: s3Config,
-  workerConcurrency: parsed.data.WORKER_CONCURRENCY,
+  meetingWorkerConcurrency: parsed.data.MEETING_WORKER_CONCURRENCY,
+  captureWorkerConcurrency: parsed.data.CAPTURE_WORKER_CONCURRENCY,
+  presignUploadExpirySeconds: parsed.data.PRESIGN_UPLOAD_EXPIRY_SECONDS,
+  meetingAiTimeoutMs: parsed.data.MEETING_AI_TIMEOUT_MS,
+  jobRetryLimit: parsed.data.JOB_RETRY_LIMIT,
   runWorkerInProcess: parsed.data.RUN_WORKER_IN_PROCESS,
   overlapPolicy: parsed.data.OVERLAP_POLICY,
 } as const;

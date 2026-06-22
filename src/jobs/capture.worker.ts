@@ -54,7 +54,7 @@ async function processOne(job: Job<CaptureJobData>): Promise<void> {
 export async function registerCaptureWorker(boss: PgBoss): Promise<void> {
   await boss.work<CaptureJobData>(
     CAPTURE_QUEUE,
-    { batchSize: env.workerConcurrency },
+    { batchSize: env.captureWorkerConcurrency },
     async (jobs) => {
       await Promise.all(jobs.map(processOne));
     },

@@ -15,7 +15,10 @@ The backend runs as **one process**: the HTTP server plus the pg-boss meeting wo
 | `AWS_REGION`, `AWS_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`  | Required when `STORAGE_DRIVER=s3` (boot fails fast if any is missing).                                                                                                                                                                                                                                    |
 | `MEDIA_KEY_PREFIX`                                                             | Optional. **Empty** (default) for a dedicated bucket → keys are surface-first: `<surface>/<org>/<owner>/<uuid>`. Set a value only when sharing a bucket.                                                                                                                                                  |
 | `CORS_ORIGINS`                                                                 | Comma-separated frontend origins (or `*`).                                                                                                                                                                                                                                                                |
-| `WORKER_CONCURRENCY`                                                           | Default `3`.                                                                                                                                                                                                                                                                                              |
+| `MEETING_WORKER_CONCURRENCY` / `CAPTURE_WORKER_CONCURRENCY`                    | Per-poll batch sizes (default `2` / `3`). Meetings hold ~90 MB in RAM each — keep theirs low and size the worker box for `MEETING_WORKER_CONCURRENCY × ~120 MB`.                                                                                                                                          |
+| `PRESIGN_UPLOAD_EXPIRY_SECONDS`                                                | Presigned-upload URL lifetime (default `900`). Generous so a 10 MB capture survives a slow mobile link.                                                                                                                                                                                                   |
+| `MEETING_AI_TIMEOUT_MS`                                                        | Per-attempt meeting-AI timeout (default `800000` ≈ 13 min). The pg-boss visibility window + the frontend poll patience both derive from this.                                                                                                                                                             |
+| `JOB_RETRY_LIMIT`                                                              | pg-boss re-dispatches a job whose worker died up to this many times (default `2`).                                                                                                                                                                                                                        |
 | `RUN_WORKER_IN_PROCESS`                                                        | Default `true`. Set `false` to run a dedicated worker (see below).                                                                                                                                                                                                                                        |
 
 ## Migrations
@@ -63,6 +66,28 @@ docker run -d --env-file .env -p 3000:3000 kims-backend
 - worker service: `node dist/worker.js` (`desiredCount: 1`, no load balancer)
 
 Both point `DIRECT_DATABASE_URL` at the unpooled endpoint.
+
+### Splitting the worker out (`RUN_WORKER_IN_PROCESS=false`) — gotchas
+
+Recommended once meeting volume grows: it isolates the 90 MB-meeting memory pressure from the web
+tier (a worker OOM can no longer take the website down). But mind these:
+
+1. **You must run the worker.** With `false`, the web process only _enqueues_ — it never consumes.
+   Forget `node dist/worker.js` and jobs sit `queued` forever with **no error**.
+2. **Disable the worker container's healthcheck.** The image `HEALTHCHECK` hits `/livez` (HTTP);
+   `worker.ts` has **no HTTP server**, so that healthcheck marks the worker unhealthy and
+   restart-loops it. Run the worker with the healthcheck off (ECS: no container health check;
+   `docker run --no-healthcheck`).
+3. **Both processes need the same creds.** The web still runs the **synchronous** AI endpoints
+   (`/transcribe`, `/text`, `/day-closure/review`) and presigns/uploads, and still calls
+   `startQueue()` to enqueue — so **both** need `DIRECT_DATABASE_URL` (unpooled), Vertex, and S3.
+4. **Migrations + reconciler.** The worker does **not** run `prisma migrate deploy` (only the web
+   `CMD` does) — run migrations first (web container or a release task). The startup **stuck-job
+   reconciler** runs in whichever process consumes the queue (the worker, when split); it's
+   idempotent across replicas.
+5. **Size the worker for RAM (≥4 GB)**, not the web. `MEETING_WORKER_CONCURRENCY` /
+   `CAPTURE_WORKER_CONCURRENCY` are read by the worker — set them there. Scale throughput with the
+   worker's `desiredCount` (each instance runs `MEETING_WORKER_CONCURRENCY` meetings at once).
 
 ## Security
 

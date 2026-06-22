@@ -1,3 +1,5 @@
+import { env } from "../config/env.js";
+
 /**
  * Per-surface generation config for Gemini 2.5 Flash.
  *
@@ -31,13 +33,49 @@ export const AI_THINKING_BUDGET = {
 /**
  * Per-attempt request timeout (our `withTimeout`, NOT undici's separate ~10s connect
  * timeout).
- * - `meeting` runs in the async worker; a 2-hour recording measures ~1 min on Flash, so a
- *   5-min ceiling is generous (the pg-boss visibility timeout is derived from this).
+ * - `meeting` runs in the async worker. We support the p95 long meeting (up to ~6.5 hr / 90 MB),
+ *   so the ceiling is sized for that worst case with generous margin — a 2-hour recording still
+ *   measures ~1 min on Flash; this is a safety cap, not the expected time. The pg-boss visibility
+ *   timeout AND the frontend poll patience both derive from this (via `jobBudgetSeconds`).
  * - `media` covers the synchronous audio/image capture endpoints — 30s is tight when an
  *   audio call spikes, so give them 60s of headroom (they're still short, just safer).
  */
 export const AI_TIMEOUT_MS = {
   default: 30_000,
   media: 60_000, // sync audio/image capture (voice, image, transcribe, team voice/image)
-  meeting: 300_000, // 5 min — async worker; real ~1 min for a 2-hour recording
+  // Env-tunable (MEETING_AI_TIMEOUT_MS, default 800000 ≈ 13 min) — sized for a ~5–6 hr / 90 MB
+  // meeting. Queue expiry + FE poll patience derive from this, so this one knob tunes the chain.
+  meeting: env.meetingAiTimeoutMs,
 } as const;
+
+export type AiJobKind = keyof typeof AI_TIMEOUT_MS;
+
+/**
+ * Total AI attempts = `AI_MAX_RETRIES + 1`. Only fast recoverable OUTPUT errors retry
+ * (empty/invalid-JSON/schema — see `RECOVERABLE_CODES` in vertex.ts); `AI_TIMEOUT` is intentionally
+ * NOT recoverable, so a hung call fails once instead of re-running a 13-min, 90 MB job.
+ */
+export const AI_MAX_RETRIES = 1;
+
+/**
+ * Per-job overhead beyond the AI call itself: the S3 download of the media + the DB writes that
+ * finalize the job. A long meeting can have ~130 small clips to fetch, so it gets more headroom
+ * than a single-file capture.
+ */
+const DOWNLOAD_HEADROOM_MS = {
+  default: 60_000,
+  media: 120_000,
+  meeting: 180_000,
+} as const;
+
+/**
+ * The worst-case wall-clock budget for ONE worker execution of a job, in seconds — the single
+ * source of truth. pg-boss's `expireInSeconds` is set from this so the queue can NEVER treat an
+ * in-flight job as stalled, and the frontend's poll patience derives from the same number (served
+ * via `GET /config`) so FE and BE can't drift. Sized for the full retry path:
+ * `(retries + 1) × per-attempt timeout + download/write overhead`.
+ */
+export function jobBudgetSeconds(kind: AiJobKind): number {
+  const attempts = AI_MAX_RETRIES + 1;
+  return Math.ceil((attempts * AI_TIMEOUT_MS[kind] + DOWNLOAD_HEADROOM_MS[kind]) / 1000);
+}

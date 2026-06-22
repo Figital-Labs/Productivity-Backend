@@ -72,6 +72,10 @@ export interface MeetingMediaItem {
 
 // Vertex inline cap is ~100 MB per request; guard below it (only reachable past ~5 h of audio).
 const MAX_INLINE_BYTES = 90 * 1024 * 1024;
+// Cheap COUNT proxy used at ENQUEUE so a flood of direct-uploaded clips is rejected before the
+// worker downloads them all. Each clip is a deterministic ~0.7 MB at the recorder's fixed 32 kbps,
+// so ~150 clips ≈ 7.5 h — comfortably above the 90 MB byte ceiling, which stays the precise gate.
+const MAX_MEETING_AUDIO_CLIPS = 150;
 
 /**
  * Sprint 15: validates that all attendee ids exist and belong to the caller's
@@ -333,6 +337,28 @@ export async function enqueueProcessing(
       "MEETING_NOT_PROCESSABLE",
       400,
       "Meeting must include at least one audio clip, image, or notes before processing.",
+    );
+  }
+
+  // Reject an oversized session at ENQUEUE — before the worker downloads ~90 MB only to fail the
+  // inline-size check. The in-memory (byte-fallback) clips + images are summed precisely; direct-
+  // uploaded clips aren't downloaded here, so they're bounded by COUNT (deterministic ~0.7 MB each).
+  // `runProcessing`'s exact MAX_INLINE_BYTES check stays the precise final backstop.
+  const knownBytes =
+    inputs.audioClips.reduce((n, m) => n + m.buffer.length, 0) +
+    inputs.images.reduce((n, m) => n + m.buffer.length, 0);
+  const totalAudioClips = inputs.audioKeys.length + inputs.audioClips.length;
+  if (knownBytes > MAX_INLINE_BYTES || totalAudioClips > MAX_MEETING_AUDIO_CLIPS) {
+    log.warn("meeting", "oversized at enqueue", {
+      meetingId: id,
+      userId: caller.id,
+      knownBytes,
+      totalAudioClips,
+    });
+    throw new AppError(
+      "MEETING_PAYLOAD_TOO_LARGE",
+      413,
+      "This session is too long to process at once. Please split it into shorter meetings.",
     );
   }
 

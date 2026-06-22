@@ -3,6 +3,7 @@ import { env } from "./config/env.js";
 import { registerCaptureWorker } from "./jobs/capture.worker.js";
 import { registerMeetingWorker } from "./jobs/meeting.worker.js";
 import { startQueue, stopQueue } from "./jobs/queue.js";
+import { reconcileStuckJobs } from "./jobs/reconcile.js";
 import prisma from "./lib/prisma.js";
 
 async function main(): Promise<void> {
@@ -16,6 +17,16 @@ async function main(): Promise<void> {
     console.log(`Server listening on port ${env.port.toString()} (all interfaces)`);
   });
 
+  // Socket/timeout hardening for a deploy behind a proxy (Render/ALB/Cloudflare):
+  //  - keepAliveTimeout sits ABOVE a typical ~60s LB idle so the load balancer closes idle sockets,
+  //    not us — avoids the classic intermittent 502 / ECONNRESET race. headersTimeout must exceed it.
+  //  - requestTimeout is set generously (5 min) so the synchronous AI endpoints (transcribe / text /
+  //    day-closure review — held up to ~120s) are never cut mid-flight; explicit so it doesn't rely
+  //    on a Node-version default.
+  server.keepAliveTimeout = 75_000;
+  server.headersTimeout = 80_000;
+  server.requestTimeout = 300_000;
+
   // Single-process deploy: run the pg-boss consumer in-process (durable jobs + backpressure
   // without a second process to operate). Best-effort — if the queue can't start, the web
   // server still serves; meeting processing degrades and surfaces an error on enqueue.
@@ -25,6 +36,9 @@ async function main(): Promise<void> {
       .then(async (boss) => {
         await registerMeetingWorker(boss);
         await registerCaptureWorker(boss);
+        // Clear any rows orphaned in `processing` by a previous crash/redeploy so the FE doesn't poll
+        // them forever (pg-boss re-dispatches the queue job separately via its visibility timeout).
+        await reconcileStuckJobs();
       })
       .then(() => {
         console.log("Meeting + capture workers consuming jobs in-process.");

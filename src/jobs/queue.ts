@@ -12,7 +12,7 @@
 import { PgBoss } from "pg-boss";
 
 import { env } from "../config/env.js";
-import { AI_TIMEOUT_MS } from "../lib/ai-config.js";
+import { jobBudgetSeconds } from "../lib/ai-config.js";
 import { errInfo, log } from "../lib/logger.js";
 
 export const MEETING_QUEUE = "process-meeting";
@@ -39,11 +39,19 @@ export interface CaptureJobData {
   targetDate?: string;
 }
 
-// Visibility timeout must exceed the longest AI call (meeting ceiling) so pg-boss never
-// treats an in-flight job as stalled. +120s headroom for S3 download + DB writes.
-const MEETING_EXPIRE_SECONDS = Math.ceil(AI_TIMEOUT_MS.meeting / 1000) + 120;
-// Captures use the (shorter) media ceiling; same +120s headroom for download + dispatch writes.
-const CAPTURE_EXPIRE_SECONDS = Math.ceil(AI_TIMEOUT_MS.media / 1000) + 120;
+// Visibility window = the worst-case budget for ONE worker execution (full retry path + S3
+// download), so pg-boss can NEVER treat a still-running job as stalled — the bug that, once
+// `retryLimit` is set, would otherwise re-dispatch a job mid-retry and double-process it. Single
+// source of truth in ai-config; the frontend's poll patience derives from the same numbers
+// (served via GET /config), so FE and BE timeouts can't drift apart.
+const MEETING_EXPIRE_SECONDS = jobBudgetSeconds("meeting");
+const CAPTURE_EXPIRE_SECONDS = jobBudgetSeconds("media");
+
+// Re-dispatch a job whose worker DIED (process crash / OOM) as a fresh execution with its own
+// visibility window. App-level AI failures never reach pg-boss as failures (the worker records them
+// on the ProcessingJob row and resolves), so this retries genuine infra death only — and it's safe
+// precisely because `expireInSeconds` above now covers a full execution.
+const JOB_RETRY = { retryLimit: env.jobRetryLimit, retryBackoff: true } as const;
 
 // Fail fast on a transaction-pooler URL — pg-boss silently misbehaves on it.
 if (env.directDatabaseUrl.includes("-pooler")) {
@@ -78,13 +86,19 @@ export function startQueue(): Promise<PgBoss> {
 /** Producer side: enqueue a meeting for out-of-band processing. */
 export async function enqueueMeeting(data: MeetingJobData): Promise<void> {
   const started = await startQueue();
-  await started.send(MEETING_QUEUE, data, { expireInSeconds: MEETING_EXPIRE_SECONDS });
+  await started.send(MEETING_QUEUE, data, {
+    expireInSeconds: MEETING_EXPIRE_SECONDS,
+    ...JOB_RETRY,
+  });
 }
 
 /** Producer side: enqueue a voice/image capture for out-of-band processing. */
 export async function enqueueCapture(data: CaptureJobData): Promise<void> {
   const started = await startQueue();
-  await started.send(CAPTURE_QUEUE, data, { expireInSeconds: CAPTURE_EXPIRE_SECONDS });
+  await started.send(CAPTURE_QUEUE, data, {
+    expireInSeconds: CAPTURE_EXPIRE_SECONDS,
+    ...JOB_RETRY,
+  });
 }
 
 /** Stop the queue (drains in-flight work) — called from the in-process graceful shutdown. */

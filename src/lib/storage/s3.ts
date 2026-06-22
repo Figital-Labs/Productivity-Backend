@@ -124,7 +124,8 @@ export class S3Storage implements BlobStorage {
         // POST Policy restores the size + content-type validation we'd lose by bypassing multer.
         Conditions: [["content-length-range", 1, MAX_MEDIA_BYTES]],
         Fields: { "Content-Type": contentType },
-        Expires: 300,
+        // Generous (default 900s) so a 10 MB capture finishes even on a slow mobile link.
+        Expires: env.presignUploadExpirySeconds,
       });
       return { url, fields, key };
     } catch (err) {
