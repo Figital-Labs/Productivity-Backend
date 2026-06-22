@@ -13,7 +13,6 @@ import { canAccessTask } from "../../utils/auth.js";
 
 import {
   DEFAULT_DURATION_MINUTES,
-  findEarliestFreeSlot,
   type OverlapPolicy,
   placeWithCascade,
   type Slot,
@@ -96,8 +95,10 @@ async function runSerializable<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
  * scheduling is a convenience and must never block task creation, so on any
  * error (or a full day) the task is simply left Unscheduled and returned as-is.
  */
-export async function autoScheduleOnCreate(task: taskRepo.Task): Promise<taskRepo.Task> {
-  try {
+export function autoScheduleOnCreate(task: taskRepo.Task): Promise<taskRepo.Task> {
+  // DECISION: tasks are created UNSCHEDULED by default — auto-scheduling below is disabled (restore: uncomment, re-add `async` + the `findEarliestFreeSlot` import).
+  return Promise.resolve(task);
+  /* try {
     return await runSerializable(async (tx) => {
       const hours = await workingHoursFor(tx, task.assigneeId);
       const siblings = await scheduledSiblings(tx, task.assigneeId, task.targetDate, task.id);
@@ -112,7 +113,7 @@ export async function autoScheduleOnCreate(task: taskRepo.Task): Promise<taskRep
   } catch (err) {
     console.error("[scheduling] auto-schedule failed, leaving task unscheduled:", err);
     return task;
-  }
+  } */
 }
 
 export interface ScheduleTaskInput {
