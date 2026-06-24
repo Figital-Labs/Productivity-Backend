@@ -11,6 +11,8 @@ import {
   createTeamUserInputSchema,
   getReportSubmissionsQuerySchema,
   getReportTasksQuerySchema,
+  listManagedTreeQuerySchema,
+  listReportsQuerySchema,
   resetTeamUserPasswordInputSchema,
 } from "../schemas/team.schema.js";
 import * as teamImageDelegateService from "../services/team-image-delegate.service.js";
@@ -20,13 +22,21 @@ import * as teamService from "../services/team.service.js";
 import { parseDateString } from "../utils/date.js";
 
 export async function listReports(req: Request, res: Response): Promise<void> {
-  const reports = await teamService.listReports(req.user);
+  const query = listReportsQuerySchema.parse(req.query);
+  const reports = await teamService.listReports(req.user, {
+    limit: query.limit,
+    offset: query.offset,
+  });
   res.status(200).json(reports);
 }
 
 export async function listManagedTree(req: Request, res: Response): Promise<void> {
-  const nodes = await teamService.listManagedTree(req.user);
-  res.status(200).json(nodes);
+  const query = listManagedTreeQuerySchema.parse(req.query);
+  const result = await teamService.listManagedTree(req.user, {
+    limit: query.limit,
+    offset: query.offset,
+  });
+  res.status(200).json(result);
 }
 
 export async function getReportTasks(req: Request, res: Response): Promise<void> {

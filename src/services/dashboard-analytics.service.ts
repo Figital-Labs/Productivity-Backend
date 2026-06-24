@@ -49,16 +49,16 @@ export interface PerformersResult {
   windowDays: number;
 }
 
-export async function getPerformers(
+// Builds the unsorted per-staff performer rows for a scope + metric + window.
+// Shared by the top-N widget (`getPerformers`) and the full paginated
+// leaderboard (`getPerformersRanking`) so ranking semantics never drift.
+async function performerRows(
   scope: Scope,
   metric: "tasks" | "consistency",
   days: number,
-  limit: number,
-): Promise<PerformersResult> {
+): Promise<PerformerRow[]> {
   const userIds = await userIdsInScope(scope);
-  if (userIds.length === 0) {
-    return { top: [], bottom: [], metric, windowDays: days };
-  }
+  if (userIds.length === 0) return [];
 
   // Performers list is individual-contributor only — exclude managers and above.
   // Level is the reliable discriminator: L100 = IC, L300+ = lead/manager/admin.
@@ -67,9 +67,7 @@ export async function getPerformers(
     select: { id: true },
   });
   const staffIds = staffRows.map((r) => r.id);
-  if (staffIds.length === 0) {
-    return { top: [], bottom: [], metric, windowDays: days };
-  }
+  if (staffIds.length === 0) return [];
 
   const dates = rangeDays(days);
 
@@ -91,24 +89,16 @@ export async function getPerformers(
       }),
     ]);
     const doneByUser = new Map(taskCounts.map((r) => [r.assigneeId, r._count._all]));
-    const rows: PerformerRow[] = users.map((u) => ({
+    return users.map((u) => ({
       user: u,
       value: doneByUser.get(u.id) ?? 0,
       secondary: `${(doneByUser.get(u.id) ?? 0).toString()} tasks done · ${days.toString()}d`,
     }));
-    const sortedDesc = [...rows].sort((a, b) => b.value - a.value);
-    const sortedAsc = [...rows].sort((a, b) => a.value - b.value);
-    return {
-      metric,
-      windowDays: days,
-      top: sortedDesc.slice(0, limit),
-      bottom: sortedAsc.slice(0, limit),
-    };
   }
 
-  // consistency: rank by lowest missed-days. Bottom = highest missed-days.
+  // consistency: score by lowest missed-days.
   const rows = await consistencyForUsers(staffIds, days);
-  const performerRows: PerformerRow[] = rows.map((r) => {
+  return rows.map((r) => {
     const missed = r.planMissedDays + r.closureMissedDays;
     const score = Math.max(0, 100 - missed * 10);
     return {
@@ -120,13 +110,59 @@ export async function getPerformers(
           : `missed ${r.planMissedDays.toString()}/${days.toString()} plans, ${r.closureMissedDays.toString()}/${days.toString()} EODs`,
     };
   });
-  const sortedDesc = [...performerRows].sort((a, b) => b.value - a.value);
-  const sortedAsc = [...performerRows].sort((a, b) => a.value - b.value);
+}
+
+// `id` tiebreaker → a deterministic total order, so the top-N widget and the
+// paginated leaderboard rank ties identically and offset pages never overlap.
+const byValueDesc = (a: PerformerRow, b: PerformerRow): number =>
+  b.value - a.value || a.user.id.localeCompare(b.user.id);
+const byValueAsc = (a: PerformerRow, b: PerformerRow): number =>
+  a.value - b.value || a.user.id.localeCompare(b.user.id);
+
+export async function getPerformers(
+  scope: Scope,
+  metric: "tasks" | "consistency",
+  days: number,
+  limit: number,
+): Promise<PerformersResult> {
+  const rows = await performerRows(scope, metric, days);
+  const sortedDesc = [...rows].sort(byValueDesc);
+  const sortedAsc = [...rows].sort(byValueAsc);
   return {
     metric,
     windowDays: days,
     top: sortedDesc.slice(0, limit),
     bottom: sortedAsc.slice(0, limit),
+  };
+}
+
+export interface PerformersRankingResult {
+  rows: PerformerRow[];
+  total: number;
+  hasMore: boolean;
+  metric: "tasks" | "consistency";
+  windowDays: number;
+}
+
+// Full ranked leaderboard in one direction, paginated. Backs the "View all"
+// drill-down from the top-N PerformersPanel widget.
+export async function getPerformersRanking(
+  scope: Scope,
+  metric: "tasks" | "consistency",
+  days: number,
+  order: "top" | "bottom",
+  limit: number,
+  offset: number,
+): Promise<PerformersRankingResult> {
+  const rows = await performerRows(scope, metric, days);
+  const sorted = order === "bottom" ? [...rows].sort(byValueAsc) : [...rows].sort(byValueDesc);
+  const page = sorted.slice(offset, offset + limit);
+  return {
+    rows: page,
+    total: sorted.length,
+    hasMore: offset + page.length < sorted.length,
+    metric,
+    windowDays: days,
   };
 }
 
@@ -451,11 +487,16 @@ export interface OverdueTaskRow {
 export interface OverdueResult {
   tasks: OverdueTaskRow[];
   total: number;
+  hasMore: boolean;
 }
 
-export async function getOverdueTasks(scope: Scope, limit = 20): Promise<OverdueResult> {
+export async function getOverdueTasks(
+  scope: Scope,
+  limit = 20,
+  offset = 0,
+): Promise<OverdueResult> {
   const userIds = await userIdsInScope(scope);
-  if (userIds.length === 0) return { tasks: [], total: 0 };
+  if (userIds.length === 0) return { tasks: [], total: 0, hasMore: false };
 
   const today = todayInUserTz(DEFAULT_TIMEZONE);
 
@@ -467,8 +508,11 @@ export async function getOverdueTasks(scope: Scope, limit = 20): Promise<Overdue
         completed: false,
         deletedAt: null,
       },
-      orderBy: { targetDate: "asc" },
+      // `id` tiebreaker makes the order a deterministic total order so
+      // skip/take pages never overlap or drop tasks tied on targetDate.
+      orderBy: [{ targetDate: "asc" }, { id: "asc" }],
       take: limit,
+      skip: offset,
       select: {
         id: true,
         title: true,
@@ -499,6 +543,7 @@ export async function getOverdueTasks(scope: Scope, limit = 20): Promise<Overdue
       assignee: t.assignee,
     })),
     total,
+    hasMore: offset + tasks.length < total,
   };
 }
 

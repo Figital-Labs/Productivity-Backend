@@ -37,6 +37,11 @@ export const listTasksQuerySchema = z
   .object({
     date: dateStringSchema.optional(),
     openCarryOver: z.coerce.boolean().optional(),
+    // Optional pagination. A single user × single day is naturally bounded, so
+    // these are unset by default (full day returned, unchanged behavior). They
+    // exist so a pathological day can be paged rather than truncated silently.
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+    offset: z.coerce.number().int().min(0).optional(),
   })
   .refine((v) => !(v.date && v.openCarryOver), {
     message: "date and openCarryOver are mutually exclusive",

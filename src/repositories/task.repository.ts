@@ -47,14 +47,29 @@ export function findById(id: string): Promise<Task | null> {
 // — would go in a separate `listCreatedBy(creatorId, ...)` helper if/when
 // a "delegated by me" surface lands.
 
-export function listByDate(userId: string, date: Date): Promise<Task[]> {
+export interface PageOpts {
+  limit?: number | undefined;
+  offset?: number | undefined;
+}
+
+function pageArgs(opts?: PageOpts): { take?: number; skip?: number } {
+  return {
+    ...(opts?.limit !== undefined ? { take: opts.limit } : {}),
+    ...(opts?.offset !== undefined ? { skip: opts.offset } : {}),
+  };
+}
+
+export function listByDate(userId: string, date: Date, opts?: PageOpts): Promise<Task[]> {
   // Sprint 8 (BUG-004): user-facing list sorts by recency of last edit so the
   // task they just touched floats to top. Previous order was [priority asc,
   // createdAt asc] which left recently-edited tasks buried.
   return prisma.task.findMany({
     ...taskWithCreator,
     where: { assigneeId: userId, targetDate: date, deletedAt: null },
-    orderBy: [{ updatedAt: "desc" }],
+    // `id` tiebreaker keeps optional limit/offset paging stable when tasks
+    // share an updatedAt (only affects rows already tied — no visible reorder).
+    orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    ...pageArgs(opts),
   });
 }
 
@@ -72,7 +87,7 @@ export function listPending(userId: string, limit: number): Promise<Task[]> {
   });
 }
 
-export function listOpenCarryOver(userId: string, today: Date): Promise<Task[]> {
+export function listOpenCarryOver(userId: string, today: Date, opts?: PageOpts): Promise<Task[]> {
   // Sprint 8 (BUG-004): same recency-of-edit ordering as `listByDate`, since
   // carryover is also user-facing (rendered in the "Previous Days" section).
   return prisma.task.findMany({
@@ -83,7 +98,8 @@ export function listOpenCarryOver(userId: string, today: Date): Promise<Task[]> 
       deletedAt: null,
       targetDate: { lt: today },
     },
-    orderBy: [{ updatedAt: "desc" }],
+    orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    ...pageArgs(opts),
   });
 }
 

@@ -167,11 +167,46 @@ function taskPriority(value: string | null): Priority | null {
   return value === "low" || value === "medium" || value === "high" ? value : null;
 }
 
+export interface ActivityPage {
+  events: ActivityEvent[];
+  // ISO timestamp to pass as the next `cursor`, or null when the feed is
+  // exhausted (the page came back shorter than the requested limit).
+  nextCursor: string | null;
+}
+
+const DEFAULT_PAGE_SIZE = 30;
+
+// Runs a query only when its event family is wanted for this `kind`; otherwise
+// resolves to an empty array. Keeps the 9-stream fan-out parallel and typed.
+function emptyIfSkipped<T>(wanted: boolean, run: () => Promise<T[]>): Promise<T[]> {
+  return wanted ? run() : Promise.resolve([]);
+}
+
+// Time window shared by every stream: the from/to bounds plus the strictly-
+// older pagination cursor. Each stream filters its own timestamp field by this.
+interface TimeWindow {
+  gte?: Date;
+  lte?: Date;
+  lt?: Date;
+}
+
 export async function listActivity(
   user: AuthenticatedUser,
   query: ListActivityQuery,
-): Promise<ActivityEvent[]> {
+): Promise<ActivityPage> {
   const { from, to } = activityBounds(query);
+  const kind = query.kind ?? "all";
+  const limit = query.limit ?? DEFAULT_PAGE_SIZE;
+  const cursor = query.cursor !== undefined ? new Date(query.cursor) : undefined;
+  const wantMeetings = kind === "all" || kind === "meetings";
+  const wantOthers = kind === "all" || kind === "tasks";
+
+  const window: TimeWindow = {
+    ...(from !== undefined ? { gte: from } : {}),
+    ...(to !== undefined ? { lte: to } : {}),
+    ...(cursor !== undefined ? { lt: cursor } : {}),
+  };
+
   const scopedUserIds =
     query.scope === "team" || query.scope === "org"
       ? await userIdsInScope(await resolveScope(user))
@@ -188,139 +223,91 @@ export async function listActivity(
     dayClosures,
     processedMeetings,
   ] = await Promise.all([
-    prisma.voiceInteraction.findMany({
-      where: {
-        userId: { in: scopedUserIds },
-        ...(from !== undefined || to !== undefined
-          ? {
-              createdAt: {
-                ...(from !== undefined ? { gte: from } : {}),
-                ...(to !== undefined ? { lte: to } : {}),
-              },
-            }
-          : {}),
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.textInteraction.findMany({
-      where: {
-        userId: { in: scopedUserIds },
-        ...(from !== undefined || to !== undefined
-          ? {
-              createdAt: {
-                ...(from !== undefined ? { gte: from } : {}),
-                ...(to !== undefined ? { lte: to } : {}),
-              },
-            }
-          : {}),
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.imageExtraction.findMany({
-      where: {
-        userId: { in: scopedUserIds },
-        ...(from !== undefined || to !== undefined
-          ? {
-              createdAt: {
-                ...(from !== undefined ? { gte: from } : {}),
-                ...(to !== undefined ? { lte: to } : {}),
-              },
-            }
-          : {}),
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.unifiedInteraction.findMany({
-      where: {
-        userId: { in: scopedUserIds },
-        ...(from !== undefined || to !== undefined
-          ? {
-              createdAt: {
-                ...(from !== undefined ? { gte: from } : {}),
-                ...(to !== undefined ? { lte: to } : {}),
-              },
-            }
-          : {}),
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.task.findMany({
-      include: { creator: { select: { id: true, name: true } } },
-      where: {
-        sourceType: "manual",
-        deletedAt: null,
-        OR: [{ assigneeId: { in: scopedUserIds } }, { creatorId: { in: scopedUserIds } }],
-        ...(from !== undefined || to !== undefined
-          ? {
-              createdAt: {
-                ...(from !== undefined ? { gte: from } : {}),
-                ...(to !== undefined ? { lte: to } : {}),
-              },
-            }
-          : {}),
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.task.findMany({
-      include: { creator: { select: { id: true, name: true } } },
-      where: {
-        completed: true,
-        deletedAt: null,
-        OR: [{ assigneeId: { in: scopedUserIds } }, { creatorId: { in: scopedUserIds } }],
-        ...(from !== undefined || to !== undefined
-          ? {
-              updatedAt: {
-                ...(from !== undefined ? { gte: from } : {}),
-                ...(to !== undefined ? { lte: to } : {}),
-              },
-            }
-          : {}),
-      },
-      orderBy: { updatedAt: "desc" },
-    }),
-    prisma.dayPlanSubmission.findMany({
-      where: {
-        userId: { in: scopedUserIds },
-        ...(from !== undefined || to !== undefined
-          ? {
-              submittedAt: {
-                ...(from !== undefined ? { gte: from } : {}),
-                ...(to !== undefined ? { lte: to } : {}),
-              },
-            }
-          : {}),
-      },
-      orderBy: { submittedAt: "desc" },
-    }),
-    prisma.dayClosureSubmission.findMany({
-      where: {
-        userId: { in: scopedUserIds },
-        // Sprint 17 Phase 5: the activity feed surfaces real events. A
-        // draft is not an event — it's an in-progress UI state.
-        status: "submitted",
-        ...(from !== undefined || to !== undefined
-          ? {
-              submittedAt: {
-                ...(from !== undefined ? { gte: from } : {}),
-                ...(to !== undefined ? { lte: to } : {}),
-              },
-            }
-          : {}),
-      },
-      orderBy: { submittedAt: "desc" },
-    }),
-    prisma.meeting.findMany({
-      where: {
-        deletedAt: null,
-        processedAt: {
-          not: null,
-          ...(from !== undefined ? { gte: from } : {}),
-          ...(to !== undefined ? { lte: to } : {}),
+    emptyIfSkipped(wantOthers, () =>
+      prisma.voiceInteraction.findMany({
+        where: { userId: { in: scopedUserIds }, createdAt: window },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+      }),
+    ),
+    emptyIfSkipped(wantOthers, () =>
+      prisma.textInteraction.findMany({
+        where: { userId: { in: scopedUserIds }, createdAt: window },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+      }),
+    ),
+    emptyIfSkipped(wantOthers, () =>
+      prisma.imageExtraction.findMany({
+        where: { userId: { in: scopedUserIds }, createdAt: window },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+      }),
+    ),
+    emptyIfSkipped(wantOthers, () =>
+      prisma.unifiedInteraction.findMany({
+        where: { userId: { in: scopedUserIds }, createdAt: window },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+      }),
+    ),
+    emptyIfSkipped(wantOthers, () =>
+      prisma.task.findMany({
+        include: { creator: { select: { id: true, name: true } } },
+        where: {
+          sourceType: "manual",
+          deletedAt: null,
+          OR: [{ assigneeId: { in: scopedUserIds } }, { creatorId: { in: scopedUserIds } }],
+          createdAt: window,
         },
-        OR: [{ userId: { in: scopedUserIds } }, { attendeeIds: { hasSome: scopedUserIds } }],
-      },
-      orderBy: { processedAt: "desc" },
-    }),
+        orderBy: { createdAt: "desc" },
+        take: limit,
+      }),
+    ),
+    emptyIfSkipped(wantOthers, () =>
+      prisma.task.findMany({
+        include: { creator: { select: { id: true, name: true } } },
+        where: {
+          completed: true,
+          deletedAt: null,
+          OR: [{ assigneeId: { in: scopedUserIds } }, { creatorId: { in: scopedUserIds } }],
+          updatedAt: window,
+        },
+        orderBy: { updatedAt: "desc" },
+        take: limit,
+      }),
+    ),
+    emptyIfSkipped(wantOthers, () =>
+      prisma.dayPlanSubmission.findMany({
+        where: { userId: { in: scopedUserIds }, submittedAt: window },
+        orderBy: { submittedAt: "desc" },
+        take: limit,
+      }),
+    ),
+    emptyIfSkipped(wantOthers, () =>
+      prisma.dayClosureSubmission.findMany({
+        where: {
+          userId: { in: scopedUserIds },
+          // Sprint 17 Phase 5: the activity feed surfaces real events. A
+          // draft is not an event — it's an in-progress UI state.
+          status: "submitted",
+          submittedAt: window,
+        },
+        orderBy: { submittedAt: "desc" },
+        take: limit,
+      }),
+    ),
+    emptyIfSkipped(wantMeetings, () =>
+      prisma.meeting.findMany({
+        where: {
+          deletedAt: null,
+          processedAt: { not: null, ...window },
+          OR: [{ userId: { in: scopedUserIds } }, { attendeeIds: { hasSome: scopedUserIds } }],
+        },
+        orderBy: { processedAt: "desc" },
+        take: limit,
+      }),
+    ),
   ]);
 
   const allActions = [
@@ -515,5 +502,11 @@ export async function listActivity(
       }),
   ];
 
-  return events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  // Merge the (per-stream over-fetched) events into one timeline, then slice to
+  // the page size. nextCursor is the oldest returned event's timestamp; null
+  // when this page is short (no more rows older than it).
+  const sorted = events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  const page = sorted.slice(0, limit);
+  const nextCursor = page.length === limit ? (page[page.length - 1]?.at ?? null) : null;
+  return { events: page, nextCursor };
 }

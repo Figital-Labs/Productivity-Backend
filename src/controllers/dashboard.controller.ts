@@ -14,11 +14,13 @@ import {
   dashboardMeetingsQuerySchema,
   dashboardPeopleQuerySchema,
   dashboardTrendsQuerySchema,
+  directoryQuerySchema,
   meetingConversionQuerySchema,
   meetingsAnalyticsQuerySchema,
   overdueQuerySchema,
   patchGroupMemberSchema,
   performersQuerySchema,
+  performersRankingQuerySchema,
   personDayQuerySchema,
   planAccuracyQuerySchema,
   planVsClosureQuerySchema,
@@ -85,8 +87,8 @@ export async function meetings(req: Request, res: Response): Promise<void> {
 
 export async function activity(req: Request, res: Response): Promise<void> {
   const query = dashboardActivityQuerySchema.parse(req.query);
-  const events = await activityService.listActivity(req.user, query);
-  res.json({ events });
+  // listActivity now returns a paginated { events, nextCursor } page.
+  res.json(await activityService.listActivity(req.user, query));
 }
 
 export async function morningBrief(req: Request, res: Response): Promise<void> {
@@ -145,7 +147,8 @@ export async function teamTree(req: Request, res: Response): Promise<void> {
 }
 
 export async function directory(req: Request, res: Response): Promise<void> {
-  res.json(await treeService.getDirectory(req.user));
+  const query = directoryQuerySchema.parse(req.query);
+  res.json(await treeService.getDirectory(req.user, { limit: query.limit, offset: query.offset }));
 }
 
 export async function personProfile(req: Request, res: Response): Promise<void> {
@@ -163,6 +166,21 @@ export async function performers(req: Request, res: Response): Promise<void> {
   const query = performersQuerySchema.parse(req.query);
   const scope = await resolveScope(req.user);
   res.json(await analyticsService.getPerformers(scope, query.metric, query.days, query.limit));
+}
+
+export async function performersRanking(req: Request, res: Response): Promise<void> {
+  const query = performersRankingQuerySchema.parse(req.query);
+  const scope = await resolveScope(req.user);
+  res.json(
+    await analyticsService.getPerformersRanking(
+      scope,
+      query.metric,
+      query.days,
+      query.order,
+      query.limit,
+      query.offset,
+    ),
+  );
 }
 
 export async function planVsClosure(req: Request, res: Response): Promise<void> {
@@ -200,7 +218,7 @@ export async function priorityBreakdown(req: Request, res: Response): Promise<vo
 export async function overdueTasks(req: Request, res: Response): Promise<void> {
   const query = overdueQuerySchema.parse(req.query);
   const scope = await resolveScope(req.user);
-  res.json(await analyticsService.getOverdueTasks(scope, query.limit));
+  res.json(await analyticsService.getOverdueTasks(scope, query.limit, query.offset));
 }
 
 export async function planAccuracy(req: Request, res: Response): Promise<void> {

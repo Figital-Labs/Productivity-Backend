@@ -21,11 +21,12 @@ export function listTasks(
   user: AuthenticatedUser,
   query: ListTasksQuery,
 ): Promise<taskRepo.Task[]> {
+  const page = { limit: query.limit, offset: query.offset };
   if (query.openCarryOver) {
-    return taskRepo.listOpenCarryOver(user.id, todayInUserTz(DEFAULT_TIMEZONE));
+    return taskRepo.listOpenCarryOver(user.id, todayInUserTz(DEFAULT_TIMEZONE), page);
   }
   const date = query.date ? parseDateString(query.date) : todayInUserTz(DEFAULT_TIMEZONE);
-  return taskRepo.listByDate(user.id, date);
+  return taskRepo.listByDate(user.id, date, page);
 }
 
 export async function createTask(

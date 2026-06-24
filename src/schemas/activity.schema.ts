@@ -7,6 +7,12 @@ export const listActivityQuerySchema = z
     from: dateStringSchema.optional(),
     to: dateStringSchema.optional(),
     scope: z.enum(["personal", "team", "org"]).optional(),
+    // Server-side filter so the Task vs Meeting history tabs paginate
+    // independently (a naive merge would yield empty Meeting pages).
+    kind: z.enum(["all", "tasks", "meetings"]).optional(),
+    // ISO timestamp of the last event from the previous page (strictly-older).
+    cursor: z.iso.datetime().optional(),
+    limit: z.coerce.number().int().min(1).max(50).optional(),
   })
   .refine((value) => value.from === undefined || value.to === undefined || value.from <= value.to, {
     message: "`from` must be on or before `to`",
@@ -153,5 +159,8 @@ export const activityEventSchema = z.discriminatedUnion("type", [
 ]);
 export type ActivityEvent = z.infer<typeof activityEventSchema>;
 
-export const activityResponseSchema = z.array(activityEventSchema);
+export const activityResponseSchema = z.object({
+  events: z.array(activityEventSchema),
+  nextCursor: z.string().nullable(),
+});
 export type ActivityResponse = z.infer<typeof activityResponseSchema>;

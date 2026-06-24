@@ -16,6 +16,13 @@ export const dashboardPeopleQuerySchema = z.object({
 });
 export type DashboardPeopleQuery = z.infer<typeof dashboardPeopleQuerySchema>;
 
+/** `GET /dashboard/directory` — org tree + paginated unassigned-staff list. */
+export const directoryQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+export type DirectoryQuery = z.infer<typeof directoryQuerySchema>;
+
 export const dashboardConsistencyQuerySchema = z.object({
   days: z.coerce.number().int().min(1).max(30).default(7),
 });
@@ -90,6 +97,16 @@ export const performersQuerySchema = z.object({
 });
 export type PerformersQuery = z.infer<typeof performersQuerySchema>;
 
+/** `GET /dashboard/performers/ranking` — full ranked leaderboard, one direction, paged. */
+export const performersRankingQuerySchema = z.object({
+  metric: z.enum(["tasks", "consistency"]).default("tasks"),
+  days: z.coerce.number().int().min(1).max(30).default(7),
+  order: z.enum(["top", "bottom"]).default("top"),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+export type PerformersRankingQuery = z.infer<typeof performersRankingQuerySchema>;
+
 /** `GET /dashboard/analytics/plan-vs-closure` — per-day series. */
 export const planVsClosureQuerySchema = z.object({
   range: z.enum(["7d", "30d"]).default("7d"),
@@ -111,6 +128,7 @@ export type TaskFlowQuery = z.infer<typeof taskFlowQuerySchema>;
 /** `GET /dashboard/analytics/overdue` — overdue incomplete tasks in scope. */
 export const overdueQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
 });
 export type OverdueQuery = z.infer<typeof overdueQuerySchema>;
 

@@ -73,6 +73,27 @@ export const attachExistingUserInputSchema = z.object({
 export type AttachExistingUserInput = z.infer<typeof attachExistingUserInputSchema>;
 
 /**
+ * Query for `GET /team/reports` — optional paging. No defaults: callers that
+ * pass nothing get the full direct-report list (SendReminderModal, ManageSection,
+ * and the listManagedTree rollup all rely on this).
+ */
+export const listReportsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+});
+export type ListReportsQuery = z.infer<typeof listReportsQuerySchema>;
+
+/**
+ * Query for `GET /team/reports/tree` — paginated by direct report. Defaults to
+ * the first 50 direct reports; the summary rollup is always team-wide.
+ */
+export const listManagedTreeQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+export type ListManagedTreeQuery = z.infer<typeof listManagedTreeQuerySchema>;
+
+/**
  * Query for `GET /team/reports/:id/tasks?date=YYYY-MM-DD`. Date is required
  * — drilling into a report's day always asks for a specific date.
  */
