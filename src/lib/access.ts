@@ -39,6 +39,12 @@ export interface Capabilities {
   canDelegate: boolean;
   /** Can create/edit departments & groups (org-level structure). */
   canManageDeptGroups: boolean;
+  /**
+   * Owns user accounts: create/edit users, reset passwords, set reporting
+   * managers. Admin-only — this is the flag the FE gates account UI on, and
+   * what distinguishes an admin from a plain manager.
+   */
+  canManageUsers: boolean;
 }
 
 /**
@@ -54,5 +60,6 @@ export function capabilitiesFor(level: number, scope: Scope): Capabilities {
     canViewDashboard: managesSomeone,
     canDelegate: managesSomeone,
     canManageDeptGroups: isOrgAdmin(level),
+    canManageUsers: isOrgAdmin(level),
   };
 }

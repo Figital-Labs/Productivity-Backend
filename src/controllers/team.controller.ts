@@ -14,6 +14,7 @@ import {
   listManagedTreeQuerySchema,
   listReportsQuerySchema,
   resetTeamUserPasswordInputSchema,
+  updateTeamUserInputSchema,
 } from "../schemas/team.schema.js";
 import * as teamImageDelegateService from "../services/team-image-delegate.service.js";
 import * as teamTextDelegateService from "../services/team-text-delegate.service.js";
@@ -99,6 +100,13 @@ export async function createUser(req: Request, res: Response): Promise<void> {
   const input = createTeamUserInputSchema.parse((req.body as unknown) ?? {});
   const user = await teamService.createUser(req.user, input);
   res.status(201).json(user);
+}
+
+export async function updateUser(req: Request, res: Response): Promise<void> {
+  const { id: targetUserId } = idParamSchema.parse(req.params);
+  const input = updateTeamUserInputSchema.parse((req.body as unknown) ?? {});
+  const user = await teamService.updateUser(req.user, targetUserId, input);
+  res.status(200).json(user);
 }
 
 export async function attachExistingUser(req: Request, res: Response): Promise<void> {

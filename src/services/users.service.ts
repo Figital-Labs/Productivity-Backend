@@ -1,3 +1,4 @@
+import { isOrgAdmin } from "../lib/access.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as userRepo from "../repositories/user.repository.js";
 import type { SearchUsersQuery, WorkingHoursInput } from "../schemas/users.schema.js";
@@ -11,24 +12,28 @@ export interface PublicUserSummary {
   level: number;
 }
 
-const SEARCH_RESULT_CAP = 50;
-
 /**
  * Sprint 14 addendum: same-org user search. Used by the manager dashboard's
- * "Add Existing User" picker and reusable by the Meetings page. Excludes
- * `orgId` from the response since it's always the caller's org (no
- * cross-org leakage).
+ * "Add Existing User" picker, the reporting-manager picker, and the Meetings
+ * page. Paginated (limit/offset) for lazy-loaded dropdowns. Excludes `orgId`
+ * from the response since it's always the caller's org (no cross-org leakage).
+ *
+ * Level ceiling: non-admins only see users below their own level. Org admins
+ * (and the meetings picker) see everyone in the org — an admin assigning a
+ * reporting manager must be able to pick anyone, including other admins.
  */
 export async function searchSameOrg(
   caller: AuthenticatedUser,
   query: SearchUsersQuery,
 ): Promise<PublicUserSummary[]> {
   const trimmed = query.q?.trim();
+  const seesAllLevels = query.forMeeting === true || isOrgAdmin(caller.level);
   const rows = await userRepo.searchSameOrg(
     caller.orgId,
     trimmed && trimmed.length > 0 ? trimmed : undefined,
-    SEARCH_RESULT_CAP,
-    query.forMeeting ? undefined : caller.level,
+    query.limit,
+    seesAllLevels ? undefined : caller.level,
+    query.offset,
   );
   return rows.map((r) => ({
     id: r.id,
