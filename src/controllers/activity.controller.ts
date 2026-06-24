@@ -16,6 +16,6 @@ export async function list(req: Request, res: Response): Promise<void> {
     throw parsed.error;
   }
 
-  const events = await activityService.listActivity(req.user, parsed.data);
-  res.json(events);
+  const page = await activityService.listActivity(req.user, parsed.data);
+  res.json(page);
 }

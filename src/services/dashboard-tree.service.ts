@@ -191,9 +191,23 @@ export interface DirectoryTree {
   org: { id: string; name: string };
   departments: DirectoryDepartmentNode[];
   unassignedStaff: { id: string; name: string; designation: string | null; role: string }[];
+  // Total operational (non-admin/root) staff without a group — drives the
+  // "Needs placement" count and the "Load more" affordance. `unassignedStaff`
+  // is the paginated slice of this set.
+  unassignedStaffTotal: number;
 }
 
-export async function getDirectory(actor: AuthenticatedUser): Promise<DirectoryTree> {
+export interface DirectoryPageOpts {
+  limit?: number;
+  offset?: number;
+}
+
+export async function getDirectory(
+  actor: AuthenticatedUser,
+  opts?: DirectoryPageOpts,
+): Promise<DirectoryTree> {
+  const limit = opts?.limit ?? 50;
+  const offset = opts?.offset ?? 0;
   const [org, departments, allUsers, ledGroupIds, headedDeptIds] = await Promise.all([
     prisma.organization.findUnique({ where: { id: actor.orgId } }),
     prisma.department.findMany({
@@ -215,6 +229,9 @@ export async function getDirectory(actor: AuthenticatedUser): Promise<DirectoryT
     prisma.user.findMany({
       where: { orgId: actor.orgId },
       select: { id: true, name: true, designation: true, role: true },
+      // Stable total order (name + unique id) so paginated slices of
+      // `unassignedStaff` never shuffle, overlap, or drop across requests.
+      orderBy: [{ name: "asc" }, { id: "asc" }],
     }),
     prisma.groupMembership
       .findMany({
@@ -264,12 +281,18 @@ export async function getDirectory(actor: AuthenticatedUser): Promise<DirectoryT
       }),
   }));
 
+  // Operational staff with no active group membership. Admin/root accounts are
+  // excluded here (the directory intentionally hides them) so the total + the
+  // paginated slice stay consistent with what the UI shows.
+  const unassigned = allUsers
+    .filter((u) => !assignedUsers.has(u.id) && u.role !== "admin" && u.role !== "root")
+    .map((u) => ({ id: u.id, name: u.name, designation: u.designation, role: u.role }));
+
   return {
     org: { id: org.id, name: org.name },
     departments: departmentNodes,
-    unassignedStaff: allUsers
-      .filter((u) => !assignedUsers.has(u.id))
-      .map((u) => ({ id: u.id, name: u.name, designation: u.designation, role: u.role })),
+    unassignedStaff: unassigned.slice(offset, offset + limit),
+    unassignedStaffTotal: unassigned.length,
   };
 }
 

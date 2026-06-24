@@ -83,13 +83,26 @@ async function requireCanManage(manager: AuthenticatedUser, targetUserId: string
  * day-plan / day-closure submission status. Single grouped query for counts
  * to avoid N+1.
  */
-export async function listReports(manager: AuthenticatedUser): Promise<ReportWithProgress[]> {
+export interface ReportPageOpts {
+  limit?: number | undefined;
+  offset?: number | undefined;
+}
+
+export async function listReports(
+  manager: AuthenticatedUser,
+  opts?: ReportPageOpts,
+): Promise<ReportWithProgress[]> {
   const row = await prisma.user.findUnique({
     where: { id: manager.id },
     select: {
       reports: {
         select: { id: true, email: true, name: true, orgId: true, role: true, designation: true },
-        orderBy: { name: "asc" },
+        // name + unique id → deterministic order so depth-0 paging is stable.
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+        // Unset by default (full list) so existing callers — the rollup in
+        // listManagedTree, SendReminderModal, ManageSection — are unchanged.
+        ...(opts?.limit !== undefined ? { take: opts.limit } : {}),
+        ...(opts?.offset !== undefined ? { skip: opts.offset } : {}),
       },
     },
   });
@@ -395,36 +408,77 @@ export interface ManagedTreeNode {
   todayProgress?: ReportProgress;
 }
 
+export interface ManagedTreeRollup {
+  done: number;
+  total: number;
+  plans: number;
+  closures: number;
+}
+
+export interface ManagedTreeResult {
+  nodes: ManagedTreeNode[];
+  // Total direct reports (depth-0). `nodes` is the paginated slice of those
+  // plus the depth-1 children of just the included direct reports.
+  total: number;
+  hasMore: boolean;
+  // Team-wide "today" rollup across ALL direct reports — independent of the
+  // page so the summary card never drifts as more rows load.
+  rollup: ManagedTreeRollup;
+}
+
 /**
  * Two-level managed tree: direct reports (depth=0, with todayProgress) plus
  * their direct reports (depth=1, basic info only). Used by the mobile Team
  * tab to show the full supervised pool for task delegation (G7 + G10).
+ *
+ * Paginated by direct report (depth-0). The `rollup` + `total` are computed
+ * over the full direct-report set so the summary stays accurate per page.
  */
-export async function listManagedTree(manager: AuthenticatedUser): Promise<ManagedTreeNode[]> {
+export async function listManagedTree(
+  manager: AuthenticatedUser,
+  opts?: ReportPageOpts,
+): Promise<ManagedTreeResult> {
+  const limit = opts?.limit ?? 50;
+  const offset = opts?.offset ?? 0;
+
   const directReports = await listReports(manager);
-  if (directReports.length === 0) return [];
+  const rollup = directReports.reduce<ManagedTreeRollup>(
+    (acc, r) => ({
+      done: acc.done + r.todayProgress.done,
+      total: acc.total + r.todayProgress.total,
+      plans: acc.plans + (r.todayProgress.planSubmitted ? 1 : 0),
+      closures: acc.closures + (r.todayProgress.closureSubmitted ? 1 : 0),
+    }),
+    { done: 0, total: 0, plans: 0, closures: 0 },
+  );
+  const total = directReports.length;
+  if (total === 0) return { nodes: [], total: 0, hasMore: false, rollup };
 
-  const directIds = directReports.map((r) => r.id);
+  const pagedDirect = directReports.slice(offset, offset + limit);
+  const pagedIds = pagedDirect.map((r) => r.id);
 
-  const subRows = await prisma.user.findMany({
-    where: {
-      managers: { some: { id: { in: directIds } } },
-      NOT: { id: { in: [manager.id, ...directIds] } },
-    },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      designation: true,
-      orgId: true,
-      role: true,
-      managers: { where: { id: { in: directIds } }, select: { id: true } },
-    },
-    orderBy: { name: "asc" },
-  });
+  const subRows =
+    pagedIds.length > 0
+      ? await prisma.user.findMany({
+          where: {
+            managers: { some: { id: { in: pagedIds } } },
+            NOT: { id: { in: [manager.id, ...pagedIds] } },
+          },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            designation: true,
+            orgId: true,
+            role: true,
+            managers: { where: { id: { in: pagedIds } }, select: { id: true } },
+          },
+          orderBy: { name: "asc" },
+        })
+      : [];
 
-  return [
-    ...directReports.map((r) => ({
+  const nodes: ManagedTreeNode[] = [
+    ...pagedDirect.map((r) => ({
       id: r.id,
       email: r.email,
       name: r.name,
@@ -450,6 +504,8 @@ export async function listManagedTree(manager: AuthenticatedUser): Promise<Manag
       })),
     ),
   ];
+
+  return { nodes, total, hasMore: offset + pagedDirect.length < total, rollup };
 }
 
 export async function detachReport(manager: AuthenticatedUser, reportId: string): Promise<void> {

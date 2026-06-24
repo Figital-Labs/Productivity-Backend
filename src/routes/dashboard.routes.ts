@@ -29,6 +29,7 @@ dashboardRouter.post("/reminders", dashboardController.createReminder);
 // Sprint 18 — Phase 2 endpoints.
 dashboardRouter.get("/summary-cards", dashboardController.summaryCards);
 dashboardRouter.get("/performers", dashboardController.performers);
+dashboardRouter.get("/performers/ranking", dashboardController.performersRanking);
 dashboardRouter.get("/analytics/plan-vs-closure", dashboardController.planVsClosure);
 dashboardRouter.get("/analytics/groups", dashboardController.groupAnalytics);
 dashboardRouter.get("/analytics/task-flow", dashboardController.taskFlow);
