@@ -5,7 +5,7 @@ import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as dayClosureRepo from "../repositories/day-closure.repository.js";
 import * as dayPlanRepo from "../repositories/day-plan.repository.js";
 import * as taskRepo from "../repositories/task.repository.js";
-import { canAccessTask, canManageUser } from "../utils/auth.js";
+import { canAccessTask, inReportingScope } from "../utils/auth.js";
 import { parseDateString, todayInUserTz } from "../utils/date.js";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata";
@@ -362,7 +362,7 @@ export async function getPersonProfile(
       name: m.group.name,
       isLead: m.isLead,
     })),
-    canManage: await canManageUser(actor, targetId),
+    canManage: await inReportingScope(actor, targetId),
   };
 }
 

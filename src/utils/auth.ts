@@ -92,6 +92,30 @@ export async function reportSubtreeIds(actorId: string): Promise<Set<string>> {
 }
 
 /**
+ * OPERATIONAL authority: "may I see/delegate to this user?" Used by the
+ * manager surfaces — view a report's tasks/plans, delegate a task. True iff
+ *
+ *     actor is root super-admin (cross-org), OR
+ *     actor is same-org admin, OR
+ *     target is anywhere in actor's reporting subtree (transitive, down the chain)
+ *
+ * NOTE: intentionally no level ceiling and no `canManageUsers` flag — a manager
+ * manages their reports purely by virtue of the reporting edge (matches the
+ * flat model where a manager and their report may share a level). Account
+ * mutations (create/edit/reset-password) are a SEPARATE, admin-only authority —
+ * see `isOrgAdmin` / the requireOrgAdmin middleware.
+ */
+export async function inReportingScope(
+  actor: AuthenticatedUser,
+  targetId: string,
+): Promise<boolean> {
+  if (actor.isSuperAdmin) return true;
+  if (isOrgAdmin(actor.level)) return true;
+  const subtree = await reportSubtreeIds(actor.id);
+  return subtree.has(targetId);
+}
+
+/**
  * Sprint 18 (L7+L8): the central "may I act on this user?" authority.
  *
  *   true iff

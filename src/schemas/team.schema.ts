@@ -32,25 +32,47 @@ export const createTeamUserInputSchema = z.object({
   name: z.string().min(1, "name is required").max(120),
   email: z.email("email must be a valid email").max(200),
   password: z.string().min(6, "password must be at least 6 characters").max(200),
-  role: z.enum(["staff", "manager"]).optional(),
-  roleType: z.enum(["director", "dept_head", "group_lead", "staff", "custom"]).optional(),
-  /** Explicit level override (used in `custom` mode or to refine a typed role). */
-  level: z.number().int().min(1).max(1000).optional(),
-  /** Dept Head (sets Department.headId) or general association. */
-  departmentId: z.string().optional(),
-  /** Group Lead / Staff: optionally join a group at creation time. */
-  groupId: z.string().optional(),
-  /** Membership flag if `groupId` is set. Group Lead defaults this to true. */
-  isLead: z.boolean().optional(),
-  /** Override the default canManageUsers flag for the type. */
-  canManageUsers: z.boolean().optional(),
+  /** Human-facing job title shown in the UI (e.g. "General Manager"). */
+  designation: z.string().max(120).optional(),
   /**
-   * Explicit manager edges. Defaults to `[creator.id]`. Useful when an admin
-   * onboards a dept head whose manager is the director, not the admin.
+   * Simplified model: an admin creates either a plain user or an admin. When
+   * true → {role:"admin", level:800, canManageUsers:true}; otherwise a plain
+   * staff user {role:"staff", level:100}. Account creation is admin-only.
+   */
+  isAdmin: z.boolean().optional(),
+  /**
+   * Reporting managers (m2m). The UI picks one today; the field is an array so
+   * multi-manager needs no API change later. Empty/absent → top of the tree.
    */
   managerIds: z.array(z.string()).max(20).optional(),
+
+  // --- Legacy hierarchy fields (deprecated, kept for backward compat) ---
+  // Older FE flows still send these; new flows use isAdmin + designation.
+  role: z.enum(["staff", "manager"]).optional(),
+  roleType: z.enum(["director", "dept_head", "group_lead", "staff", "custom"]).optional(),
+  level: z.number().int().min(1).max(1000).optional(),
+  departmentId: z.string().optional(),
+  groupId: z.string().optional(),
+  isLead: z.boolean().optional(),
+  canManageUsers: z.boolean().optional(),
 });
 export type CreateTeamUserInput = z.infer<typeof createTeamUserInputSchema>;
+
+/**
+ * Body for `PATCH /team/users/:id` — admin edits a user's account fields. All
+ * fields optional; only provided keys are updated. `managerIds` uses
+ * set-replacement semantics (the user's managers become exactly this set).
+ */
+export const updateTeamUserInputSchema = z
+  .object({
+    name: z.string().min(1).max(120).optional(),
+    email: z.email("email must be a valid email").max(200).optional(),
+    designation: z.string().max(120).nullable().optional(),
+    isAdmin: z.boolean().optional(),
+    managerIds: z.array(z.string()).max(20).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "No fields to update" });
+export type UpdateTeamUserInput = z.infer<typeof updateTeamUserInputSchema>;
 
 /**
  * Body for `POST /team/users/:id/reset-password` — manager resets a report's

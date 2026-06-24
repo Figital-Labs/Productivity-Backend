@@ -6,3 +6,9 @@ generated
 
 # local disk storage driver (STORAGE_DRIVER=disk)
 .media-store/
+
+# local DB backups (contain PII — never commit)
+_backups/
+
+# one-off dev DB scripts (hardcoded prod connection string — never commit)
+scripts/*.cjs

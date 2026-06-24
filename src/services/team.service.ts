@@ -14,8 +14,9 @@ import type {
   CreateDelegatedTaskInput,
   CreateTeamUserInput,
   ResetTeamUserPasswordInput,
+  UpdateTeamUserInput,
 } from "../schemas/team.schema.js";
-import { canCreateUserAtLevel, reportSubtreeIds } from "../utils/auth.js";
+import { inReportingScope } from "../utils/auth.js";
 import { parseDateString, todayInUserTz } from "../utils/date.js";
 
 import { addUserToPersonalDirects } from "./personal-directs.service.js";
@@ -62,19 +63,20 @@ function toPublicTeamUser(u: {
   };
 }
 
-async function requireCanManage(manager: AuthenticatedUser, targetUserId: string): Promise<void> {
-  if (manager.isSuperAdmin) return;
-  const target = await prisma.user.findUnique({
-    where: { id: targetUserId },
-    select: { level: true },
-  });
-  if (!target) throw new NotFoundError("User", targetUserId);
-  if (target.level >= manager.level) {
-    throw new ForbiddenError("You cannot manage a user at or above your level");
-  }
-  const subtree = await reportSubtreeIds(manager.id);
-  if (!subtree.has(targetUserId)) {
-    throw new ForbiddenError("You are not a manager of this user");
+/**
+ * Operational guard for the manager surfaces (view a report's tasks/plans,
+ * delegate). Passes if the actor is admin/root or the target is anywhere in
+ * the actor's reporting subtree. No level ceiling, no `canManageUsers` flag —
+ * managing your reports flows from the reporting edge alone. Account mutations
+ * (create/edit/reset-password) are admin-only and gated by the requireOrgAdmin
+ * middleware on their routes, not here.
+ */
+async function requireReportingScope(
+  manager: AuthenticatedUser,
+  targetUserId: string,
+): Promise<void> {
+  if (!(await inReportingScope(manager, targetUserId))) {
+    throw new ForbiddenError("This user is outside your team");
   }
 }
 
@@ -164,7 +166,7 @@ export async function getReportTasks(
   reportId: string,
   date: Date,
 ): Promise<Task[]> {
-  await requireCanManage(manager, reportId);
+  await requireReportingScope(manager, reportId);
   return taskRepo.listByDate(reportId, date);
 }
 
@@ -177,7 +179,7 @@ export async function getReportSubmissions(
   reportId: string,
   date: Date,
 ): Promise<{ dayPlan: DayPlanSubmission | null; dayClosure: DayClosureSubmission | null }> {
-  await requireCanManage(manager, reportId);
+  await requireReportingScope(manager, reportId);
   const [dayPlan, dayClosureRow] = await Promise.all([
     dayPlanRepo.findByUserAndDate(reportId, date),
     dayClosureRepo.findByUserAndDate(reportId, date),
@@ -197,7 +199,7 @@ export async function createDelegatedTask(
   manager: AuthenticatedUser,
   input: CreateDelegatedTaskInput,
 ): Promise<Task> {
-  await requireCanManage(manager, input.assigneeId);
+  await requireReportingScope(manager, input.assigneeId);
   const targetDate = input.targetDate
     ? parseDateString(input.targetDate)
     : todayInUserTz(DEFAULT_TIMEZONE);
@@ -266,21 +268,26 @@ export async function createUser(
   creator: AuthenticatedUser,
   input: CreateTeamUserInput,
 ): Promise<PublicTeamUser> {
-  // L8 guardrail: only users with the create-users permission may proceed.
-  if (!creator.isSuperAdmin && !isOrgAdmin(creator.level) && !creator.canManageUsers) {
-    throw new ForbiddenError("You do not have permission to create users.");
+  // Account creation is admin-only (also enforced by requireOrgAdmin on the
+  // route; kept here as defense-in-depth).
+  if (!creator.isSuperAdmin && !isOrgAdmin(creator.level)) {
+    throw new ForbiddenError("Only admins can create users.");
   }
 
-  const defaults = resolveHierarchyDefaults(input);
-  const resolvedRole = defaults.role;
-  const resolvedLevel = input.level ?? defaults.level;
-  const resolvedCanManageUsers = input.canManageUsers ?? defaults.canManageUsers;
-
-  // L7 ceiling: never mint a user at level >= your own (root + admin excepted).
-  if (!canCreateUserAtLevel(creator, resolvedLevel)) {
-    throw new ForbiddenError(
-      `You cannot create a user at level ${resolvedLevel.toString()} — your level is ${creator.level.toString()}.`,
-    );
+  // Simplified model: `isAdmin` chooses plain user vs admin. Fall back to the
+  // legacy roleType/role mapping when `isAdmin` is absent (older FE flows).
+  let resolvedRole: "staff" | "manager" | "admin";
+  let resolvedLevel: number;
+  let resolvedCanManageUsers: boolean;
+  if (input.isAdmin !== undefined && input.roleType === undefined) {
+    resolvedRole = input.isAdmin ? "admin" : "staff";
+    resolvedLevel = input.isAdmin ? 800 : 100;
+    resolvedCanManageUsers = input.isAdmin;
+  } else {
+    const defaults = resolveHierarchyDefaults(input);
+    resolvedRole = defaults.role;
+    resolvedLevel = input.level ?? defaults.level;
+    resolvedCanManageUsers = input.canManageUsers ?? defaults.canManageUsers;
   }
 
   // Email uniqueness check before transaction — fail fast.
@@ -300,8 +307,10 @@ export async function createUser(
   }
 
   const passwordHash = await hashPassword(input.password);
-  const managerIds =
-    input.managerIds && input.managerIds.length > 0 ? input.managerIds : [creator.id];
+  // Reporting managers are optional now (absent → top of the tree). The UI
+  // sends a one-element array; the field is an array so multi-manager needs no
+  // change later.
+  const managerIds = input.managerIds ?? [];
 
   const created = await prisma.$transaction(async (tx) => {
     const newUser = await tx.user.create({
@@ -309,6 +318,7 @@ export async function createUser(
         email: input.email,
         name: input.name,
         passwordHash,
+        designation: input.designation ?? null,
         role: resolvedRole,
         level: resolvedLevel,
         canManageUsers: resolvedCanManageUsers,
@@ -316,12 +326,13 @@ export async function createUser(
       },
     });
 
-    // Wire manager edges. Always include the creator so they can drill into
-    // the new user immediately (unless explicitly excluded by `managerIds`).
-    await tx.user.update({
-      where: { id: newUser.id },
-      data: { managers: { connect: managerIds.map((id) => ({ id })) } },
-    });
+    // Wire manager edges (set-replacement semantics on create = connect the set).
+    if (managerIds.length > 0) {
+      await tx.user.update({
+        where: { id: newUser.id },
+        data: { managers: { connect: managerIds.map((id) => ({ id })) } },
+      });
+    }
 
     // dept_head → set Department.headId on the chosen department.
     if (input.roleType === "dept_head" && input.departmentId) {
@@ -356,6 +367,75 @@ export async function createUser(
   });
 
   return toPublicTeamUser(created);
+}
+
+/**
+ * Admin edits a user's account fields. Only provided keys change. `managerIds`
+ * uses set-replacement (the user's managers become exactly that set; absent →
+ * untouched, empty array → cleared to top-of-tree). Admin-only via the
+ * requireOrgAdmin route gate; the org boundary is enforced here.
+ */
+export async function updateUser(
+  admin: AuthenticatedUser,
+  targetUserId: string,
+  input: UpdateTeamUserInput,
+): Promise<PublicTeamUser> {
+  const target = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { id: true, orgId: true },
+  });
+  if (!target) throw new NotFoundError("User", targetUserId);
+  if (!admin.isSuperAdmin && target.orgId !== admin.orgId) {
+    throw new ForbiddenError("This user is in another organization");
+  }
+
+  // Email change → uniqueness check (a different user must not own it).
+  if (input.email !== undefined) {
+    const owner = await prisma.user.findUnique({ where: { email: input.email } });
+    if (owner && owner.id !== targetUserId) {
+      throw new ConflictError("USER_ALREADY_EXISTS", "A user with this email already exists.");
+    }
+  }
+
+  // Validate manager ids are same-org before wiring (avoid cross-org edges).
+  if (input.managerIds && input.managerIds.length > 0) {
+    const found = await prisma.user.findMany({
+      where: { id: { in: input.managerIds }, orgId: target.orgId },
+      select: { id: true },
+    });
+    if (found.length !== input.managerIds.length) {
+      throw new NotFoundError("Manager");
+    }
+    if (input.managerIds.includes(targetUserId)) {
+      throw new AppError("INVALID_MANAGER", 400, "A user cannot report to themselves.");
+    }
+  }
+
+  const data: {
+    name?: string;
+    email?: string;
+    designation?: string | null;
+    role?: string;
+    level?: number;
+    canManageUsers?: boolean;
+    managers?: { set: { id: string }[] };
+  } = {};
+  if (input.name !== undefined) data.name = input.name;
+  if (input.email !== undefined) data.email = input.email;
+  if (input.designation !== undefined) data.designation = input.designation;
+  if (input.isAdmin !== undefined) {
+    data.role = input.isAdmin ? "admin" : "staff";
+    data.level = input.isAdmin ? 800 : 100;
+    data.canManageUsers = input.isAdmin;
+  }
+  // Set-replacement of reporting managers.
+  if (input.managerIds !== undefined) {
+    data.managers = { set: input.managerIds.map((id) => ({ id })) };
+  }
+
+  const updated = await prisma.user.update({ where: { id: targetUserId }, data });
+
+  return toPublicTeamUser(updated);
 }
 
 /**
@@ -519,16 +599,20 @@ export async function detachReport(manager: AuthenticatedUser, reportId: string)
 }
 
 /**
- * Manager resets a report's password. Manager must manage the target user.
+ * Admin resets a user's password. Account-level action — gated admin-only by
+ * the requireOrgAdmin middleware on the route; here we just enforce the org
+ * boundary (an org admin may only reset users in their own org; root anywhere).
  */
 export async function resetUserPassword(
-  manager: AuthenticatedUser,
+  admin: AuthenticatedUser,
   targetUserId: string,
   input: ResetTeamUserPasswordInput,
 ): Promise<void> {
-  await requireCanManage(manager, targetUserId);
   const target = await prisma.user.findUnique({ where: { id: targetUserId } });
   if (!target) throw new NotFoundError("User", targetUserId);
+  if (!admin.isSuperAdmin && target.orgId !== admin.orgId) {
+    throw new ForbiddenError("This user is in another organization");
+  }
   const passwordHash = await hashPassword(input.password);
   await prisma.user.update({ where: { id: targetUserId }, data: { passwordHash } });
 }

@@ -60,6 +60,7 @@ export function searchSameOrg(
   q: string | undefined,
   take: number,
   maxLevel?: number,
+  skip = 0,
 ): Promise<Pick<User, "id" | "email" | "name" | "role" | "level" | "designation">[]> {
   const baseWhere = q
     ? {
@@ -74,7 +75,9 @@ export function searchSameOrg(
   return prisma.user.findMany({
     where,
     take,
-    orderBy: { name: "asc" },
+    skip,
+    // Stable order for deterministic paging (name + unique id tiebreaker).
+    orderBy: [{ name: "asc" }, { id: "asc" }],
     select: { id: true, email: true, name: true, role: true, level: true, designation: true },
   });
 }
