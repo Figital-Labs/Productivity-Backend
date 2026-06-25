@@ -27,6 +27,8 @@ export interface PublicAuthUser {
   // these, NOT on the role string.
   level: number;
   capabilities: Capabilities;
+  // Cross-org root. Drives the super-admin platform portal on the FE.
+  isSuperAdmin: boolean;
 }
 
 export interface AuthResponse {
@@ -71,6 +73,7 @@ async function toPublicUser(user: userRepo.User): Promise<PublicAuthUser> {
     workEndMinute: user.workEndMinute,
     level: user.level,
     capabilities: capabilitiesFor(user.level, scope),
+    isSuperAdmin: user.isSuperAdmin,
   };
 }
 
