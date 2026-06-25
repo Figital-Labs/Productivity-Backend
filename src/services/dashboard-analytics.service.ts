@@ -128,12 +128,16 @@ export async function getPerformers(
   const rows = await performerRows(scope, metric, days);
   const sortedDesc = [...rows].sort(byValueDesc);
   const sortedAsc = [...rows].sort(byValueAsc);
-  return {
-    metric,
-    windowDays: days,
-    top: sortedDesc.slice(0, limit),
-    bottom: sortedAsc.slice(0, limit),
-  };
+
+  // A "top performer" must have actually produced something — a 0-value user is
+  // never a top performer. And the two lists must be disjoint: exclude anyone
+  // already shown in `top` from `bottom`, so the same person can't appear in
+  // both (which made Top and Low Activity look like mirror images).
+  const top = sortedDesc.filter((r) => r.value > 0).slice(0, limit);
+  const topIds = new Set(top.map((r) => r.user.id));
+  const bottom = sortedAsc.filter((r) => !topIds.has(r.user.id)).slice(0, limit);
+
+  return { metric, windowDays: days, top, bottom };
 }
 
 export interface PerformersRankingResult {

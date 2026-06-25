@@ -7,7 +7,7 @@ export type Scope =
   | { type: "org"; orgId: string }
   | { type: "dept"; departmentIds: string[]; orgId: string }
   | { type: "group"; groupIds: string[]; orgId: string }
-  | { type: "reports-only"; reportIds: string[]; orgId: string }
+  | { type: "reports-only"; reportIds: string[]; orgId: string; actorId: string }
   | { type: "none" };
 
 /**
@@ -54,6 +54,7 @@ export async function resolveScope(user: AuthenticatedUser): Promise<Scope> {
       type: "reports-only",
       reportIds: Array.from(user.reportIds),
       orgId: user.orgId,
+      actorId: user.id,
     };
   }
 

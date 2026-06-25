@@ -17,6 +17,7 @@ import type {
   UpdateDepartmentInput,
   UpdateGroupInput,
 } from "../schemas/dashboard.schema.js";
+import { reportSubtreeIds } from "../utils/auth.js";
 import { dayBoundsInTz, formatDateYmd, parseDateString, todayInUserTz } from "../utils/date.js";
 import { omitUndefined } from "../utils/object.js";
 
@@ -117,7 +118,10 @@ export async function userIdsInScope(scope: Scope): Promise<string[]> {
     });
     return unique(memberships.map((membership) => membership.userId));
   }
-  return unique(scope.reportIds);
+  // reports-only: the manager's WHOLE team — direct reports + everyone below
+  // them (transitive subtree), deduped — so every KPI/analytic matches the
+  // team table rather than only direct reports.
+  return Array.from(await reportSubtreeIds(scope.actorId));
 }
 
 export async function kpisForUsers(
