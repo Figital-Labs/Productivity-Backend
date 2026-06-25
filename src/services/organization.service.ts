@@ -64,6 +64,25 @@ export async function createOrganization(
   }
 }
 
+/** Rename an org (root-only). Name is unique. */
+export async function updateOrganization(orgId: string, name: string): Promise<PublicOrganization> {
+  const org = await prisma.organization.findUnique({ where: { id: orgId } });
+  if (!org) throw new NotFoundError("Organization", orgId);
+  try {
+    const updated = await prisma.organization.update({
+      where: { id: orgId },
+      data: { name },
+      include: { _count: { select: { users: true } } },
+    });
+    return toPublic(updated, orgId);
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes("Organization_name_key")) {
+      throw new ConflictError("ORGANIZATION_NAME_TAKEN", `Org name "${name}" is taken.`);
+    }
+    throw err;
+  }
+}
+
 /**
  * Bootstrap the first admin user of an org. Sets canManageUsers=true so they
  * can immediately invite their dept heads / staff. Org must already exist.

@@ -3,6 +3,7 @@ import { Router } from "express";
 import { jwtAuth } from "../middleware/auth.js";
 
 import { activityRouter } from "./activity.routes.js";
+import { adminRouter } from "./admin.routes.js";
 import { authRouter } from "./auth.routes.js";
 import { capturesRouter } from "./captures.routes.js";
 import { configRouter } from "./config.routes.js";
@@ -40,6 +41,7 @@ v1Router.use("/day-plan", dayPlanRouter);
 v1Router.use("/day-closure", dayClosureRouter);
 v1Router.use("/dashboard", dashboardRouter);
 v1Router.use("/orgs", organizationRouter);
+v1Router.use("/admin", adminRouter);
 v1Router.use("/activity", activityRouter);
 v1Router.use("/team", teamRouter);
 v1Router.use("/users", usersRouter);
