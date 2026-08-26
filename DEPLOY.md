@@ -51,6 +51,65 @@ Direct upload is a progressive enhancement: until CORS is set, clips upload thro
 Optional lifecycle (per surface, since keys are `<surface>/…` in the dedicated bucket): e.g. keep
 `meetings/` 90 days, `voice/` + `image/` 30 days; abort incomplete multipart uploads after 7 days.
 
+## How production ACTUALLY runs (as of 2026-08-25)
+
+> The Docker/Fargate options below are the documented _options_. What is deployed today is
+> **neither**: an **EC2** box (`day-planner-prod`, `i-0a7665218d9211593`) running the built app
+> under **PM2** as `day-planner-backend` on **port 8000**, behind **nginx**. Trust this section over
+> the Docker instructions when debugging live.
+
+```
+browser ──HTTPS──▶ nginx (:443, Certbot TLS)  ──▶  PM2 `day-planner-backend` (127.0.0.1:8000)
+                    │  /        → /var/www/day-planner  (static SPA)
+                    │  /api/    → proxy_pass to the Node app
+                    └─ config: /etc/nginx/conf.d/day-planner.conf
+```
+
+- **Restart after an `.env` change:** `pm2 restart day-planner-backend --update-env`.
+  (`pm2 env 0` will NOT show app config — the app loads `.env` itself via dotenv in
+  `src/config/env.ts` with `override: true`, so the FILE wins. Verify by curling the app.)
+- **Database:** AWS RDS since 2026-08-24 — see [.agents/DATABASE-ACCESS.md](./.agents/DATABASE-ACCESS.md).
+
+### ⚠️ nginx `client_max_body_size` — the upload trap
+
+nginx's default body limit is **1 MB**, while the app accepts **10 MB** (`MAX_MEDIA_BYTES`).
+Left at the default, nginx returns **413** for anything larger _before the request reaches Node_ —
+so uploads fail with **nothing in `pm2 logs`**. The config therefore sets:
+
+```nginx
+server {                                # the :443 block, NOT the Certbot redirect block
+    client_max_body_size 12M;           # ABOVE the app's 10M, deliberately
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000/api/;
+        proxy_request_buffering off;    # stream large uploads instead of buffering to disk
+        proxy_read_timeout 300s;        # headroom for slow mobile connections
+    }
+}
+```
+
+**Why 12M and not 10M:** nginx must never be the component that rejects. At 12M an oversized file
+reaches the app, which returns a proper `413 FILE_TOO_LARGE` _with CORS headers_ and a readable
+message (`src/middleware/upload.ts` maps multer's `LIMIT_FILE_SIZE`). Let the app own the limit.
+
+Apply changes with `sudo nginx -t && sudo systemctl reload nginx` — `-t` validates before anything
+changes, and `reload` swaps workers with no dropped connections.
+
+### Debugging tip: a 4xx at the edge LOOKS like a CORS error
+
+This cost real hours. Both **nginx's 413** and **S3's 403** (presigned-POST policy rejection) return
+error responses **without `Access-Control-Allow-Origin`**. The browser cannot read them, so it
+reports a **CORS failure** — sending you off to check CORS config that was correct all along.
+
+Two rules that cut straight through it:
+
+1. **Reproduce while tailing `pm2 logs day-planner-backend --lines 0`.** Every 4xx is logged with
+   route + code (`src/middleware/error.ts`). **Silence means the request never reached the app** —
+   so the failure is at nginx or S3, not in your code.
+2. **Symptom differs by device? It is not CORS.** CORS is origin-based, not device-based. "Works on
+   laptop, fails on phone" means the _payload_ differs — phone photos are 2–30 MB where laptop
+   screenshots are under 1 MB. That is a size limit, not a CORS rule.
+
 ## Run
 
 **EC2 (Docker):**

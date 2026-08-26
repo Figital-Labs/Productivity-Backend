@@ -377,8 +377,13 @@ model MorningBriefCache {
 /// an `orgId` FK to this row. Root super-admins (`User.isSuperAdmin`) can
 /// create new orgs via `POST /orgs`; everyone else is scoped to their own.
 model Organization {
-  id        String   @id @default(cuid())
-  name      String   @unique
+  id   String @id @default(cuid())
+  name String @unique
+  /// Per-org branding. NULL means "no logo uploaded" — the frontend falls back to the
+  /// product mark, then to the org's initials, so a brand-new tenant looks deliberate
+  /// rather than broken. Nullable by design: adding it touches no existing row.
+  /// Absolute URL (S3 object or any CDN); the app never serves it from disk.
+  logoUrl   String?
   createdAt DateTime @default(now())
 
   users       User[]

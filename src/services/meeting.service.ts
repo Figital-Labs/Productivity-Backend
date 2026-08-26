@@ -1,5 +1,10 @@
 import { enqueueMeeting } from "../jobs/queue.js";
-import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
+import {
+  AI_TEMPERATURE,
+  AI_THINKING_BUDGET,
+  AI_TIMEOUT_MS,
+  RETRY_PROFILE_FOR,
+} from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { AppError, ConflictError, NotFoundError } from "../lib/errors.js";
 import { log } from "../lib/logger.js";
@@ -494,6 +499,10 @@ export async function runProcessing(
     temperature: AI_TEMPERATURE.meeting,
     thinkingBudget: AI_THINKING_BUDGET.meeting,
     timeoutMs: AI_TIMEOUT_MS.meeting,
+    // Queued work — nobody is blocked on this request, so a transient 429/503 gets a real
+    // backoff (2s/10s/30s) instead of the 400ms a synchronous surface uses. jobBudgetSeconds
+    // already covers this extra wall-clock.
+    retryProfile: RETRY_PROFILE_FOR.meeting,
     label: "meeting",
     onRaw: logRaw("meeting", caller.id),
   });

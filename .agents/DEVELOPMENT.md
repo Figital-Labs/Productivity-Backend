@@ -26,10 +26,33 @@ Run from `Backend_task_list/`. (Authoritative list: `package.json` `scripts`.)
 
 ## Environment
 - `.env` (loaded by `config/env.ts`, `override: true` — see GOTCHAS #1). Validated with zod.
-- **DB:** `DATABASE_URL` (Postgres; Neon in deploy).
+- **DB:** `DATABASE_URL` (Postgres; local Docker for dev, Neon in prod). Full local/prod/dev-RDS story + helper scripts in **Databases & environments** below.
 - **Vertex AI:** Google service-account credentials (`secrets/` holds the SA json, gitignored) + project/location. Model is `gemini-2.5-flash`.
 - **Auth:** JWT secret.
 - Deployed on **Render free tier** (512MB / 0.1 vCPU) — memory and the synchronous meeting call both matter (GOTCHAS #2, #3).
+
+## Databases & environments
+> **See [DATABASE-ACCESS.md](./DATABASE-ACCESS.md)** for how to actually connect to each database, why
+> AWS credentials give you *zero* access to the data inside them, the security-group model, and the
+> full Neon → RDS migration runbook.
+
+> **⚠️ Updated 2026-08-24: production is no longer on Neon.** It now runs on AWS RDS — database
+> `productivity-ai` on the `hospital-os-prod` instance. The Neon project is kept intact as a rollback
+> path (`DATABASE_URL_PROD`) and must not be decommissioned yet. The prod migration script is
+> `scripts/migrate-neon-to-rds.sh`.
+
+Postgres targets. The app only ever reads `DATABASE_URL`; the other `DATABASE_URL_*` entries live in
+`.env` as references for the helper scripts below (not read by app code). Scripts are in `scripts/`.
+
+Keys, after the 2026-08-24 rename — `DATABASE_URL_LOCAL` (Docker), `DATABASE_URL_DEV` (RDS dev),
+`DATABASE_URL_PROD` (**RDS production**), `DATABASE_URL_NEON_LEGACY` (retired Neon, rollback only).
+⚠️ Only `DATABASE_URL` may carry `uselibpqcompat=true` — libpq (psql/pg_dump) rejects it, so adding
+it to any `DATABASE_URL_*` key silently breaks the scripts.
+
+- **Local (default)** — Postgres **18** in Docker: container `task-list-postgres`, db `tasklist`, user/pass `postgres`/`postgres`, port 5432, named volume `tasklist-pgdata` (data survives `docker rm`). Migrate + seed as above, or pull real data ↓.
+- **Real data locally** — `bash scripts/pull-prod-to-local.sh`: dumps the whole prod DB (Neon, `DATABASE_URL_PROD`) into local, **excludes the `pgboss` job schema** (so the in-process worker doesn't run prod jobs), then **resets every password to `1234`** via `prisma/reset-all-passwords.ts` (localhost-guarded). Idempotent; recreates the container to match Neon's major version.
+- **Shared AWS RDS dev** — `DATABASE_URL_DEV` → db `productivity_ai_dev` on a **shared** RDS instance (`ap-south-1`). Needs `./global-bundle.pem` (AWS root CA, auto-downloaded by the script) for `sslmode=verify-full`. `bash scripts/push-local-to-dev.sh` pushes local → that DB, **guarded to only ever touch a `*dev*` DB** (never the shared `june-22-prod`). ⚠️ It connects as the RDS **master `postgres` user** (broad access) — for real app use, ask DevOps for a user scoped to `productivity_ai_dev`.
+- **Point the app at dev** — set `DATABASE_URL` to the `DATABASE_URL_DEV` value (run from this repo dir so `./global-bundle.pem` resolves); don't leave two active `DATABASE_URL` lines.
 
 ## Code conventions
 - **ESM + strict TypeScript.** Import with explicit `.js` extensions (`./foo.js`), even from `.ts`.

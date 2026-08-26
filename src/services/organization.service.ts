@@ -10,18 +10,27 @@ import type {
 export interface PublicOrganization {
   id: string;
   name: string;
+  /** Per-org branding; null until the org uploads one (FE falls back to the product mark). */
+  logoUrl: string | null;
   createdAt: string;
   userCount: number;
   isCurrent: boolean;
 }
 
 function toPublic(
-  org: { id: string; name: string; createdAt: Date; _count: { users: number } },
+  org: {
+    id: string;
+    name: string;
+    logoUrl: string | null;
+    createdAt: Date;
+    _count: { users: number };
+  },
   currentOrgId: string,
 ): PublicOrganization {
   return {
     id: org.id,
     name: org.name,
+    logoUrl: org.logoUrl,
     createdAt: org.createdAt.toISOString(),
     userCount: org._count.users,
     isCurrent: org.id === currentOrgId,
@@ -64,20 +73,36 @@ export async function createOrganization(
   }
 }
 
-/** Rename an org (root-only). Name is unique. */
-export async function updateOrganization(orgId: string, name: string): Promise<PublicOrganization> {
+/**
+ * Update an org (root-only): rename and/or set its branding logo. Both fields are optional
+ * so a caller can change one without clobbering the other — the previous signature took a
+ * bare `name`, which made "set the logo" impossible without also resending the name.
+ * Passing `logoUrl: null` explicitly CLEARS the logo (back to the product-mark fallback);
+ * omitting the key leaves it untouched.
+ */
+export async function updateOrganization(
+  orgId: string,
+  // `| undefined` spelled out because the project runs `exactOptionalPropertyTypes`.
+  input: { name?: string | undefined; logoUrl?: string | null | undefined },
+): Promise<PublicOrganization> {
   const org = await prisma.organization.findUnique({ where: { id: orgId } });
   if (!org) throw new NotFoundError("Organization", orgId);
   try {
     const updated = await prisma.organization.update({
       where: { id: orgId },
-      data: { name },
+      data: {
+        ...(input.name !== undefined && { name: input.name }),
+        ...(input.logoUrl !== undefined && { logoUrl: input.logoUrl }),
+      },
       include: { _count: { select: { users: true } } },
     });
     return toPublic(updated, orgId);
   } catch (err: unknown) {
     if (err instanceof Error && err.message.includes("Organization_name_key")) {
-      throw new ConflictError("ORGANIZATION_NAME_TAKEN", `Org name "${name}" is taken.`);
+      // A unique violation here can only come from a rename, so `input.name` is set on this
+      // path. Fall back to the current name so the message can never read `Org name "undefined"`.
+      const attempted = input.name ?? org.name;
+      throw new ConflictError("ORGANIZATION_NAME_TAKEN", `Org name "${attempted}" is taken.`);
     }
     throw err;
   }

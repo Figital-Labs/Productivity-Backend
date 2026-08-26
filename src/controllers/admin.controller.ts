@@ -4,7 +4,7 @@ import {
   aiUsageQuerySchema,
   interactionParamsSchema,
   interactionsQuerySchema,
-  renameOrgSchema,
+  updateOrgSchema,
 } from "../schemas/admin.schema.js";
 import { idParamSchema } from "../schemas/common.js";
 import { bootstrapAdminSchema, createOrganizationSchema } from "../schemas/organization.schema.js";
@@ -21,10 +21,11 @@ export async function createOrg(req: Request, res: Response): Promise<void> {
   res.status(201).json(await orgService.createOrganization(input));
 }
 
+/** PATCH /orgs/:id — rename the org and/or set its branding logo (root-only). */
 export async function renameOrg(req: Request, res: Response): Promise<void> {
   const { id } = idParamSchema.parse(req.params);
-  const { name } = renameOrgSchema.parse((req.body as unknown) ?? {});
-  res.json(await orgService.updateOrganization(id, name));
+  const input = updateOrgSchema.parse((req.body as unknown) ?? {});
+  res.json(await orgService.updateOrganization(id, input));
 }
 
 export async function bootstrapAdmin(req: Request, res: Response): Promise<void> {

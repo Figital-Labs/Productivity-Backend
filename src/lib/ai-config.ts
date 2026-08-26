@@ -51,11 +51,49 @@ export const AI_TIMEOUT_MS = {
 export type AiJobKind = keyof typeof AI_TIMEOUT_MS;
 
 /**
- * Total AI attempts = `AI_MAX_RETRIES + 1`. Only fast recoverable OUTPUT errors retry
- * (empty/invalid-JSON/schema — see `RECOVERABLE_CODES` in vertex.ts); `AI_TIMEOUT` is intentionally
- * NOT recoverable, so a hung call fails once instead of re-running a 13-min, 90 MB job.
+ * Total AI attempts that can each consume a FULL `timeoutMs` = `AI_MAX_RETRIES + 1`. Only fast
+ * recoverable OUTPUT errors retry (empty/invalid-JSON/schema — see `RECOVERABLE_CODES` in
+ * vertex.ts); `AI_TIMEOUT` is intentionally NOT recoverable, so a hung call fails once instead of
+ * re-running a 13-min, 90 MB job.
  */
 export const AI_MAX_RETRIES = 1;
+
+/**
+ * Backoff schedules per failure class, in ms. Array length = number of RETRIES for that class,
+ * so `[400]` means one retry after 400 ms (two attempts total). See `classifyAiFailure`.
+ *
+ *  - `fast`    — the DEFAULT, byte-identical to the historical behaviour. Every SYNCHRONOUS
+ *                surface (voice, image, text, transcribe, brief, closure, delegates) uses it:
+ *                a user is watching a spinner, so seconds of backoff would be a UX regression
+ *                and could collide with nginx's `proxy_read_timeout`.
+ *  - `patient` — for queued work only (the meeting worker), where nobody is blocked on the
+ *                request. A per-minute Vertex quota window needs tens of seconds, not 400 ms —
+ *                that mismatch is why a transient 429 surfaced as a hard failure that then
+ *                succeeded on a manual retry.
+ *
+ * `jobBudgetSeconds` below adds these delays to the queue's visibility window, so a retrying job
+ * can never outlive `expireInSeconds` (pg-boss ABORTS the handler at that point and re-dispatches,
+ * which would double-process the meeting).
+ */
+export const RETRY_PROFILES = {
+  fast: { output: [400], transient: [400] },
+  patient: { output: [400], transient: [2_000, 10_000, 30_000] },
+} as const;
+
+export type RetryProfile = keyof typeof RETRY_PROFILES;
+
+/** Which schedule each job kind runs under. Only queued work may be `patient`. */
+export const RETRY_PROFILE_FOR: Record<AiJobKind, RetryProfile> = {
+  default: "fast",
+  media: "fast",
+  meeting: "patient",
+};
+
+/** Worst-case total time spent sleeping between retries, for one execution. */
+function retryBackoffMs(profile: RetryProfile): number {
+  const s = RETRY_PROFILES[profile];
+  return [...s.output, ...s.transient].reduce((n, ms) => n + ms, 0);
+}
 
 /**
  * Per-job overhead beyond the AI call itself: the S3 download of the media + the DB writes that
@@ -77,5 +115,12 @@ const DOWNLOAD_HEADROOM_MS = {
  */
 export function jobBudgetSeconds(kind: AiJobKind): number {
   const attempts = AI_MAX_RETRIES + 1;
-  return Math.ceil((attempts * AI_TIMEOUT_MS[kind] + DOWNLOAD_HEADROOM_MS[kind]) / 1000);
+  // Retry SLEEP is real wall-clock inside the handler, so it must be inside the budget too —
+  // pg-boss aborts a handler that outlives `expireInSeconds`. Transient attempts themselves
+  // return in seconds (the API rejects immediately), so they are absorbed by the headroom below;
+  // only the full-timeout OUTPUT path is multiplied by `attempts`.
+  const backoffMs = retryBackoffMs(RETRY_PROFILE_FOR[kind]);
+  return Math.ceil(
+    (attempts * AI_TIMEOUT_MS[kind] + backoffMs + DOWNLOAD_HEADROOM_MS[kind]) / 1000,
+  );
 }

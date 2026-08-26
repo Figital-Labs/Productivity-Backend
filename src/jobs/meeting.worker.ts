@@ -2,20 +2,30 @@
  * Meeting processing consumer (ADR-0025 · Producer–Consumer pattern). Pulls
  * "process-meeting" jobs from pg-boss, downloads the media from S3, and runs the slow
  * Vertex fusion via `meetingService.runProcessing`. Updates the `ProcessingJob` row so
- * the frontend's GET /jobs/:id poll reflects progress. AI/processing failures are caught
- * per job and recorded on the row (the FE surfaces them); pg-boss's default policy still
- * retries on infra/transport errors. ADR-0025 Phase 3 formalizes the retry taxonomy.
+ * the frontend's GET /jobs/:id poll reflects progress.
+ *
+ * RETRY TAXONOMY (ADR-0025 Phase 3) — three layers, each covering a different failure:
+ *   1. `downloadOne`       — per-object S3 blips (3 tries, sub-second).
+ *   2. `vertex.ts`         — within one execution, by failure class (see `classifyAiFailure`):
+ *                            output errors retry instantly, transient ones back off 2s/10s/30s.
+ *   3. this file           — across executions: a TRANSIENT failure that survives layer 2 is
+ *                            re-queued minutes later rather than surfaced as an error.
+ *
+ * pg-boss's own `retryLimit` covers only a worker that genuinely DIED. It can never see an
+ * application failure, because this handler must not rethrow: pg-boss fails the whole batch
+ * (`fail(name, jobIds, err)`), which would take healthy sibling meetings down with the bad one.
  */
 import type { Job, PgBoss } from "pg-boss";
 
 import { env } from "../config/env.js";
 import { errInfo, log } from "../lib/logger.js";
 import { storage } from "../lib/storage/index.js";
+import { classifyAiFailure } from "../lib/vertex.js";
 import type { InlineMedia } from "../lib/vertex.js";
 import * as jobRepo from "../repositories/job.repository.js";
 import * as meetingService from "../services/meeting.service.js";
 
-import { MEETING_QUEUE } from "./queue.js";
+import { enqueueMeeting, MEETING_QUEUE } from "./queue.js";
 import type { MeetingJobData } from "./queue.js";
 
 // A long meeting (~5–6 hr) is ~130 small clips. Fetch them with bounded parallelism (faster than
@@ -23,6 +33,19 @@ import type { MeetingJobData } from "./queue.js";
 // one transient S3 blip among 130 must not fail the whole meeting.
 const DOWNLOAD_MAX_ATTEMPTS = 3;
 const DOWNLOAD_PARALLELISM = 4;
+
+/**
+ * APP-LEVEL retry for TRANSIENT failures (Vertex 429/503, S3 5xx, dropped socket).
+ *
+ * `vertex.ts` already retries inside a single execution (2s/10s/30s on the `patient` profile),
+ * but a Vertex quota window is per-minute — so when that budget is exhausted the right move is to
+ * come back MINUTES later, not to surface an error the user has to clear by pressing Process
+ * again. These delays are the gap before each subsequent execution.
+ *
+ * Bounded at MAX_JOB_ATTEMPTS so a persistently failing job can never loop forever.
+ */
+const MAX_JOB_ATTEMPTS = 3;
+const RETRY_DELAYS_SECONDS = [60, 300];
 
 async function downloadOne(key: string): Promise<InlineMedia> {
   let lastErr: unknown;
@@ -59,6 +82,7 @@ async function downloadAll(keys: string[]): Promise<InlineMedia[]> {
 
 async function processOne(job: Job<MeetingJobData>): Promise<void> {
   const { processingJobId, audioKeys, imageKeys, customPrompt } = job.data;
+  const attempt = job.data.attempt ?? 1;
   const row = await jobRepo.findById(processingJobId);
   if (!row) {
     // status row gone (deleted?) — nothing to do; don't fail the batch.
@@ -89,11 +113,46 @@ async function processOne(job: Job<MeetingJobData>): Promise<void> {
     await jobRepo.markSucceeded(processingJobId);
     log.info("worker", "succeeded", ctx);
   } catch (err) {
-    // Isolate the failure to this job (the FE sees it via the ProcessingJob row) and don't
-    // rethrow, so a sibling job in the same batch still completes.
+    // Never rethrow: pg-boss fails the ENTIRE batch on a handler throw
+    // (`fail(name, jobIds, err)` in its manager), so one bad meeting would kill its siblings.
+    // Retries are therefore driven here, at the application level, by re-enqueueing.
     const { message, stack } = errInfo(err);
+    const kind = classifyAiFailure(err);
+    const nextAttempt = attempt + 1;
+
+    if (kind === "transient" && nextAttempt <= MAX_JOB_ATTEMPTS) {
+      const delaySeconds = RETRY_DELAYS_SECONDS[attempt - 1] ?? 300;
+      try {
+        // Row goes back to `queued` FIRST so the FE keeps polling rather than flashing an error;
+        // if the re-enqueue then throws we fall through and fail it properly below.
+        await jobRepo.markQueuedForRetry(processingJobId, message);
+        await enqueueMeeting(
+          {
+            processingJobId,
+            audioKeys,
+            imageKeys,
+            attempt: nextAttempt,
+            ...(customPrompt !== undefined ? { customPrompt } : {}),
+          },
+          { startAfterSeconds: delaySeconds },
+        );
+        log.warn("worker", "transient failure — re-queued", {
+          ...ctx,
+          attempt,
+          nextAttempt,
+          delaySeconds,
+          message,
+        });
+        return;
+      } catch (requeueErr) {
+        // Re-enqueue failed — the row must NOT be left sitting in `queued` with nothing
+        // scheduled to pick it up (the reconciler only rescues rows stuck in `processing`).
+        log.error("worker", "re-queue failed", { ...ctx, ...errInfo(requeueErr) });
+      }
+    }
+
     await jobRepo.markFailed(processingJobId, message);
-    log.error("worker", "failed", { ...ctx, message, stack });
+    log.error("worker", "failed", { ...ctx, kind, attempt, message, stack });
   }
 }
 

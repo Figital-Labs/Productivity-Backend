@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { env } from "../config/env.js";
 
-import { AI_MAX_RETRIES } from "./ai-config.js";
+import { RETRY_PROFILES, type RetryProfile } from "./ai-config.js";
 import { UpstreamError } from "./errors.js";
 import { log } from "./logger.js";
 
@@ -36,8 +36,12 @@ interface CommonGenOptions {
   temperature?: number;
   systemInstruction?: string;
   thinkingBudget?: number;
-  /** Total attempts = maxRetries + 1. Default 1 (→ 2 attempts). */
-  maxRetries?: number;
+  /**
+   * Retry schedule. Default "fast" — identical to the historical behaviour, and correct for every
+   * SYNCHRONOUS caller. Only async/queued work (the meeting worker) should pass "patient", and
+   * doing so REQUIRES `jobBudgetSeconds` to cover the extra backoff (see ai-config.ts).
+   */
+  retryProfile?: RetryProfile;
   /** Per-attempt timeout. Default 30000ms. */
   timeoutMs?: number;
   /** Called with the raw model text BEFORE parsing — for logging/persistence. */
@@ -62,9 +66,6 @@ export interface GenerateTextOptions extends CommonGenOptions {
 type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-// Single source of truth (ai-config) so the queue's visibility budget — which assumes this many
-// attempts — never disagrees with what the AI layer actually does.
-const DEFAULT_MAX_RETRIES = AI_MAX_RETRIES;
 
 /**
  * UpstreamError codes worth retrying — transient model/OUTPUT failures (they fail fast). Auth,
@@ -76,6 +77,51 @@ const DEFAULT_MAX_RETRIES = AI_MAX_RETRIES;
 const RECOVERABLE_CODES = new Set(["AI_EMPTY_RESPONSE", "AI_INVALID_JSON", "AI_SCHEMA_MISMATCH"]);
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * How a failed attempt should be treated. Previously this was a single boolean —
+ * `!(err instanceof UpstreamError)` — which was wrong at BOTH ends: a permanent 401/400 from the
+ * SDK was retried (burning a second full `timeoutMs`; up to ~27 min on a meeting), while a
+ * transient 429/503 got only the same 400 ms backoff as a fast output error, which is far too
+ * short for a per-minute quota window.
+ *
+ *  - `output`    — the model replied but the payload was unusable. Fails fast, retry immediately.
+ *  - `transient` — infrastructure said "try later" (429/503/5xx, socket drop). Needs REAL backoff.
+ *  - `permanent` — nothing will change on a retry (auth, bad request, our own AI_TIMEOUT).
+ */
+export type AiFailureClass = "output" | "transient" | "permanent";
+
+/** Best-effort HTTP status extraction across SDK error shapes (and, last resort, the message). */
+function httpStatusOf(err: unknown): number | undefined {
+  if (typeof err !== "object" || err === null) return undefined;
+  const e = err as { status?: unknown; statusCode?: unknown; code?: unknown; message?: unknown };
+  for (const v of [e.status, e.statusCode, e.code]) {
+    if (typeof v === "number" && v >= 100 && v < 600) return v;
+    if (typeof v === "string" && /^\d{3}$/.test(v)) return Number(v);
+  }
+  // The @google/genai SDK often only carries the status inside the message text.
+  if (typeof e.message === "string") {
+    const m = /\b(4\d{2}|5\d{2})\b/.exec(e.message);
+    if (m?.[1]) return Number(m[1]);
+  }
+  return undefined;
+}
+
+export function classifyAiFailure(err: unknown): AiFailureClass {
+  if (err instanceof UpstreamError) {
+    // Unchanged: output errors retry, everything else (incl. AI_TIMEOUT) is terminal.
+    return RECOVERABLE_CODES.has(err.code) ? "output" : "permanent";
+  }
+  const status = httpStatusOf(err);
+  if (status !== undefined) {
+    // 408 request timeout, 429 quota, 5xx capacity → worth waiting for.
+    if (status === 408 || status === 429 || status >= 500) return "transient";
+    // 400/401/403/404 — a retry produces the identical failure, just slower.
+    return "permanent";
+  }
+  // No status at all: transport-level (ECONNRESET, socket hang up, DNS). Genuinely transient.
+  return "transient";
+}
 
 /** `[ai-meta]` — finishReason + token usage (incl. audio tokens) for cost/latency tracing. */
 function logMeta(
@@ -141,22 +187,46 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
- * Retry on recoverable UpstreamError codes, or on unknown/network errors
- * (SDK transport failures, 5xx). Backoff is quadratic: 400ms, 1600ms, ...
+ * Retry with a per-failure-class budget (see `classifyAiFailure` / `RETRY_PROFILES`).
+ *
+ * Output and transient failures are counted SEPARATELY, so a run that hits one 429 still has its
+ * full output-retry allowance left (and vice versa). Permanent failures abort immediately rather
+ * than burning another `timeoutMs`.
  */
-async function withRetry<T>(fn: () => Promise<T>, maxRetries: number): Promise<T> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  profile: RetryProfile,
+  surface: string,
+): Promise<T> {
+  const schedule = RETRY_PROFILES[profile];
+  let outputRetries = 0;
+  let transientRetries = 0;
+
+  for (;;) {
     try {
       return await fn();
     } catch (err) {
-      lastErr = err;
-      const recoverable = !(err instanceof UpstreamError) || RECOVERABLE_CODES.has(err.code);
-      if (!recoverable || attempt === maxRetries) throw err;
-      await sleep(400 * (attempt + 1) ** 2);
+      const kind = classifyAiFailure(err);
+      if (kind === "permanent") throw err;
+
+      const delays = schedule[kind];
+      const used = kind === "output" ? outputRetries : transientRetries;
+      if (used >= delays.length) throw err;
+      if (kind === "output") outputRetries += 1;
+      else transientRetries += 1;
+
+      const delayMs = delays[used] ?? 0;
+      log.warn("ai", "retrying", {
+        surface,
+        kind,
+        attempt: used + 1,
+        of: delays.length,
+        delayMs,
+        message: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      });
+      await sleep(delayMs);
     }
   }
-  throw lastErr;
 }
 
 /**
@@ -186,45 +256,53 @@ export async function generateStructured<S extends z.ZodType>(
     bytes: mediaBytes(opts.media),
   });
 
-  return withRetry(async () => {
-    const startedAt = Date.now();
-    const response = await withTimeout(
-      ai.models.generateContent({ model: opts.model, contents: [{ role: "user", parts }], config }),
-      opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    );
+  return withRetry(
+    async () => {
+      const startedAt = Date.now();
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: opts.model,
+          contents: [{ role: "user", parts }],
+          config,
+        }),
+        opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      );
 
-    const text = response.text;
-    if (typeof text !== "string" || text.length === 0) {
-      log.warn("ai", "empty response", { surface });
-      throw new UpstreamError("AI_EMPTY_RESPONSE", "Vertex returned no text content.");
-    }
-    opts.onRaw?.(text);
+      const text = response.text;
+      if (typeof text !== "string" || text.length === 0) {
+        log.warn("ai", "empty response", { surface });
+        throw new UpstreamError("AI_EMPTY_RESPONSE", "Vertex returned no text content.");
+      }
+      opts.onRaw?.(text);
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      log.warn("ai", "invalid JSON", { surface, rawLen: text.length });
-      throw new UpstreamError("AI_INVALID_JSON", "Vertex response was not valid JSON.", {
-        raw: text,
-      });
-    }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        log.warn("ai", "invalid JSON", { surface, rawLen: text.length });
+        throw new UpstreamError("AI_INVALID_JSON", "Vertex response was not valid JSON.", {
+          raw: text,
+        });
+      }
 
-    const result = opts.schema.safeParse(parsed);
-    if (!result.success) {
-      log.warn("ai", "schema mismatch", {
-        surface,
-        rawLen: text.length,
-        issues: result.error.issues.length,
-      });
-      throw new UpstreamError("AI_SCHEMA_MISMATCH", "Vertex response did not match the schema.", {
-        raw: text,
-        issues: result.error.issues as unknown as Record<string, unknown>,
-      });
-    }
-    logMeta(surface, response, Date.now() - startedAt, text.length);
-    return result.data;
-  }, opts.maxRetries ?? DEFAULT_MAX_RETRIES);
+      const result = opts.schema.safeParse(parsed);
+      if (!result.success) {
+        log.warn("ai", "schema mismatch", {
+          surface,
+          rawLen: text.length,
+          issues: result.error.issues.length,
+        });
+        throw new UpstreamError("AI_SCHEMA_MISMATCH", "Vertex response did not match the schema.", {
+          raw: text,
+          issues: result.error.issues as unknown as Record<string, unknown>,
+        });
+      }
+      logMeta(surface, response, Date.now() - startedAt, text.length);
+      return result.data;
+    },
+    opts.retryProfile ?? "fast",
+    surface,
+  );
 }
 
 /**
@@ -239,24 +317,28 @@ export async function generateText(opts: GenerateTextOptions): Promise<string> {
   const surface = opts.label ?? "text";
   log.debug("ai", "request", { surface, model: opts.model, bytes: mediaBytes(opts.media) });
 
-  return withRetry(async () => {
-    const startedAt = Date.now();
-    const response = await withTimeout(
-      ai.models.generateContent({
-        model: opts.model,
-        contents: [{ role: "user", parts }],
-        ...(Object.keys(config).length > 0 && { config }),
-      }),
-      opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    );
+  return withRetry(
+    async () => {
+      const startedAt = Date.now();
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: opts.model,
+          contents: [{ role: "user", parts }],
+          ...(Object.keys(config).length > 0 && { config }),
+        }),
+        opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      );
 
-    const text = response.text;
-    if (typeof text !== "string" || text.length === 0) {
-      log.warn("ai", "empty response", { surface });
-      throw new UpstreamError("AI_EMPTY_RESPONSE", "Vertex returned no text content.");
-    }
-    opts.onRaw?.(text);
-    logMeta(surface, response, Date.now() - startedAt, text.length);
-    return text;
-  }, opts.maxRetries ?? DEFAULT_MAX_RETRIES);
+      const text = response.text;
+      if (typeof text !== "string" || text.length === 0) {
+        log.warn("ai", "empty response", { surface });
+        throw new UpstreamError("AI_EMPTY_RESPONSE", "Vertex returned no text content.");
+      }
+      opts.onRaw?.(text);
+      logMeta(surface, response, Date.now() - startedAt, text.length);
+      return text;
+    },
+    opts.retryProfile ?? "fast",
+    surface,
+  );
 }

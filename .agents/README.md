@@ -10,6 +10,26 @@ tags: [meta, entry-point]
 
 **Agents starting a session: read this file first, then [PRODUCT.md](./PRODUCT.md) → [ARCHITECTURE.md](./ARCHITECTURE.md) → [GOTCHAS.md](./GOTCHAS.md) → [DEVELOPMENT.md](./DEVELOPMENT.md).** Everything else is loaded on-demand. (PRODUCT/ARCHITECTURE refreshed 2026-06-11; SCOPE/STATE are superseded for *current* state — see below.)
 
+> **📛 Naming note — same project, renamed folders (read before following any path).** "Task-List",
+> "Backend Task List", and "Productivity AI" are all **the same product**. The folders were renamed;
+> historical docs here (sprint logs, ADRs, changelog) keep the old names by convention. Translate:
+>
+> | Old name in these docs | Current folder |
+> |---|---|
+> | `Task-List` (e.g. `../../Task-List/.agents/...`) | `Productivity-frontend` (the frontend repo) |
+> | `Backend_task_list` | `Productivity-Backend` (this repo) |
+> | `gig_project` / project root | `Dayplan/` (the workspace root) |
+>
+> Cross-repo links to `Task-List/…` won't resolve — read them as `Productivity-frontend/…`. Two files
+> older docs call "canonical" (`Wavesprint.md`, `kims-fix-backlog.md`) and the Windows plan path
+> (`C:\Users\ashoka\.claude\plans\…`) are from the earlier setup and may not exist on this machine.
+
+> **🧭 Where's the "current state"?** STATE.md's banner and the sprint logs point at `Wavesprint.md`
+> (canonical status) and `kims-fix-backlog.md` (live backlog) — **neither exists in this checkout; ignore
+> them.** For what the system is *now*, read the reading order above (**PRODUCT.md → ARCHITECTURE.md →
+> GOTCHAS.md → DEVELOPMENT.md**) plus `git log` for recent changes. There is **no** separate live-backlog
+> file here — start from explicit user direction, not an autonomous backlog.
+
 This directory is the persistent memory of the backend project. It is designed for **multiple agents collaborating** on this codebase — sequentially or in parallel — without losing context or stepping on each other.
 
 ---
@@ -21,6 +41,7 @@ Starting a new session?            → README.md (here) → PRODUCT.md → ARCHI
 Need product context?              → PRODUCT.md
 Footguns / why is it like this?    → GOTCHAS.md  (read before meetings / hierarchy / AI work)
 How do I build / run / eval?       → DEVELOPMENT.md
+Connecting to a database?          → DATABASE-ACCESS.md  (prod moved Neon → AWS RDS 2026-08-24)
 Need the schema or endpoints?      → ARCHITECTURE.md
 Writing code, need conventions?    → DEVELOPMENT.md (+ CONVENTIONS.md, GLOSSARY.md)
 Designing code, need to know why?  → decisions/ (find the relevant ADR)
@@ -39,6 +60,7 @@ Adding a new decision?             → decisions/00NN-slug.md (next sequence num
 | `ARCHITECTURE.md` | Data model, API surface, AI layer. (Refreshed 2026-06-11.) | When implementing a feature. | When schema/endpoints/structure change. |
 | `GOTCHAS.md` | Footguns + key decisions (meetings, hierarchy, AI). | Before debugging those areas. | When a new footgun/decision emerges. |
 | `DEVELOPMENT.md` | Commands, env, conventions, working rules. | Before building/running code. | When workflow/conventions change. |
+| `DATABASE-ACCESS.md` | How to connect to local/dev/prod Postgres, the connection-string footguns, the security-group model, and the Neon → RDS migration runbook. | Before touching any database, or when a connection hangs/fails. | When an environment, credential path, or network rule changes. |
 | `STATE.md` | ⚠️ SUPERSEDED for current state — historical sprint log / changelog only. | For build history. | Append-only changelog. |
 | `SCOPE.md` | ⚠️ SUPERSEDED — its "deferred" items (meetings, hierarchy, analytics) are now built. | — | — |
 | `CONVENTIONS.md` | Code style, commit style, working patterns. | Before writing any code. | When we adopt a new pattern. |

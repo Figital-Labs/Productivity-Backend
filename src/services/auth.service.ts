@@ -29,6 +29,10 @@ export interface PublicAuthUser {
   capabilities: Capabilities;
   // Cross-org root. Drives the super-admin platform portal on the FE.
   isSuperAdmin: boolean;
+  // Per-org branding, so the shell can render the right logo on FIRST paint rather than
+  // flashing a wrong/placeholder mark while a second request lands. `logoUrl` is null
+  // until that org uploads one — the FE falls back to the product mark, then initials.
+  org: { id: string; name: string; logoUrl: string | null };
 }
 
 export interface AuthResponse {
@@ -47,9 +51,13 @@ async function toPublicUser(user: userRepo.User): Promise<PublicAuthUser> {
   // Build the authenticated-user shape resolveScope needs (reports drive the
   // "manages someone" relationship signal), then derive capabilities from
   // level + that scope.
+  // Same round-trip also fetches the org's branding — see PublicAuthUser.org.
   const withReports = await prisma.user.findUnique({
     where: { id: user.id },
-    select: { reports: { select: { id: true } } },
+    select: {
+      reports: { select: { id: true } },
+      org: { select: { id: true, name: true, logoUrl: true } },
+    },
   });
   const authUser: AuthenticatedUser = {
     id: user.id,
@@ -74,6 +82,9 @@ async function toPublicUser(user: userRepo.User): Promise<PublicAuthUser> {
     level: user.level,
     capabilities: capabilitiesFor(user.level, scope),
     isSuperAdmin: user.isSuperAdmin,
+    // Fall back to the orgId if the relation somehow didn't load: the shell still renders
+    // (initials from the id) instead of throwing on a missing logo.
+    org: withReports?.org ?? { id: user.orgId, name: user.orgId, logoUrl: null },
   };
 }
 

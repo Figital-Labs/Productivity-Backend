@@ -20,6 +20,13 @@ export const CAPTURE_QUEUE = "process-capture";
 
 export interface MeetingJobData {
   processingJobId: string;
+  /**
+   * 1-based execution counter for the APP-level transient retry (see meeting.worker.ts).
+   * Distinct from pg-boss's own `retryLimit`, which only covers a worker that actually died —
+   * an AI failure never reaches pg-boss, because the handler catches it (a throw would fail
+   * every sibling job in the batch; see pg-boss manager.js `fail(name, jobIds, err)`).
+   */
+  attempt?: number;
   audioKeys: string[];
   imageKeys: string[];
   customPrompt?: string;
@@ -83,11 +90,19 @@ export function startQueue(): Promise<PgBoss> {
   return startPromise;
 }
 
-/** Producer side: enqueue a meeting for out-of-band processing. */
-export async function enqueueMeeting(data: MeetingJobData): Promise<void> {
+/**
+ * Producer side: enqueue a meeting for out-of-band processing.
+ * `startAfterSeconds` delays the dispatch — used by the worker's transient-failure retry so the
+ * next attempt lands well outside a Vertex per-minute quota window.
+ */
+export async function enqueueMeeting(
+  data: MeetingJobData,
+  opts: { startAfterSeconds?: number } = {},
+): Promise<void> {
   const started = await startQueue();
   await started.send(MEETING_QUEUE, data, {
     expireInSeconds: MEETING_EXPIRE_SECONDS,
+    ...(opts.startAfterSeconds !== undefined ? { startAfter: opts.startAfterSeconds } : {}),
     ...JOB_RETRY,
   });
 }
