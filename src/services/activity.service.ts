@@ -310,6 +310,14 @@ export async function listActivity(
     ),
   ]);
 
+  const externalAttendeeNamesOf = (value: unknown): string[] =>
+    Array.isArray(value)
+      ? value.flatMap((e) => {
+          const name = (e as { name?: unknown } | null)?.name;
+          return typeof name === "string" && name.trim().length > 0 ? [name] : [];
+        })
+      : [];
+
   const allActions = [
     ...voiceInteractions.flatMap((row) => persistedActions(row.actions)),
     ...textInteractions.flatMap((row) => persistedActions(row.actions)),
@@ -491,6 +499,7 @@ export async function listActivity(
             const name = userNames.get(id);
             return name === undefined ? [] : [{ id, name }];
           }),
+          externalAttendeeNames: externalAttendeeNamesOf(meeting.externalAttendees),
           summary: meeting.summary ?? "",
           actionItems: actions.map((action) => ({
             title: action.title,

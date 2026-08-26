@@ -13,13 +13,43 @@ export type MeetingType = z.infer<typeof meetingTypeEnum>;
  * validates same-org membership before persisting. Max 50 attendees keeps
  * the prompt context manageable.
  */
-export const createMeetingInputSchema = z.object({
-  title: z.string().min(1).max(200),
-  scheduledAt: isoDateTimeSchema,
-  type: meetingTypeEnum,
-  attendeeIds: z.array(z.string().min(1)).min(1).max(50),
-  agenda: z.string().max(2000).optional(),
+/**
+ * An attendee with no account — a vendor, consultant, or clinician from another hospital.
+ * Name is what gets displayed; email is optional and used only to spot the "this is actually one
+ * of your colleagues" mistake at create time (see EXTERNAL_ATTENDEE_IS_USER in meeting.service).
+ *
+ * These are stored and shown, but NEVER sent to Vertex: they have no DB row, so any id we passed
+ * the model would be fiction it could emit as an `assigneeId`.
+ */
+export const externalAttendeeSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  email: z.email().max(200).trim().toLowerCase().optional(),
 });
+export type ExternalAttendeeInput = z.infer<typeof externalAttendeeSchema>;
+
+// Capped to bound the row size; internal attendees keep their own separate cap of 50.
+const externalAttendeesSchema = z.array(externalAttendeeSchema).max(20);
+
+/** A meeting needs at least ONE attendee overall — internal, external, or a mix. */
+function hasAnyAttendee(d: {
+  attendeeIds?: string[] | undefined;
+  externalAttendees?: ExternalAttendeeInput[] | undefined;
+}): boolean {
+  return (d.attendeeIds?.length ?? 0) + (d.externalAttendees?.length ?? 0) > 0;
+}
+
+export const createMeetingInputSchema = z
+  .object({
+    title: z.string().min(1).max(200),
+    scheduledAt: isoDateTimeSchema,
+    type: meetingTypeEnum,
+    // `.min(0)`: a 1-on-1 with an outside vendor is legitimate and has no internal attendee
+    // besides the creator, who owns the meeting regardless.
+    attendeeIds: z.array(z.string().min(1)).min(0).max(50),
+    externalAttendees: externalAttendeesSchema.optional(),
+    agenda: z.string().max(2000).optional(),
+  })
+  .refine(hasAnyAttendee, "A meeting needs at least one attendee (internal or external).");
 export type CreateMeetingInput = z.infer<typeof createMeetingInputSchema>;
 
 /**
@@ -31,11 +61,20 @@ export const updateMeetingInputSchema = z
     title: z.string().min(1).max(200).optional(),
     scheduledAt: isoDateTimeSchema.optional(),
     type: meetingTypeEnum.optional(),
-    attendeeIds: z.array(z.string().min(1)).min(1).max(50).optional(),
+    attendeeIds: z.array(z.string().min(1)).min(0).max(50).optional(),
+    externalAttendees: externalAttendeesSchema.optional(),
     agenda: z.string().max(2000).optional(),
     notes: z.string().max(5000).optional(),
   })
-  .refine((d) => Object.keys(d).length > 0, "At least one field must be provided");
+  .refine((d) => Object.keys(d).length > 0, "At least one field must be provided")
+  // Only the both-provided-and-both-empty case is decidable here. When just ONE of the two is
+  // sent, the request alone can't tell whether the meeting still has attendees — the other list
+  // lives on the row — so `updateMeeting` re-checks against the MERGED result.
+  .refine(
+    (d) =>
+      !(d.attendeeIds !== undefined && d.externalAttendees !== undefined && !hasAnyAttendee(d)),
+    "A meeting needs at least one attendee (internal or external).",
+  );
 export type UpdateMeetingInput = z.infer<typeof updateMeetingInputSchema>;
 
 /**

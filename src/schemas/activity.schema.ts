@@ -130,6 +130,12 @@ const meetingProcessedEventSchema = z.object({
   actionItemCount: z.number().int().nonnegative(),
   recommendationCount: z.number().int().nonnegative(),
   attendees: z.array(meetingAttendeeRefSchema),
+  /**
+   * Names of attendees with no account (BE-23). A SEPARATE array because they have no user id,
+   * and `meetingAttendeeRefSchema` requires one — inventing a placeholder is exactly what the
+   * design avoids. Without this the feed would silently under-report who was in the room.
+   */
+  externalAttendeeNames: z.array(z.string()).default([]),
   summary: z.string(),
   actionItems: z.array(meetingProcessedActionItemSchema),
   recommendations: z.array(meetingProcessedRecommendationSchema),

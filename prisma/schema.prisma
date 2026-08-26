@@ -10,28 +10,28 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  name         String
+  id              String       @id @default(cuid())
+  email           String       @unique
+  name            String
   // Real job title (e.g. "General Manager"), shown in the UI. role/level stay
   // internal (authz only); designation is the human-facing label.
-  designation  String?
-  passwordHash String
-  role         String   @default("staff")
-  level        Int      @default(100)
+  designation     String?
+  passwordHash    String
+  role            String       @default("staff")
+  level           Int          @default(100)
   // Sprint 18: org becomes an FK; isSuperAdmin is the cross-org root flag;
   // canManageUsers is the grantable L8 permission for the hierarchy guardrail.
-  orgId          String
-  isSuperAdmin   Boolean  @default(false)
-  canManageUsers Boolean  @default(false)
-  org            Organization @relation(fields: [orgId], references: [id])
-  timezone     String   @default("Asia/Kolkata")
+  orgId           String
+  isSuperAdmin    Boolean      @default(false)
+  canManageUsers  Boolean      @default(false)
+  org             Organization @relation(fields: [orgId], references: [id])
+  timezone        String       @default("Asia/Kolkata")
   // Sprint 19: per-user working hours as minutes from local midnight — the
   // window the day-timeline schedules tasks into. Defaults to 09:00–18:00.
-  workStartMinute Int    @default(540)
-  workEndMinute   Int    @default(1080)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  workStartMinute Int          @default(540)
+  workEndMinute   Int          @default(1080)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   // Sprint 11: Task ownership split — assigneeId is who does the work,
   // creatorId is who created/delegated. For self-created tasks they're equal.
@@ -68,35 +68,35 @@ model User {
 }
 
 model Task {
-  id         String    @id @default(cuid())
+  id                       String    @id @default(cuid())
   // Sprint 11: split `userId` into assignee + creator.
   // assigneeId — the user whose task list this lives on (does the work).
   // creatorId  — the user who created/delegated it. Equal to assigneeId for
   //               self-created tasks; different when a manager delegates.
-  assigneeId String
-  creatorId  String
-  title      String
-  targetDate DateTime  @db.Date
+  assigneeId               String
+  creatorId                String
+  title                    String
+  targetDate               DateTime  @db.Date
   // Sprint 19: intra-day time-slot scheduling. Minutes from local midnight on
   // the targetDate day (0–1439); null = Unscheduled. Duration defaults to 30
   // when scheduled. Wall-clock = targetDate (local date) + minute offset, so no
   // UTC/DST math is needed and overlap is a pure integer-interval comparison.
   scheduledStartMinute     Int?
   scheduledDurationMinutes Int?
-  priority   String?
-  completed  Boolean   @default(false)
-  isPartial  Boolean   @default(false)
+  priority                 String?
+  completed                Boolean   @default(false)
+  isPartial                Boolean   @default(false)
   // Sprint 20: stamped when a task transitions to completed (cleared on un-complete).
   // Gives a real "done at" signal for schedule-adherence analytics.
-  completedAt DateTime?
-  notes      String?
-  aiFeedback String?
-  sourceType String
-  sourceId   String?
-  groupId    String?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  deletedAt  DateTime?
+  completedAt              DateTime?
+  notes                    String?
+  aiFeedback               String?
+  sourceType               String
+  sourceId                 String?
+  groupId                  String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  deletedAt                DateTime?
 
   assignee User          @relation("AssignedTasks", fields: [assigneeId], references: [id])
   creator  User          @relation("CreatedTasks", fields: [creatorId], references: [id])
@@ -256,23 +256,31 @@ model UnifiedInteraction {
 // summary, dispatched actions (PersistedMeetingAction[]), and recommendations
 // — same JSON pattern as VoiceInteraction.actions etc.
 model Meeting {
-  id              String    @id @default(cuid())
-  userId          String // creator
-  title           String
-  scheduledAt     DateTime
-  type            String // 'hurdle' | '1-on-1' (free-form to allow future types)
-  attendeeIds     String[]
-  agenda          String?
-  notes           String?
-  summary         String?
-  customPrompt    String?
-  actions         Json      @default("[]") // PersistedMeetingAction[] post-process
-  recommendations Json      @default("[]") // MeetingRecommendation[] post-process
-  mediaKeys       String[]  @default([]) // S3 keys (audio + image) — durable audit trail
-  processedAt     DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  deletedAt       DateTime?
+  id                String    @id @default(cuid())
+  userId            String // creator
+  title             String
+  scheduledAt       DateTime
+  type              String // 'hurdle' | '1-on-1' (free-form to allow future types)
+  /// Real, same-org User ids. This is ALSO an ACL — `meeting.repository.findVisibleTo` grants
+  /// read access via `attendeeIds has userId` — so every entry must resolve to a real user.
+  /// People outside the org go in `externalAttendees` instead (BE-23).
+  attendeeIds       String[]
+  /// People who attended but have no account: `[{ name, email? }]`. Display-only.
+  /// Deliberately NOT an ACL (they can't sign in) and deliberately NEVER sent to Vertex —
+  /// they have no DB row, so any id we passed the model would be fiction it could emit as an
+  /// `assigneeId`. See .agents/sprints/23-external-meeting-attendees.md.
+  externalAttendees Json      @default("[]")
+  agenda            String?
+  notes             String?
+  summary           String?
+  customPrompt      String?
+  actions           Json      @default("[]") // PersistedMeetingAction[] post-process
+  recommendations   Json      @default("[]") // MeetingRecommendation[] post-process
+  mediaKeys         String[]  @default([]) // S3 keys (audio + image) — durable audit trail
+  processedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
 
   user User @relation("UserMeetings", fields: [userId], references: [id])
 
@@ -377,8 +385,8 @@ model MorningBriefCache {
 /// an `orgId` FK to this row. Root super-admins (`User.isSuperAdmin`) can
 /// create new orgs via `POST /orgs`; everyone else is scoped to their own.
 model Organization {
-  id   String @id @default(cuid())
-  name String @unique
+  id        String   @id @default(cuid())
+  name      String   @unique
   /// Per-org branding. NULL means "no logo uploaded" — the frontend falls back to the
   /// product mark, then to the org's initials, so a brand-new tenant looks deliberate
   /// rather than broken. Nullable by design: adding it touches no existing row.

@@ -8,6 +8,7 @@ import {
 import { logRaw } from "../lib/ai-log.js";
 import { AppError, ConflictError, NotFoundError } from "../lib/errors.js";
 import { log } from "../lib/logger.js";
+import prisma from "../lib/prisma.js";
 import { buildMeetingIntentPrompt } from "../lib/prompts/meeting-intent.js";
 import type { MeetingAttendee } from "../lib/prompts/meeting-intent.js";
 import { storage } from "../lib/storage/index.js";
@@ -26,6 +27,7 @@ import type { Meeting } from "../repositories/meeting.repository.js";
 import * as meetingRepo from "../repositories/meeting.repository.js";
 import * as userRepo from "../repositories/user.repository.js";
 import type {
+  ExternalAttendeeInput,
   CreateMeetingInput,
   MeetingRecommendation,
   PatchRecommendationStatusInput,
@@ -45,8 +47,43 @@ export interface HydratedAttendee {
   role: "staff" | "manager" | "admin";
 }
 
-export interface HydratedMeeting extends Omit<Meeting, "actions" | "recommendations"> {
+/**
+ * An attendee with no account. Display-only; never sent to the AI (BE-23).
+ *
+ * `id?: never` is a deliberate COMPILE-TIME guard, not decoration. The prompt builder takes
+ * `MeetingAttendee[]`, which requires `id: string` — so this type can never be assigned or spread
+ * into the attendee directory without a type error. That is the mechanical stop preventing a
+ * future "just include everyone who attended" refactor from feeding Vertex a fabricated id.
+ * (There is no test runner in this project, so the type system is the guard.)
+ */
+export interface ExternalAttendee {
+  name: string;
+  email?: string;
+  id?: never;
+}
+
+/**
+ * JSONB holds whatever was written, so validate on the way OUT rather than casting. A row written
+ * by an older build (or hand-edited in psql) must not be able to crash a meeting fetch — anything
+ * malformed is dropped rather than surfaced.
+ */
+function toExternalAttendees(value: unknown): ExternalAttendee[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry): ExternalAttendee[] => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const { name, email } = entry as { name?: unknown; email?: unknown };
+    if (typeof name !== "string" || name.trim().length === 0) return [];
+    return [{ name, ...(typeof email === "string" && email.length > 0 ? { email } : {}) }];
+  });
+}
+
+export interface HydratedMeeting extends Omit<
+  Meeting,
+  "actions" | "recommendations" | "externalAttendees"
+> {
   attendees: HydratedAttendee[];
+  /** People outside the org, kept in their OWN array so no caller can mistake them for users. */
+  externalAttendees: ExternalAttendee[];
   actions: PersistedMeetingAction[];
   recommendations: MeetingRecommendation[];
 }
@@ -127,6 +164,7 @@ async function hydrate(meeting: Meeting): Promise<HydratedMeeting> {
   return {
     ...meeting,
     attendees,
+    externalAttendees: toExternalAttendees(meeting.externalAttendees),
     actions: (meeting.actions ?? []) as PersistedMeetingAction[],
     recommendations: (meeting.recommendations ?? []) as MeetingRecommendation[],
   };
@@ -218,6 +256,49 @@ export async function deleteMeetingMedia(
   log.info("meeting", "media deleted", { meetingId: id, userId: caller.id, key });
 }
 
+/**
+ * Reject an external attendee whose email belongs to a real user IN THE CALLER'S OWN ORG.
+ *
+ * Adding a colleague as an "external" name is silently wrong: they'd get no meeting access (the
+ * ACL is `attendeeIds`) and the AI would never see them, so work they committed to could not be
+ * assigned. One explicit error beats that quiet failure.
+ *
+ * Scoped to the caller's org deliberately — a genuine outsider may well be a user of a DIFFERENT
+ * tenant (another hospital that also buys this product). Blocking that would be wrong AND would
+ * leak the existence of their account across tenants.
+ */
+async function assertExternalsAreNotOwnOrgUsers(
+  caller: AuthenticatedUser,
+  externals: ExternalAttendeeInput[] | undefined,
+): Promise<void> {
+  const emails = (externals ?? [])
+    .map((e) => e.email)
+    .filter((e): e is string => typeof e === "string" && e.length > 0);
+  if (emails.length === 0) return;
+
+  const clash = await prisma.user.findFirst({
+    where: { email: { in: emails }, orgId: caller.orgId },
+    select: { email: true, name: true },
+  });
+  if (clash) {
+    throw new ConflictError(
+      "EXTERNAL_ATTENDEE_IS_USER",
+      `${clash.name} (${clash.email}) is already a user in your organization — add them as a regular attendee so they can see the meeting.`,
+    );
+  }
+}
+
+/** Drop duplicates: by email when present, otherwise by case-insensitive trimmed name. */
+function dedupeExternals(externals: ExternalAttendeeInput[]): ExternalAttendeeInput[] {
+  const seen = new Set<string>();
+  return externals.filter((e) => {
+    const key = e.email ?? e.name.trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export async function createMeeting(
   caller: AuthenticatedUser,
   input: CreateMeetingInput,
@@ -225,6 +306,7 @@ export async function createMeeting(
   // Validate attendees BEFORE creating the meeting (so we don't persist
   // a half-valid row if the FE typo'd an id).
   await validateAttendees(caller, input.attendeeIds);
+  await assertExternalsAreNotOwnOrgUsers(caller, input.externalAttendees);
 
   const created = await meetingRepo.create({
     userId: caller.id,
@@ -232,6 +314,9 @@ export async function createMeeting(
     scheduledAt: new Date(input.scheduledAt),
     type: input.type,
     attendeeIds: input.attendeeIds,
+    ...(input.externalAttendees !== undefined && {
+      externalAttendees: dedupeExternals(input.externalAttendees),
+    }),
     ...(input.agenda !== undefined && { agenda: input.agenda }),
   });
   return hydrate(created);
@@ -250,6 +335,7 @@ export async function updateMeeting(
   if (existing.processedAt !== null) {
     const lockedFieldChanged =
       input.attendeeIds !== undefined ||
+      input.externalAttendees !== undefined ||
       input.scheduledAt !== undefined ||
       input.type !== undefined;
     if (lockedFieldChanged) {
@@ -263,12 +349,29 @@ export async function updateMeeting(
   if (input.attendeeIds !== undefined) {
     await validateAttendees(caller, input.attendeeIds);
   }
+  await assertExternalsAreNotOwnOrgUsers(caller, input.externalAttendees);
+
+  // Attendee floor, checked against the MERGED result: a request that clears `attendeeIds` is
+  // fine if the row already has externals (and vice versa), so neither list alone is decidable
+  // in the schema. Falling back to the stored value is what makes a partial update safe.
+  const nextInternal = input.attendeeIds ?? existing.attendeeIds;
+  const nextExternal = input.externalAttendees ?? toExternalAttendees(existing.externalAttendees);
+  if (nextInternal.length + nextExternal.length === 0) {
+    throw new AppError(
+      "MEETING_NEEDS_ATTENDEE",
+      400,
+      "A meeting needs at least one attendee (internal or external).",
+    );
+  }
 
   const patched = await meetingRepo.update(id, {
     ...(input.title !== undefined && { title: input.title }),
     ...(input.scheduledAt !== undefined && { scheduledAt: new Date(input.scheduledAt) }),
     ...(input.type !== undefined && { type: input.type }),
     ...(input.attendeeIds !== undefined && { attendeeIds: input.attendeeIds }),
+    ...(input.externalAttendees !== undefined && {
+      externalAttendees: dedupeExternals(input.externalAttendees),
+    }),
     ...(input.agenda !== undefined && { agenda: input.agenda }),
     ...(input.notes !== undefined && { notes: input.notes }),
   });
@@ -447,6 +550,10 @@ export async function runProcessing(
     throw new NotFoundError("Meeting");
   }
 
+  // BE-23 — INTERNAL ATTENDEES ONLY. `meeting.externalAttendees` must never be merged in here:
+  // those people have no DB row, so any id we invented would be fiction the model could emit as
+  // an `assigneeId`. `validateAttendees` returns real users only, which is what keeps this honest —
+  // do not widen it to "everyone who attended" when adding external people to the API response.
   const attendees = await validateAttendees(caller, meeting.attendeeIds);
   const attendeeDirectory: MeetingAttendee[] = attendees.map((a) => ({
     id: a.id,

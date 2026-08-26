@@ -11,6 +11,7 @@ export interface CreateMeetingData {
   scheduledAt: Date;
   type: string;
   attendeeIds: string[];
+  externalAttendees?: InputJsonValue | undefined;
   agenda?: string | undefined;
 }
 
@@ -19,6 +20,7 @@ export interface UpdateMeetingData {
   scheduledAt?: Date | undefined;
   type?: string | undefined;
   attendeeIds?: string[] | undefined;
+  externalAttendees?: InputJsonValue | undefined;
   agenda?: string | undefined;
   notes?: string | undefined;
 }
