@@ -129,6 +129,12 @@ const meetingProcessedEventSchema = z.object({
   title: z.string(),
   actionItemCount: z.number().int().nonnegative(),
   recommendationCount: z.number().int().nonnegative(),
+  /**
+   * Whose meeting this is. Needed once the feed is scoped to a team or org: without it a manager
+   * sees "a meeting happened" with no way to tell whose, which is most of the point of oversight.
+   * Optional so an event cached before this shipped still parses.
+   */
+  owner: meetingAttendeeRefSchema.optional(),
   attendees: z.array(meetingAttendeeRefSchema),
   /**
    * Names of attendees with no account (BE-23). A SEPARATE array because they have no user id,

@@ -363,6 +363,8 @@ export async function listActivity(
   // Sprint 15: meeting attendees + per-action assignees both need name
   // resolution for the rich `meeting_processed` projection.
   for (const meeting of processedMeetings) {
+    // The owner needs a name too, not just the attendees — the feed labels the event with it.
+    userIdsNeedingNames.add(meeting.userId);
     for (const attendeeId of meeting.attendeeIds) userIdsNeedingNames.add(attendeeId);
     for (const action of persistedMeetingActions(meeting.actions)) {
       userIdsNeedingNames.add(action.assigneeId);
@@ -488,6 +490,9 @@ export async function listActivity(
       .map((meeting): ActivityEvent => {
         const actions = persistedMeetingActions(meeting.actions);
         const recoTitles = persistedMeetingRecommendationTitles(meeting.recommendations);
+        // Hoisted so the field can be spread conditionally without a non-null assertion:
+        // the name is absent if the owner was deleted, and the event stays valid without it.
+        const ownerName = userNames.get(meeting.userId);
         return {
           type: "meeting_processed",
           at: meeting.processedAt.toISOString(),
@@ -500,6 +505,7 @@ export async function listActivity(
             return name === undefined ? [] : [{ id, name }];
           }),
           externalAttendeeNames: externalAttendeeNamesOf(meeting.externalAttendees),
+          ...(ownerName !== undefined && { owner: { id: meeting.userId, name: ownerName } }),
           summary: meeting.summary ?? "",
           actionItems: actions.map((action) => ({
             title: action.title,

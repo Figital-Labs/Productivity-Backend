@@ -11,6 +11,7 @@ import { log } from "../lib/logger.js";
 import prisma from "../lib/prisma.js";
 import { buildMeetingIntentPrompt } from "../lib/prompts/meeting-intent.js";
 import type { MeetingAttendee } from "../lib/prompts/meeting-intent.js";
+import { resolveScope } from "../lib/resolve-scope.js";
 import { storage } from "../lib/storage/index.js";
 import type { PresignedUpload } from "../lib/storage/index.js";
 import {
@@ -36,6 +37,7 @@ import type {
 import { meetingIntentResponseSchema } from "../schemas/meeting.schema.js";
 import { promptDateAnchors, todayInUserTz } from "../utils/date.js";
 
+import { userIdsInScope } from "./dashboard-rollup.service.js";
 import type { PersistedMeetingAction } from "./meeting-action-dispatch.service.js";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata";
@@ -176,14 +178,56 @@ function requireOwnership(meeting: Meeting | null, callerId: string): asserts me
   }
 }
 
+/**
+ * Read access to a meeting. Widened from creator-only so a manager or admin can open a meeting
+ * belonging to someone they already oversee — previously they could see a `meeting_processed`
+ * event in the activity feed but had no way to drill into it.
+ *
+ * Scope is NOT a new rule invented here: it reuses `resolveScope` + `userIdsInScope`, the same
+ * pair the dashboard and activity feed run on. So a viewer sees exactly the people they already
+ * see everywhere else — an org admin gets their whole org, a department head only their
+ * departments, a manager only their reports. One definition of "who reports to me", not two.
+ *
+ * Denials throw NotFoundError rather than a 403: a 403 would confirm that a meeting with that id
+ * exists, which is itself a leak across orgs.
+ *
+ * WRITES ARE NOT WIDENED. Every mutation (update, delete, re-process, media upload/delete,
+ * recommendation status) still calls `requireOwnership`. An overseer can read what happened;
+ * only the owner can change it.
+ */
+async function requireViewableMeeting(
+  caller: AuthenticatedUser,
+  meeting: Meeting | null,
+): Promise<Meeting> {
+  // Returns the meeting rather than asserting: TypeScript does not permit an `asserts` predicate
+  // on an async function, since a Promise cannot narrow synchronously at the call site.
+  if (meeting?.deletedAt !== null) throw new NotFoundError("Meeting");
+  if (meeting.userId === caller.id) return meeting;
+
+  const scope = await resolveScope(caller);
+  const visibleUserIds = await userIdsInScope(scope);
+  if (!visibleUserIds.includes(meeting.userId)) throw new NotFoundError("Meeting");
+
+  // Audit trail. Meetings hold recordings of real conversations, so a read by someone who was
+  // not in the room is worth being able to reconstruct later. Deliberately server-side only —
+  // surfacing it to the owner is a separate product decision.
+  log.info("meeting", "viewed by overseer", {
+    meetingId: meeting.id,
+    ownerId: meeting.userId,
+    viewerId: caller.id,
+    orgId: caller.orgId,
+    scope: scope.type,
+  });
+  return meeting;
+}
+
 export async function listMeetings(caller: AuthenticatedUser): Promise<HydratedMeeting[]> {
   const rows = await meetingRepo.listByUser(caller.id);
   return Promise.all(rows.map(hydrate));
 }
 
 export async function getMeeting(caller: AuthenticatedUser, id: string): Promise<HydratedMeeting> {
-  const row = await meetingRepo.findById(id);
-  requireOwnership(row, caller.id);
+  const row = await requireViewableMeeting(caller, await meetingRepo.findById(id));
   return hydrate(row);
 }
 
@@ -196,8 +240,10 @@ export async function getMeetingMedia(
   caller: AuthenticatedUser,
   id: string,
 ): Promise<MeetingMediaItem[]> {
-  const meeting = await meetingRepo.findById(id);
-  requireOwnership(meeting, caller.id);
+  // Same widened read rule as getMeeting — the recordings ARE "what happened in the meeting",
+  // so an overseer who can open the meeting can play them. Uploading or deleting media still
+  // requires ownership (presignMeetingMedia / deleteMeetingMedia below).
+  const meeting = await requireViewableMeeting(caller, await meetingRepo.findById(id));
   return Promise.all(
     meeting.mediaKeys.map(async (key) => ({
       key,
@@ -328,6 +374,8 @@ export async function updateMeeting(
   input: UpdateMeetingInput,
 ): Promise<HydratedMeeting> {
   const existing = await meetingRepo.findById(id);
+  // OWNER ONLY — deliberately not the widened view rule. An overseer can read a meeting they
+  // did not attend; they must never be able to rewrite its title, agenda, notes or attendees.
   requireOwnership(existing, caller.id);
 
   // After processing, lock attendees/scheduledAt/type — only notes/agenda/title
