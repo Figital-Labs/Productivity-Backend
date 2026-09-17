@@ -35,11 +35,17 @@ export const createTeamUserInputSchema = z.object({
   /** Human-facing job title shown in the UI (e.g. "General Manager"). */
   designation: z.string().max(120).optional(),
   /**
-   * Simplified model: an admin creates either a plain user or an admin. When
-   * true → {role:"admin", level:800, canManageUsers:true}; otherwise a plain
-   * staff user {role:"staff", level:100}. Account creation is admin-only.
+   * Simplified model: an admin creates a plain user, a manager, or an admin.
+   * isAdmin → {role:"admin", level:800, canManageUsers:true}; else isManager →
+   * {role:"manager", level:300}; otherwise a plain staff user {role:"staff",
+   * level:100}. Account creation is admin-only.
    */
   isAdmin: z.boolean().optional(),
+  /**
+   * Manager access (level 300): the user can open the dashboard/team views for
+   * their reportees and assign them tasks. Ignored when `isAdmin` is true.
+   */
+  isManager: z.boolean().optional(),
   /**
    * Reporting managers (m2m). The UI picks one today; the field is an array so
    * multi-manager needs no API change later. Empty/absent → top of the tree.
@@ -62,6 +68,8 @@ export type CreateTeamUserInput = z.infer<typeof createTeamUserInputSchema>;
  * Body for `PATCH /team/users/:id` — admin edits a user's account fields. All
  * fields optional; only provided keys are updated. `managerIds` uses
  * set-replacement semantics (the user's managers become exactly this set).
+ * `isAdmin`/`isManager` pick the access band; an omitted flag keeps the user's
+ * current band, and a user already in the chosen band keeps their exact level.
  */
 export const updateTeamUserInputSchema = z
   .object({
@@ -69,6 +77,7 @@ export const updateTeamUserInputSchema = z
     email: z.email("email must be a valid email").max(200).optional(),
     designation: z.string().max(120).nullable().optional(),
     isAdmin: z.boolean().optional(),
+    isManager: z.boolean().optional(),
     managerIds: z.array(z.string()).max(20).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "No fields to update" });

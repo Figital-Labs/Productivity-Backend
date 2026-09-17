@@ -1,4 +1,4 @@
-import { isOrgAdmin } from "../lib/access.js";
+import { isManagerLevel, isOrgAdmin, LEVELS } from "../lib/access.js";
 import { AppError, ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
 import { hashPassword } from "../lib/password.js";
 import prisma from "../lib/prisma.js";
@@ -264,6 +264,46 @@ function resolveHierarchyDefaults(input: CreateTeamUserInput): {
   }
 }
 
+interface AccessBand {
+  role: "staff" | "manager" | "admin";
+  level: number;
+  canManageUsers: boolean;
+}
+
+/**
+ * Maps the admin form's Admin / Manager-access switches onto a level band
+ * (level is the authorization source of truth — see lib/access.ts). An
+ * undefined switch keeps the user's current band, and a user already inside
+ * the chosen band keeps their exact level (a 400 dept head stays 400).
+ */
+function resolveAccessBand(
+  currentLevel: number,
+  isAdmin: boolean | undefined,
+  isManager: boolean | undefined,
+): AccessBand {
+  const currentlyAdmin = isOrgAdmin(currentLevel);
+  const currentlyManager = isManagerLevel(currentLevel) && !currentlyAdmin;
+  if (isAdmin ?? currentlyAdmin) {
+    return {
+      role: "admin",
+      level: currentlyAdmin ? currentLevel : LEVELS.ADMIN,
+      canManageUsers: true,
+    };
+  }
+  if (isManager ?? currentlyManager) {
+    return {
+      role: "manager",
+      level: currentlyManager ? currentLevel : LEVELS.GROUP_LEAD,
+      canManageUsers: false,
+    };
+  }
+  return {
+    role: "staff",
+    level: isManagerLevel(currentLevel) ? LEVELS.STAFF : currentLevel,
+    canManageUsers: false,
+  };
+}
+
 export async function createUser(
   creator: AuthenticatedUser,
   input: CreateTeamUserInput,
@@ -274,15 +314,20 @@ export async function createUser(
     throw new ForbiddenError("Only admins can create users.");
   }
 
-  // Simplified model: `isAdmin` chooses plain user vs admin. Fall back to the
-  // legacy roleType/role mapping when `isAdmin` is absent (older FE flows).
+  // Simplified model: `isAdmin` / `isManager` choose staff, manager or admin.
+  // Fall back to the legacy roleType/role mapping when both are absent (older
+  // FE flows).
   let resolvedRole: "staff" | "manager" | "admin";
   let resolvedLevel: number;
   let resolvedCanManageUsers: boolean;
-  if (input.isAdmin !== undefined && input.roleType === undefined) {
-    resolvedRole = input.isAdmin ? "admin" : "staff";
-    resolvedLevel = input.isAdmin ? 800 : 100;
-    resolvedCanManageUsers = input.isAdmin;
+  if (
+    (input.isAdmin !== undefined || input.isManager !== undefined) &&
+    input.roleType === undefined
+  ) {
+    const band = resolveAccessBand(LEVELS.STAFF, input.isAdmin ?? false, input.isManager ?? false);
+    resolvedRole = band.role;
+    resolvedLevel = band.level;
+    resolvedCanManageUsers = band.canManageUsers;
   } else {
     const defaults = resolveHierarchyDefaults(input);
     resolvedRole = defaults.role;
@@ -382,7 +427,7 @@ export async function updateUser(
 ): Promise<PublicTeamUser> {
   const target = await prisma.user.findUnique({
     where: { id: targetUserId },
-    select: { id: true, orgId: true },
+    select: { id: true, orgId: true, level: true },
   });
   if (!target) throw new NotFoundError("User", targetUserId);
   if (!admin.isSuperAdmin && target.orgId !== admin.orgId) {
@@ -423,10 +468,15 @@ export async function updateUser(
   if (input.name !== undefined) data.name = input.name;
   if (input.email !== undefined) data.email = input.email;
   if (input.designation !== undefined) data.designation = input.designation;
-  if (input.isAdmin !== undefined) {
-    data.role = input.isAdmin ? "admin" : "staff";
-    data.level = input.isAdmin ? 800 : 100;
-    data.canManageUsers = input.isAdmin;
+  // Access band: only write when the level actually changes, so saving the
+  // form (which always sends the switches) never resets a manager to staff.
+  if (input.isAdmin !== undefined || input.isManager !== undefined) {
+    const band = resolveAccessBand(target.level, input.isAdmin, input.isManager);
+    if (band.level !== target.level) {
+      data.role = band.role;
+      data.level = band.level;
+      data.canManageUsers = band.canManageUsers;
+    }
   }
   // Set-replacement of reporting managers.
   if (input.managerIds !== undefined) {
