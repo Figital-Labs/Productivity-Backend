@@ -1,11 +1,12 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
+import { modelFor } from "../lib/ai-config.js";
 import { ValidationError } from "../lib/errors.js";
 import { truncateNotesForContext } from "../lib/notes-context.js";
 import {
   buildUnifiedIntentPrompt,
   type PendingTaskContext,
 } from "../lib/prompts/unified-intent.js";
-import { GEMINI_FLASH_MODEL, generateStructured, type InlineMedia } from "../lib/vertex.js";
+import { generateStructured, type InlineMedia } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as taskRepo from "../repositories/task.repository.js";
 import * as unifiedRepo from "../repositories/unified-interaction.repository.js";
@@ -86,7 +87,7 @@ export async function processUnified(
   if (input.image) media.push(input.image);
 
   const aiResponse = await generateStructured({
-    model: GEMINI_FLASH_MODEL,
+    model: modelFor("extraction"),
     prompt: buildUnifiedIntentPrompt({
       pendingTasks: taskContext,
       hasAudio: input.audio !== undefined,

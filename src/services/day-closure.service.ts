@@ -1,4 +1,4 @@
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_THINKING_BUDGET, modelFor, temperatureFor } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { AppError, ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
 import {
@@ -6,7 +6,7 @@ import {
   type CurrentTaskState,
 } from "../lib/prompts/day-closure-feedback.js";
 import { resolveScope } from "../lib/resolve-scope.js";
-import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
+import { generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as dayClosureRepo from "../repositories/day-closure.repository.js";
 import * as dayPlanRepo from "../repositories/day-plan.repository.js";
@@ -92,14 +92,14 @@ export async function reviewDayClosure(
   let aiFeedback: DayClosureFeedback;
   try {
     aiFeedback = await generateStructured({
-      model: GEMINI_FLASH_MODEL,
+      model: modelFor("dayClosure"),
       prompt: buildDayClosureFeedbackPrompt({
         todaysTasks: currentTaskStateFrom(currentTasks),
         hasDayPlan: !!plan,
         closureNarrative: input.commentary ?? "",
       }),
       schema: dayClosureFeedbackSchema,
-      temperature: AI_TEMPERATURE.dayClosure,
+      temperature: temperatureFor("dayClosure"),
       thinkingBudget: AI_THINKING_BUDGET.dayClosure,
       onRaw: logRaw("day-closure", user.id),
     });

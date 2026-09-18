@@ -1,10 +1,10 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
-import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
+import { AI_THINKING_BUDGET, AI_TIMEOUT_MS, modelFor, temperatureFor } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { buildTeamImageDelegatePrompt } from "../lib/prompts/team-image-delegate.js";
 import { storeCaptureMedia } from "../lib/store-media.js";
 import { buildDirectoryContext } from "../lib/team-directory.js";
-import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
+import { generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as imageRepo from "../repositories/image.repository.js";
 import {
@@ -46,7 +46,7 @@ export async function delegateImage(
 
   // Run AI FIRST, then create the row — so a failed/empty call leaves no orphan extraction.
   const aiResponse = await generateStructured({
-    model: GEMINI_FLASH_MODEL,
+    model: modelFor("delegation"),
     prompt: buildTeamImageDelegatePrompt({
       directory,
       selfUserId: manager.id,
@@ -54,7 +54,7 @@ export async function delegateImage(
     }),
     schema: teamImageDelegateResponseSchema,
     media: [{ mimeType: image.mimeType, buffer: image.buffer }],
-    temperature: AI_TEMPERATURE.delegation,
+    temperature: temperatureFor("delegation"),
     thinkingBudget: AI_THINKING_BUDGET.delegation,
     timeoutMs: AI_TIMEOUT_MS.media,
     label: "team-image",

@@ -1,10 +1,10 @@
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_THINKING_BUDGET, modelFor, temperatureFor } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { AppError, ForbiddenError } from "../lib/errors.js";
 import prisma from "../lib/prisma.js";
 import { buildMorningBriefPrompt } from "../lib/prompts/morning-brief.js";
 import { resolveScope } from "../lib/resolve-scope.js";
-import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
+import { generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as briefRepo from "../repositories/morning-brief.repository.js";
 import {
@@ -118,10 +118,10 @@ export async function getMorningBrief(
   let payload: MorningBriefPayload;
   try {
     payload = await generateStructured({
-      model: GEMINI_FLASH_MODEL,
+      model: modelFor("morningBrief"),
       prompt,
       schema: morningBriefResponseSchema,
-      temperature: AI_TEMPERATURE.morningBrief,
+      temperature: temperatureFor("morningBrief"),
       thinkingBudget: AI_THINKING_BUDGET.morningBrief,
       onRaw: logRaw("morning-brief", user.id),
     });

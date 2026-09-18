@@ -44,6 +44,21 @@ const EnvSchema = z.object({
     .pipe(ServiceAccountSchema),
   GOOGLE_CLOUD_PROJECT: z.string().min(1),
   GOOGLE_CLOUD_LOCATION: z.string().min(1),
+  // --- Gemini model selection. `gemini-2.5-flash` retires on Vertex AI (Oct 2026), so the
+  // model is env-driven: one global default plus per-surface overrides, letting us canary a
+  // new model on ONE surface and roll back without a deploy. See .env.example. ---
+  GEMINI_MODEL: z.string().min(1).default("gemini-2.5-flash"),
+  GEMINI_MODEL_EXTRACTION: z.string().min(1).optional(),
+  GEMINI_MODEL_DELEGATION: z.string().min(1).optional(),
+  GEMINI_MODEL_MEETING: z.string().min(1).optional(),
+  GEMINI_MODEL_DAY_CLOSURE: z.string().min(1).optional(),
+  GEMINI_MODEL_MORNING_BRIEF: z.string().min(1).optional(),
+  GEMINI_MODEL_TRANSCRIBE: z.string().min(1).optional(),
+  // Gemini 3 defaults temperature to 1.0 and Google advises AGAINST lowering it (low values can
+  // cause looping / degraded output). `configured` keeps our per-surface values (correct for 2.5,
+  // where determinism is the point); `model-default` omits temperature entirely so a Gemini 3
+  // model runs as Google intends. Flip per environment while evaluating.
+  AI_TEMPERATURE_MODE: z.enum(["configured", "model-default"]).default("configured"),
   PORT: z.coerce.number().int().positive().default(3000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   // Minimum log level. Default `info` keeps routine GET access logs (debug) quiet; set `debug`
@@ -152,6 +167,19 @@ export const env = {
     credentials: parsed.data.GOOGLE_SERVICE_ACCOUNT_JSON,
     project: parsed.data.GOOGLE_CLOUD_PROJECT,
     location: parsed.data.GOOGLE_CLOUD_LOCATION,
+  },
+  gemini: {
+    model: parsed.data.GEMINI_MODEL,
+    // Per-surface overrides; `undefined` falls back to `model` (see ai-config.modelFor).
+    perSurface: {
+      extraction: parsed.data.GEMINI_MODEL_EXTRACTION,
+      delegation: parsed.data.GEMINI_MODEL_DELEGATION,
+      meeting: parsed.data.GEMINI_MODEL_MEETING,
+      dayClosure: parsed.data.GEMINI_MODEL_DAY_CLOSURE,
+      morningBrief: parsed.data.GEMINI_MODEL_MORNING_BRIEF,
+      transcribe: parsed.data.GEMINI_MODEL_TRANSCRIBE,
+    },
+    temperatureMode: parsed.data.AI_TEMPERATURE_MODE,
   },
   storageDriver: parsed.data.STORAGE_DRIVER,
   // Always present (used to build keys regardless of driver).

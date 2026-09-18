@@ -1,9 +1,10 @@
 import { enqueueMeeting } from "../jobs/queue.js";
 import {
-  AI_TEMPERATURE,
   AI_THINKING_BUDGET,
   AI_TIMEOUT_MS,
+  modelFor,
   RETRY_PROFILE_FOR,
+  temperatureFor,
 } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { AppError, ConflictError, NotFoundError } from "../lib/errors.js";
@@ -20,7 +21,7 @@ import {
   isSupportedMediaMime,
   mediaKeyPrefix,
 } from "../lib/storage/keys.js";
-import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
+import { generateStructured } from "../lib/vertex.js";
 import type { InlineMedia } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as jobRepo from "../repositories/job.repository.js";
@@ -647,11 +648,11 @@ export async function runProcessing(
   });
 
   const aiResponse = await generateStructured({
-    model: GEMINI_FLASH_MODEL,
+    model: modelFor("meeting"),
     prompt,
     schema: meetingIntentResponseSchema,
     media: allMedia,
-    temperature: AI_TEMPERATURE.meeting,
+    temperature: temperatureFor("meeting"),
     thinkingBudget: AI_THINKING_BUDGET.meeting,
     timeoutMs: AI_TIMEOUT_MS.meeting,
     // Queued work — nobody is blocked on this request, so a transient 429/503 gets a real

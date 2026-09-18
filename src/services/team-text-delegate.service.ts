@@ -1,9 +1,9 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_THINKING_BUDGET, modelFor, temperatureFor } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { buildTeamTextDelegatePrompt } from "../lib/prompts/team-text-delegate.js";
 import { buildDirectoryContext } from "../lib/team-directory.js";
-import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
+import { generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as textInteractionRepo from "../repositories/text-interaction.repository.js";
 import {
@@ -44,7 +44,7 @@ export async function delegateText(
   });
 
   const aiResponse = await generateStructured({
-    model: GEMINI_FLASH_MODEL,
+    model: modelFor("delegation"),
     prompt: buildTeamTextDelegatePrompt({
       directory,
       selfUserId: manager.id,
@@ -52,7 +52,7 @@ export async function delegateText(
       ...promptDateAnchors(today),
     }),
     schema: teamTextDelegateResponseSchema,
-    temperature: AI_TEMPERATURE.delegation,
+    temperature: temperatureFor("delegation"),
     thinkingBudget: AI_THINKING_BUDGET.delegation,
     onRaw: logRaw("team-text", manager.id),
   });

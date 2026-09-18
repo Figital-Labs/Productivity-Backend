@@ -1,9 +1,9 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_THINKING_BUDGET, modelFor, temperatureFor } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { truncateNotesForContext } from "../lib/notes-context.js";
 import { buildTextIntentPrompt, type PendingTaskContext } from "../lib/prompts/text-intent.js";
-import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
+import { generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as taskRepo from "../repositories/task.repository.js";
 import * as textInteractionRepo from "../repositories/text-interaction.repository.js";
@@ -52,14 +52,14 @@ export async function processText(
   });
 
   const aiResponse = await generateStructured({
-    model: GEMINI_FLASH_MODEL,
+    model: modelFor("extraction"),
     prompt: buildTextIntentPrompt({
       pendingTasks: taskContext,
       userText: input.text,
       ...promptDateAnchors(today),
     }),
     schema: textIntentResponseSchema,
-    temperature: AI_TEMPERATURE.extraction,
+    temperature: temperatureFor("extraction"),
     thinkingBudget: AI_THINKING_BUDGET.extraction,
     onRaw: logRaw("text", user.id),
   });
