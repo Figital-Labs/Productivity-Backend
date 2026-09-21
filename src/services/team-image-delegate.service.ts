@@ -1,6 +1,7 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
 import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
+import { withTrace } from "../lib/langfuse.js";
 import { buildTeamImageDelegatePrompt } from "../lib/prompts/team-image-delegate.js";
 import { storeCaptureMedia } from "../lib/store-media.js";
 import { buildDirectoryContext } from "../lib/team-directory.js";
@@ -45,21 +46,34 @@ export async function delegateImage(
   const directory = await buildDirectoryContext(manager.id);
 
   // Run AI FIRST, then create the row — so a failed/empty call leaves no orphan extraction.
-  const aiResponse = await generateStructured({
-    model: GEMINI_FLASH_MODEL,
-    prompt: buildTeamImageDelegatePrompt({
-      directory,
-      selfUserId: manager.id,
-      ...promptDateAnchors(today),
-    }),
-    schema: teamImageDelegateResponseSchema,
-    media: [{ mimeType: image.mimeType, buffer: image.buffer }],
-    temperature: AI_TEMPERATURE.delegation,
-    thinkingBudget: AI_THINKING_BUDGET.delegation,
-    timeoutMs: AI_TIMEOUT_MS.media,
-    label: "team-image",
-    onRaw: logRaw("team-image", manager.id),
-  });
+  const aiResponse = await withTrace(
+    {
+      name: "team-image-delegate",
+      userId: manager.id,
+      model: GEMINI_FLASH_MODEL,
+      input: {
+        mimeType: image.mimeType,
+        bytes: image.buffer.length,
+        directorySize: directory.length,
+      },
+    },
+    () =>
+      generateStructured({
+        model: GEMINI_FLASH_MODEL,
+        prompt: buildTeamImageDelegatePrompt({
+          directory,
+          selfUserId: manager.id,
+          ...promptDateAnchors(today),
+        }),
+        schema: teamImageDelegateResponseSchema,
+        media: [{ mimeType: image.mimeType, buffer: image.buffer }],
+        temperature: AI_TEMPERATURE.delegation,
+        thinkingBudget: AI_THINKING_BUDGET.delegation,
+        timeoutMs: AI_TIMEOUT_MS.media,
+        label: "team-image",
+        onRaw: logRaw("team-image", manager.id),
+      }),
+  );
 
   // Audit copy to S3 (best-effort, after AI so a storage hiccup never fails the result).
   const imageUrl = await storeCaptureMedia("image", manager.orgId, manager.id, image);

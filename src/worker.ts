@@ -4,10 +4,16 @@
  * processing out-of-band, reusing the `prisma` + `storage` singletons. Run alongside the
  * web process (two process types against the same Postgres).
  */
+// Langfuse must be imported first — it starts the OTEL SDK before any code that could create
+// spans is loaded (no-op when LANGFUSE_* keys are absent).
+// eslint-disable-next-line import-x/no-duplicates -- side-effect import must stay first
+import "./lib/langfuse.js";
 import { registerCaptureWorker } from "./jobs/capture.worker.js";
 import { registerMeetingWorker } from "./jobs/meeting.worker.js";
 import { startQueue } from "./jobs/queue.js";
 import { reconcileStuckJobs } from "./jobs/reconcile.js";
+// eslint-disable-next-line import-x/no-duplicates -- see the bootstrap import above
+import { shutdownLangfuse } from "./lib/langfuse.js";
 import prisma from "./lib/prisma.js";
 
 async function main(): Promise<void> {
@@ -28,6 +34,8 @@ async function main(): Promise<void> {
     boss
       .stop()
       .then(() => prisma.$disconnect())
+      // Flush buffered Langfuse spans before exit.
+      .then(() => shutdownLangfuse())
       .then(() => {
         console.log("Worker shutdown complete.");
         process.exit(0);
