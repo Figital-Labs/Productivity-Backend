@@ -1,6 +1,7 @@
 import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { AppError, ForbiddenError } from "../lib/errors.js";
+import { withTrace } from "../lib/langfuse.js";
 import prisma from "../lib/prisma.js";
 import { buildMorningBriefPrompt } from "../lib/prompts/morning-brief.js";
 import { resolveScope } from "../lib/resolve-scope.js";
@@ -117,14 +118,24 @@ export async function getMorningBrief(
 
   let payload: MorningBriefPayload;
   try {
-    payload = await generateStructured({
-      model: GEMINI_FLASH_MODEL,
-      prompt,
-      schema: morningBriefResponseSchema,
-      temperature: AI_TEMPERATURE.morningBrief,
-      thinkingBudget: AI_THINKING_BUDGET.morningBrief,
-      onRaw: logRaw("morning-brief", user.id),
-    });
+    payload = await withTrace(
+      {
+        name: "morning-brief",
+        userId: user.id,
+        model: GEMINI_FLASH_MODEL,
+        input: { scope: scope.type, users: userIds.length, date: formatDateYmd(today) },
+      },
+      () =>
+        generateStructured({
+          model: GEMINI_FLASH_MODEL,
+          prompt,
+          schema: morningBriefResponseSchema,
+          temperature: AI_TEMPERATURE.morningBrief,
+          thinkingBudget: AI_THINKING_BUDGET.morningBrief,
+          onRaw: logRaw("morning-brief", user.id),
+          label: "morning-brief",
+        }),
+    );
   } catch (err) {
     // Graceful degradation: never fail the dashboard on an AI hiccup. Serve a
     // deterministic numbers-only brief and DON'T cache it, so the next request

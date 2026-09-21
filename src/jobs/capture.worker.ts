@@ -9,6 +9,7 @@ import type { Job, PgBoss } from "pg-boss";
 
 import { env } from "../config/env.js";
 import { loadAuthenticatedUser } from "../lib/auth-context.js";
+import { withTrace } from "../lib/langfuse.js";
 import { errInfo, log } from "../lib/logger.js";
 import { storage } from "../lib/storage/index.js";
 import * as jobRepo from "../repositories/job.repository.js";
@@ -35,11 +36,23 @@ async function processOne(job: Job<CaptureJobData>): Promise<void> {
     const { data, contentType } = await storage.download(key);
     const media = { buffer: data, mimeType: contentType };
     const input = targetDate !== undefined ? { targetDate } : {};
-    if (surface === "voice") {
-      await voiceService.runVoiceProcessing(user, media, input, interactionId);
-    } else {
-      await imageService.runImageProcessing(user, media, input, interactionId);
-    }
+    // Langfuse: one trace per job (sessionId = the voice/image interaction id).
+    await withTrace(
+      {
+        name: surface === "voice" ? "voice-capture" : "image-capture",
+        userId: row.userId,
+        sessionId: interactionId,
+        metadata: { jobId: processingJobId },
+        input: { mimeType: contentType, bytes: data.length },
+      },
+      async () => {
+        if (surface === "voice") {
+          await voiceService.runVoiceProcessing(user, media, input, interactionId);
+        } else {
+          await imageService.runImageProcessing(user, media, input, interactionId);
+        }
+      },
+    );
     await jobRepo.markSucceeded(processingJobId);
     log.info("capture-worker", "succeeded", ctx);
   } catch (err) {
