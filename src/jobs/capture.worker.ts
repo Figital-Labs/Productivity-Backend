@@ -8,6 +8,7 @@
 import type { Job, PgBoss } from "pg-boss";
 
 import { env } from "../config/env.js";
+import { modelFor } from "../lib/ai-config.js";
 import { loadAuthenticatedUser } from "../lib/auth-context.js";
 import { withTrace } from "../lib/langfuse.js";
 import { errInfo, log } from "../lib/logger.js";
@@ -39,9 +40,11 @@ async function processOne(job: Job<CaptureJobData>): Promise<void> {
     // Langfuse: one trace per job (sessionId = the voice/image interaction id).
     await withTrace(
       {
-        name: surface === "voice" ? "voice-capture" : "image-capture",
+        name: surface === "voice" ? "voice-intent" : "image-intent",
+        service: "personal-capture",
         userId: row.userId,
         sessionId: interactionId,
+        model: modelFor("extraction"),
         metadata: { jobId: processingJobId },
         input: { mimeType: contentType, bytes: data.length },
       },

@@ -49,6 +49,7 @@ export async function delegateImage(
   const aiResponse = await withTrace(
     {
       name: "team-image-delegate",
+      service: "team-delegation",
       userId: manager.id,
       model: modelFor("delegation"),
       input: {

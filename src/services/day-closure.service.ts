@@ -95,6 +95,7 @@ export async function reviewDayClosure(
     aiFeedback = await withTrace(
       {
         name: "day-closure-review",
+        service: "day-closure",
         userId: user.id,
         model: modelFor("dayClosure"),
         input: { date: dateLabel, tasks: currentTasks.length, hasDayPlan: !!plan },

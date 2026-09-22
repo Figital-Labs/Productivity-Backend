@@ -47,6 +47,7 @@ export async function delegateText(
   const aiResponse = await withTrace(
     {
       name: "team-text-delegate",
+      service: "team-delegation",
       userId: manager.id,
       sessionId: interaction.id,
       model: modelFor("delegation"),

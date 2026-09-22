@@ -18,6 +18,7 @@
 import type { Job, PgBoss } from "pg-boss";
 
 import { env } from "../config/env.js";
+import { modelFor } from "../lib/ai-config.js";
 import { withTrace } from "../lib/langfuse.js";
 import { errInfo, log } from "../lib/logger.js";
 import { storage } from "../lib/storage/index.js";
@@ -102,9 +103,11 @@ async function processOne(job: Job<MeetingJobData>): Promise<void> {
     // Langfuse: one trace per job execution (sessionId = meeting id, so re-queued attempts group).
     await withTrace(
       {
-        name: "meeting-process",
+        name: "meeting-intent",
+        service: "meeting-ai",
         userId: row.userId,
         sessionId: row.targetId,
+        model: modelFor("meeting"),
         metadata: { jobId: processingJobId, attempt: String(attempt) },
         input: {
           audioKeys: audioKeys.length,

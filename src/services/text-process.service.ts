@@ -54,7 +54,8 @@ export async function processText(
 
   const aiResponse = await withTrace(
     {
-      name: "text-capture",
+      name: "text-intent",
+      service: "personal-capture",
       userId: user.id,
       sessionId: interaction.id,
       model: modelFor("extraction"),

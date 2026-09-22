@@ -335,11 +335,13 @@ function endGeneration(
 /**
  * Run `fn` under the caller's active Langfuse trace when one exists (the request/job boundary
  * opens it with userId / sessionId / feature via `withTrace`), otherwise open a trace named after
- * the surface label so every caller is covered.
+ * the surface label so every caller is covered. This is a defensive fallback only — every current
+ * call site already opens its own trace with the correct use-case name/service before calling in,
+ * so `service` here is just the surface label rather than a real module slug.
  */
 function underTrace<T>(surface: string, model: string, fn: () => Promise<T>): Promise<T> {
   if (getActiveTraceId() !== undefined) return fn();
-  return withTrace({ name: surface, feature: surface, model }, fn);
+  return withTrace({ name: surface, feature: surface, service: surface, model }, fn);
 }
 
 /**
