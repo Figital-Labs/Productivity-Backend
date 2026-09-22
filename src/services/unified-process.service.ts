@@ -1,11 +1,13 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
+import { modelFor } from "../lib/ai-config.js";
 import { ValidationError } from "../lib/errors.js";
+import { withTrace } from "../lib/langfuse.js";
 import { truncateNotesForContext } from "../lib/notes-context.js";
 import {
   buildUnifiedIntentPrompt,
   type PendingTaskContext,
 } from "../lib/prompts/unified-intent.js";
-import { GEMINI_FLASH_MODEL, generateStructured, type InlineMedia } from "../lib/vertex.js";
+import { generateStructured, type InlineMedia } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as taskRepo from "../repositories/task.repository.js";
 import * as unifiedRepo from "../repositories/unified-interaction.repository.js";
@@ -85,18 +87,34 @@ export async function processUnified(
   if (input.audio) media.push(input.audio);
   if (input.image) media.push(input.image);
 
-  const aiResponse = await generateStructured({
-    model: GEMINI_FLASH_MODEL,
-    prompt: buildUnifiedIntentPrompt({
-      pendingTasks: taskContext,
-      hasAudio: input.audio !== undefined,
-      hasImage: input.image !== undefined,
-      text: input.text,
-      ...promptDateAnchors(today),
-    }),
-    schema: unifiedIntentResponseSchema,
-    media,
-  });
+  const aiResponse = await withTrace(
+    {
+      name: "unified-capture",
+      userId: user.id,
+      sessionId: interaction.id,
+      model: modelFor("extraction"),
+      input: {
+        hasAudio: input.audio !== undefined,
+        hasImage: input.image !== undefined,
+        textChars: input.text?.length ?? 0,
+        pendingTasks: taskContext.length,
+      },
+    },
+    () =>
+      generateStructured({
+        model: modelFor("extraction"),
+        prompt: buildUnifiedIntentPrompt({
+          pendingTasks: taskContext,
+          hasAudio: input.audio !== undefined,
+          hasImage: input.image !== undefined,
+          text: input.text,
+          ...promptDateAnchors(today),
+        }),
+        schema: unifiedIntentResponseSchema,
+        media,
+        label: "unified",
+      }),
+  );
 
   const persistedActions: PersistedUnifiedAction[] = [];
   for (const action of aiResponse.actions) {

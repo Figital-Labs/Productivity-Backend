@@ -20,6 +20,58 @@ export const AI_TEMPERATURE = {
   transcribe: 0.0,
 } as const;
 
+/** The AI surfaces we configure independently (model, temperature, thinking). */
+export type AiSurface = keyof typeof AI_TEMPERATURE;
+
+/**
+ * Which model a surface runs on: its override if set, else the global default.
+ * Env-driven so a model can be canaried on one surface — and rolled back —
+ * without a deploy. See `GEMINI_MODEL*` in config/env.ts.
+ */
+export function modelFor(surface: AiSurface): string {
+  return env.gemini.perSurface[surface] ?? env.gemini.model;
+}
+
+/**
+ * Temperature for a surface, or `undefined` to let the model use its own default.
+ * Gemini 3 ships at 1.0 and Google warns that lowering it can cause looping, so
+ * `AI_TEMPERATURE_MODE=model-default` omits it entirely. Our configured values
+ * stay the default because determinism is the point on the extraction surfaces.
+ */
+export function temperatureFor(surface: AiSurface): number | undefined {
+  return env.gemini.temperatureMode === "model-default" ? undefined : AI_TEMPERATURE[surface];
+}
+
+/**
+ * Gemini 3 replaced the numeric `thinkingBudget` with a `thinkingLevel` enum, and
+ * sending BOTH is an API error — so the budgets below stay the single source of
+ * truth and we derive a level from them per Google's documented mapping
+ * (1–1024 → LOW, 1025–8192 → MEDIUM, above → HIGH). `vertex.ts` picks the right
+ * field for the model family, so a rollback to 2.5 needs no config change.
+ *
+ * ⚠️ MINIMAL is a floor, not an off switch: Gemini 3 cannot fully disable thinking,
+ * so the transcribe surface (budget 0 = verbatim, no thinking) will spend some
+ * thinking tokens on a 3.x model. Watch its cost/latency after a switch.
+ */
+export type ThinkingLevel = "MINIMAL" | "LOW" | "MEDIUM" | "HIGH";
+
+export function thinkingLevelForBudget(budget: number): ThinkingLevel {
+  if (budget <= 0) return "MINIMAL";
+  if (budget <= 1024) return "LOW";
+  if (budget <= 8192) return "MEDIUM";
+  return "HIGH";
+}
+
+/**
+ * True for Gemini 3 and later, which take `thinkingLevel`; false for 2.x, which
+ * take `thinkingBudget`. Unrecognised names fall back to the legacy field —
+ * a wrong guess there fails loudly on the first call rather than silently.
+ */
+export function usesThinkingLevel(model: string): boolean {
+  const major = /^gemini-(\d+)/.exec(model)?.[1];
+  return major !== undefined && Number(major) >= 3;
+}
+
 // gemini-2.5-flash thinkingBudget range is 0..24576 (0 = off, -1 = dynamic).
 export const AI_THINKING_BUDGET = {
   extraction: 512,

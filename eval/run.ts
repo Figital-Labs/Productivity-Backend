@@ -5,33 +5,99 @@
  *
  * Run this BEFORE and AFTER a prompt rewrite; ship the rewrite only if the
  * pass-rate is >= the baseline.
+ *
+ * Model migration (Gemini 2.5 → 3.x): the model and temperature policy are env
+ * driven, so the same golden set compares candidates without a code change:
+ *
+ *   EVAL_MODEL=gemini-3.6-flash EVAL_REPEATS=3 npm run eval
+ *   EVAL_MODEL=gemini-3.5-flash-lite AI_TEMPERATURE_MODE=model-default npm run eval
+ *
+ * `EVAL_REPEATS` (default 1) runs every case N times. A case that passes on some
+ * runs and fails on others is FLAKY — on the extraction surfaces that matters as
+ * much as the pass rate, since non-determinism is what users report as "the task
+ * turned out different".
  */
-import { cases } from "./cases.js";
+import { cases, EVAL_MODEL } from "./cases.js";
 
-async function main(): Promise<void> {
-  console.log(`Running ${cases.length.toString()} eval cases against ${"gemini-2.5-flash"}...\n`);
-  let failures = 0;
+interface CaseResult {
+  id: string;
+  passes: number;
+  runs: number;
+  avgMs: number;
+  firstFailure: string | null;
+}
 
-  for (const c of cases) {
-    process.stdout.write(`• ${c.id} ... `);
+async function runCase(c: (typeof cases)[number], repeats: number): Promise<CaseResult> {
+  let passes = 0;
+  let totalMs = 0;
+  let firstFailure: string | null = null;
+
+  for (let i = 0; i < repeats; i++) {
+    const startedAt = Date.now();
     try {
-      const result = await c.run();
-      const detail = c.assert(result);
-      if (detail === null) {
-        console.log("PASS");
-      } else {
-        failures++;
-        console.log(`FAIL — ${detail}`);
-      }
+      const detail = c.assert(await c.run());
+      if (detail === null) passes++;
+      else firstFailure ??= detail;
     } catch (err) {
-      failures++;
-      console.log(`ERROR — ${err instanceof Error ? err.message : String(err)}`);
+      firstFailure ??= `ERROR — ${err instanceof Error ? err.message : String(err)}`;
     }
+    totalMs += Date.now() - startedAt;
   }
 
-  const passed = cases.length - failures;
-  console.log(`\n${passed.toString()}/${cases.length.toString()} passed.`);
-  process.exit(failures > 0 ? 1 : 0);
+  return {
+    id: c.id,
+    passes,
+    runs: repeats,
+    avgMs: Math.round(totalMs / repeats),
+    firstFailure,
+  };
+}
+
+async function main(): Promise<void> {
+  const repeats = Number(process.env["EVAL_REPEATS"] ?? "1");
+  if (!Number.isInteger(repeats) || repeats < 1) {
+    console.error(
+      `EVAL_REPEATS must be a positive integer (got ${String(process.env["EVAL_REPEATS"])}).`,
+    );
+    process.exit(1);
+  }
+  const tempMode = process.env["AI_TEMPERATURE_MODE"] ?? "configured";
+  console.log(
+    `Running ${cases.length.toString()} eval cases × ${repeats.toString()} against ` +
+      `${EVAL_MODEL} (temperature: ${tempMode})...\n`,
+  );
+
+  const startedAt = Date.now();
+  const results: CaseResult[] = [];
+  for (const c of cases) {
+    process.stdout.write(`• ${c.id} ... `);
+    const r = await runCase(c, repeats);
+    results.push(r);
+    const score = `${r.passes.toString()}/${r.runs.toString()}`;
+    if (r.passes === r.runs) console.log(`PASS ${score} (${r.avgMs.toString()}ms)`);
+    else if (r.passes === 0) console.log(`FAIL ${score} — ${r.firstFailure ?? "?"}`);
+    else console.log(`FLAKY ${score} — ${r.firstFailure ?? "?"}`);
+  }
+
+  const solid = results.filter((r) => r.passes === r.runs);
+  const flaky = results.filter((r) => r.passes > 0 && r.passes < r.runs);
+  const failed = results.filter((r) => r.passes === 0);
+  const totalRuns = results.reduce((n, r) => n + r.runs, 0);
+  const totalPasses = results.reduce((n, r) => n + r.passes, 0);
+
+  console.log(
+    `\n${solid.length.toString()}/${cases.length.toString()} cases fully passed` +
+      ` · ${flaky.length.toString()} flaky · ${failed.length.toString()} failed`,
+  );
+  console.log(
+    `${totalPasses.toString()}/${totalRuns.toString()} individual runs passed` +
+      ` · ${((Date.now() - startedAt) / 1000).toFixed(1)}s wall clock` +
+      ` · model ${EVAL_MODEL}`,
+  );
+  if (flaky.length > 0) console.log(`Flaky: ${flaky.map((r) => r.id).join(", ")}`);
+  if (failed.length > 0) console.log(`Failed: ${failed.map((r) => r.id).join(", ")}`);
+
+  process.exit(totalPasses === totalRuns ? 0 : 1);
 }
 
 void main();

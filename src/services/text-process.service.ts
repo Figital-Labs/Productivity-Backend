@@ -1,9 +1,10 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_THINKING_BUDGET, modelFor, temperatureFor } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
+import { withTrace } from "../lib/langfuse.js";
 import { truncateNotesForContext } from "../lib/notes-context.js";
 import { buildTextIntentPrompt, type PendingTaskContext } from "../lib/prompts/text-intent.js";
-import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
+import { generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as taskRepo from "../repositories/task.repository.js";
 import * as textInteractionRepo from "../repositories/text-interaction.repository.js";
@@ -51,18 +52,29 @@ export async function processText(
     recommendations: [] as InputJsonValue,
   });
 
-  const aiResponse = await generateStructured({
-    model: GEMINI_FLASH_MODEL,
-    prompt: buildTextIntentPrompt({
-      pendingTasks: taskContext,
-      userText: input.text,
-      ...promptDateAnchors(today),
-    }),
-    schema: textIntentResponseSchema,
-    temperature: AI_TEMPERATURE.extraction,
-    thinkingBudget: AI_THINKING_BUDGET.extraction,
-    onRaw: logRaw("text", user.id),
-  });
+  const aiResponse = await withTrace(
+    {
+      name: "text-capture",
+      userId: user.id,
+      sessionId: interaction.id,
+      model: modelFor("extraction"),
+      input: { textChars: input.text.length, pendingTasks: taskContext.length },
+    },
+    () =>
+      generateStructured({
+        model: modelFor("extraction"),
+        prompt: buildTextIntentPrompt({
+          pendingTasks: taskContext,
+          userText: input.text,
+          ...promptDateAnchors(today),
+        }),
+        schema: textIntentResponseSchema,
+        temperature: temperatureFor("extraction"),
+        thinkingBudget: AI_THINKING_BUDGET.extraction,
+        onRaw: logRaw("text", user.id),
+        label: "text",
+      }),
+  );
 
   const persistedActions: PersistedAiAction[] = [];
   for (const action of aiResponse.actions) {

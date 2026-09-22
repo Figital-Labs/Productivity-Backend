@@ -1,9 +1,10 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_THINKING_BUDGET, modelFor, temperatureFor } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
+import { withTrace } from "../lib/langfuse.js";
 import { buildTeamTextDelegatePrompt } from "../lib/prompts/team-text-delegate.js";
 import { buildDirectoryContext } from "../lib/team-directory.js";
-import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
+import { generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as textInteractionRepo from "../repositories/text-interaction.repository.js";
 import {
@@ -43,19 +44,30 @@ export async function delegateText(
     recommendations: [] as InputJsonValue,
   });
 
-  const aiResponse = await generateStructured({
-    model: GEMINI_FLASH_MODEL,
-    prompt: buildTeamTextDelegatePrompt({
-      directory,
-      selfUserId: manager.id,
-      userText: input.text,
-      ...promptDateAnchors(today),
-    }),
-    schema: teamTextDelegateResponseSchema,
-    temperature: AI_TEMPERATURE.delegation,
-    thinkingBudget: AI_THINKING_BUDGET.delegation,
-    onRaw: logRaw("team-text", manager.id),
-  });
+  const aiResponse = await withTrace(
+    {
+      name: "team-text-delegate",
+      userId: manager.id,
+      sessionId: interaction.id,
+      model: modelFor("delegation"),
+      input: { textChars: input.text.length, directorySize: directory.length },
+    },
+    () =>
+      generateStructured({
+        model: modelFor("delegation"),
+        prompt: buildTeamTextDelegatePrompt({
+          directory,
+          selfUserId: manager.id,
+          userText: input.text,
+          ...promptDateAnchors(today),
+        }),
+        schema: teamTextDelegateResponseSchema,
+        temperature: temperatureFor("delegation"),
+        thinkingBudget: AI_THINKING_BUDGET.delegation,
+        onRaw: logRaw("team-text", manager.id),
+        label: "team-text",
+      }),
+  );
 
   const persistedActions: PersistedDelegationAction[] = [];
   const extraRecommendations: TeamDelegateRecommendation[] = [];

@@ -1,12 +1,13 @@
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../lib/ai-config.js";
+import { AI_THINKING_BUDGET, modelFor, temperatureFor } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { AppError, ConflictError, ForbiddenError, NotFoundError } from "../lib/errors.js";
+import { withTrace } from "../lib/langfuse.js";
 import {
   buildDayClosureFeedbackPrompt,
   type CurrentTaskState,
 } from "../lib/prompts/day-closure-feedback.js";
 import { resolveScope } from "../lib/resolve-scope.js";
-import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
+import { generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as dayClosureRepo from "../repositories/day-closure.repository.js";
 import * as dayPlanRepo from "../repositories/day-plan.repository.js";
@@ -91,18 +92,28 @@ export async function reviewDayClosure(
   const currentTasks = await taskRepo.listByDate(user.id, date);
   let aiFeedback: DayClosureFeedback;
   try {
-    aiFeedback = await generateStructured({
-      model: GEMINI_FLASH_MODEL,
-      prompt: buildDayClosureFeedbackPrompt({
-        todaysTasks: currentTaskStateFrom(currentTasks),
-        hasDayPlan: !!plan,
-        closureNarrative: input.commentary ?? "",
-      }),
-      schema: dayClosureFeedbackSchema,
-      temperature: AI_TEMPERATURE.dayClosure,
-      thinkingBudget: AI_THINKING_BUDGET.dayClosure,
-      onRaw: logRaw("day-closure", user.id),
-    });
+    aiFeedback = await withTrace(
+      {
+        name: "day-closure-review",
+        userId: user.id,
+        model: modelFor("dayClosure"),
+        input: { date: dateLabel, tasks: currentTasks.length, hasDayPlan: !!plan },
+      },
+      () =>
+        generateStructured({
+          model: modelFor("dayClosure"),
+          prompt: buildDayClosureFeedbackPrompt({
+            todaysTasks: currentTaskStateFrom(currentTasks),
+            hasDayPlan: !!plan,
+            closureNarrative: input.commentary ?? "",
+          }),
+          schema: dayClosureFeedbackSchema,
+          temperature: temperatureFor("dayClosure"),
+          thinkingBudget: AI_THINKING_BUDGET.dayClosure,
+          onRaw: logRaw("day-closure", user.id),
+          label: "day-closure",
+        }),
+    );
   } catch (err) {
     // Graceful degradation: don't lose the user's closure on an AI hiccup.
     // Reflect the task list deterministically; the narrative-driven auto-marking
