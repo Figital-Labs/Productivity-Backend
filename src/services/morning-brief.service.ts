@@ -121,6 +121,7 @@ export async function getMorningBrief(
     payload = await withTrace(
       {
         name: "morning-brief",
+        service: "morning-brief",
         userId: user.id,
         model: modelFor("morningBrief"),
         input: { scope: scope.type, users: userIds.length, date: formatDateYmd(today) },

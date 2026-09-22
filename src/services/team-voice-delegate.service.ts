@@ -54,6 +54,7 @@ export async function delegateVoice(
   const aiResponse = await withTrace(
     {
       name: "team-voice-delegate",
+      service: "team-delegation",
       userId: manager.id,
       model: modelFor("delegation"),
       input: {

@@ -89,7 +89,8 @@ export async function processUnified(
 
   const aiResponse = await withTrace(
     {
-      name: "unified-capture",
+      name: "unified-intent",
+      service: "personal-capture",
       userId: user.id,
       sessionId: interaction.id,
       model: modelFor("extraction"),

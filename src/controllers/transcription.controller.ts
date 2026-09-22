@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 
+import { modelFor } from "../lib/ai-config.js";
 import { ValidationError } from "../lib/errors.js";
 import { withTrace } from "../lib/langfuse.js";
 import * as transcriptionService from "../services/transcription.service.js";
@@ -18,7 +19,9 @@ export async function transcribe(req: Request, res: Response): Promise<void> {
   const result = await withTrace(
     {
       name: "transcribe",
+      service: "transcription",
       userId: req.user.id,
+      model: modelFor("transcribe"),
       input: { mimeType: file.mimetype, bytes: file.size },
     },
     () =>

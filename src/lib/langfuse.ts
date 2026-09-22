@@ -55,8 +55,8 @@ process.once("SIGINT", () => {
   void shutdownLangfuse();
 });
 
-/** `metadata.service` for every trace emitted by this repo (contract §7). */
-export const LANGFUSE_SERVICE = "productivity";
+/** `metadata.product` for every trace emitted by this repo (AI use-case tagging standard). */
+export const LANGFUSE_PRODUCT = "day-planner";
 
 interface UsageMetadataLike {
   promptTokenCount?: number | undefined;
@@ -69,6 +69,10 @@ interface UsageMetadataLike {
 /**
  * Token usage in the shape Langfuse expects, derived from `response.usageMetadata`. Zero/undefined
  * keys are omitted. Cost is NOT set here — Langfuse computes it from its model price table.
+ *
+ * Only `input` / `output` / `output_reasoning` / `input_cached` are emitted — Langfuse's cost
+ * engine prices exactly those keys. A `total` key (or `promptTokens`/`completionTokens`) is not
+ * priced at all and silently shows as zero cost, so it must never be added here.
  */
 export function usageFromResponse(res: {
   usageMetadata?: UsageMetadataLike | undefined;
@@ -79,7 +83,6 @@ export function usageFromResponse(res: {
   if (u.candidatesTokenCount) out["output"] = u.candidatesTokenCount;
   if (u.thoughtsTokenCount) out["output_reasoning"] = u.thoughtsTokenCount;
   if (u.cachedContentTokenCount) out["input_cached"] = u.cachedContentTokenCount;
-  if (u.totalTokenCount) out["total"] = u.totalTokenCount;
   return out;
 }
 
@@ -89,10 +92,12 @@ export function modelFamily(model: string): string {
 }
 
 export interface TraceOptions {
-  /** Short feature name, e.g. "meeting-process" — never contains ids. */
+  /** The use case, e.g. "meeting-intent" — this is also the trace name. Never contains ids. */
   name: string;
-  /** `metadata.feature`; defaults to `name`. */
+  /** `metadata.feature`; defaults to `name` (the use case, verbatim). */
   feature?: string;
+  /** `metadata.service` — the module slug, e.g. "meeting-ai", "team-delegation". */
+  service: string;
   /** End-user id the work is done for. */
   userId?: string;
   /** Meeting id, interaction id, job id, ... when one exists. */
@@ -114,10 +119,11 @@ export function withTrace<T>(
   fn: (trace: LangfuseSpan) => Promise<T>,
 ): Promise<T> {
   const feature = opts.feature ?? opts.name;
-  const tags = [LANGFUSE_SERVICE, feature];
+  const tags = [LANGFUSE_PRODUCT, opts.service, feature];
   if (opts.model !== undefined) tags.push(modelFamily(opts.model));
   const metadata: Record<string, string> = {
-    service: LANGFUSE_SERVICE,
+    product: LANGFUSE_PRODUCT,
+    service: opts.service,
     feature,
     ...opts.metadata,
   };
