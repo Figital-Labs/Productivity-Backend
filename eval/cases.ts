@@ -12,17 +12,25 @@
  */
 import "dotenv/config";
 
-import { AI_TEMPERATURE, AI_THINKING_BUDGET } from "../src/lib/ai-config.js";
+import { AI_THINKING_BUDGET, temperatureFor } from "../src/lib/ai-config.js";
+import { env } from "../src/config/env.js";
 import { buildDayClosureFeedbackPrompt } from "../src/lib/prompts/day-closure-feedback.js";
 import { buildMeetingIntentPrompt } from "../src/lib/prompts/meeting-intent.js";
 import { buildTeamTextDelegatePrompt } from "../src/lib/prompts/team-text-delegate.js";
 import { buildTextIntentPrompt } from "../src/lib/prompts/text-intent.js";
-import { GEMINI_FLASH_MODEL, generateStructured } from "../src/lib/vertex.js";
+import { generateStructured } from "../src/lib/vertex.js";
 import { dayClosureFeedbackSchema } from "../src/schemas/day-closure-feedback.schema.js";
 import { meetingIntentResponseSchema } from "../src/schemas/meeting.schema.js";
 import { teamTextDelegateResponseSchema } from "../src/schemas/team-text-delegate.schema.js";
 import { textIntentResponseSchema } from "../src/schemas/text-process.schema.js";
 import { promptDateAnchors, todayInUserTz } from "../src/utils/date.js";
+
+/**
+ * Model under test. Defaults to the app's configured model; override per run:
+ * `EVAL_MODEL=gemini-3.6-flash npm run eval`. Temperature follows
+ * AI_TEMPERATURE_MODE, so both policies can be evaluated without code changes.
+ */
+export const EVAL_MODEL = process.env["EVAL_MODEL"] ?? env.gemini.model;
 
 const anchors = promptDateAnchors(todayInUserTz("Asia/Kolkata"));
 const DEVANAGARI = /[ऀ-ॿ]/;
@@ -71,20 +79,20 @@ async function text(
   pendingTasks: typeof pendingPharmacy | [],
 ): Promise<EvalResponse> {
   return (await generateStructured({
-    model: GEMINI_FLASH_MODEL,
+    model: EVAL_MODEL,
     prompt: buildTextIntentPrompt({ pendingTasks, userText, ...anchors }),
     schema: textIntentResponseSchema,
-    temperature: AI_TEMPERATURE.extraction,
+    temperature: temperatureFor("extraction"),
     thinkingBudget: AI_THINKING_BUDGET.extraction,
   })) as unknown as EvalResponse;
 }
 
 async function delegate(userText: string): Promise<EvalResponse> {
   return (await generateStructured({
-    model: GEMINI_FLASH_MODEL,
+    model: EVAL_MODEL,
     prompt: buildTeamTextDelegatePrompt({ directory, selfUserId: "u-self", userText, ...anchors }),
     schema: teamTextDelegateResponseSchema,
-    temperature: AI_TEMPERATURE.delegation,
+    temperature: temperatureFor("delegation"),
     thinkingBudget: AI_THINKING_BUDGET.delegation,
   })) as unknown as EvalResponse;
 }
@@ -220,7 +228,7 @@ export const cases: EvalCase[] = [
     id: "day-closure/all-done-novel-phrasing",
     run: async () =>
       (await generateStructured({
-        model: GEMINI_FLASH_MODEL,
+        model: EVAL_MODEL,
         prompt: buildDayClosureFeedbackPrompt({
           todaysTasks: [
             {
@@ -249,7 +257,7 @@ export const cases: EvalCase[] = [
           closureNarrative: "aaj sab nipta diya, kuch bhi pending nahi raha",
         }),
         schema: dayClosureFeedbackSchema,
-        temperature: AI_TEMPERATURE.dayClosure,
+        temperature: temperatureFor("dayClosure"),
         thinkingBudget: AI_THINKING_BUDGET.dayClosure,
       })) as unknown as EvalResponse,
     assert: (r) => {
@@ -267,7 +275,7 @@ export const cases: EvalCase[] = [
     id: "meeting/owner-and-unassigned",
     run: async () =>
       (await generateStructured({
-        model: GEMINI_FLASH_MODEL,
+        model: EVAL_MODEL,
         prompt: buildMeetingIntentPrompt({
           attendees: [{ id: "u-ravi", name: "Ravi", role: "OT Technician" }],
           selfUserId: "u-self",
@@ -279,7 +287,7 @@ export const cases: EvalCase[] = [
           ...anchors,
         }),
         schema: meetingIntentResponseSchema,
-        temperature: AI_TEMPERATURE.meeting,
+        temperature: temperatureFor("meeting"),
         thinkingBudget: AI_THINKING_BUDGET.meeting,
       })) as unknown as EvalResponse,
     assert: (r) => {

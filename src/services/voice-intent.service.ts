@@ -1,8 +1,8 @@
-import { AI_TEMPERATURE, AI_THINKING_BUDGET, AI_TIMEOUT_MS } from "../lib/ai-config.js";
+import { AI_THINKING_BUDGET, AI_TIMEOUT_MS, modelFor, temperatureFor } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
 import { truncateNotesForContext } from "../lib/notes-context.js";
 import { buildVoiceIntentPrompt, type PendingTaskContext } from "../lib/prompts/voice-intent.js";
-import { GEMINI_FLASH_MODEL, generateStructured } from "../lib/vertex.js";
+import { generateStructured } from "../lib/vertex.js";
 import type { AuthenticatedUser } from "../middleware/auth.js";
 import * as taskRepo from "../repositories/task.repository.js";
 import * as voiceRepo from "../repositories/voice.repository.js";
@@ -62,14 +62,14 @@ export async function runVoiceProcessing(
   });
 
   const aiResponse = await generateStructured({
-    model: GEMINI_FLASH_MODEL,
+    model: modelFor("extraction"),
     prompt: buildVoiceIntentPrompt({
       pendingTasks: taskContext,
       ...promptDateAnchors(today),
     }),
     schema: voiceIntentResponseSchema,
     media: [{ mimeType: audio.mimeType, buffer: audio.buffer }],
-    temperature: AI_TEMPERATURE.extraction,
+    temperature: temperatureFor("extraction"),
     thinkingBudget: AI_THINKING_BUDGET.extraction,
     timeoutMs: AI_TIMEOUT_MS.media,
     label: "voice",

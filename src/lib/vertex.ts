@@ -6,7 +6,12 @@ import { z } from "zod";
 
 import { env } from "../config/env.js";
 
-import { RETRY_PROFILES, type RetryProfile } from "./ai-config.js";
+import {
+  RETRY_PROFILES,
+  type RetryProfile,
+  thinkingLevelForBudget,
+  usesThinkingLevel,
+} from "./ai-config.js";
 import { UpstreamError } from "./errors.js";
 import { usageFromResponse, withTrace } from "./langfuse.js";
 import { log } from "./logger.js";
@@ -23,7 +28,11 @@ const ai = new GoogleGenAI({
   googleAuthOptions: { credentials: env.gcp.credentials },
 });
 
-export const GEMINI_FLASH_MODEL = "gemini-2.5-flash";
+/**
+ * The model is no longer a constant — `gemini-2.5-flash` retires on Vertex AI in
+ * October 2026. Call sites resolve it per surface via `modelFor()` in ai-config,
+ * which reads `GEMINI_MODEL` / `GEMINI_MODEL_<SURFACE>` from the environment.
+ */
 
 export interface InlineMedia {
   mimeType: string;
@@ -36,7 +45,12 @@ export interface InlineMedia {
  * behaviour (every field is conditionally spread into the config).
  */
 interface CommonGenOptions {
-  temperature?: number;
+  /**
+   * `| undefined` is explicit because `temperatureFor()` returns undefined under
+   * AI_TEMPERATURE_MODE=model-default, and the repo runs `exactOptionalPropertyTypes`.
+   * Undefined means "omit it" — the model then applies its own default.
+   */
+  temperature?: number | undefined;
   systemInstruction?: string;
   thinkingBudget?: number;
   /**
@@ -161,7 +175,20 @@ function buildParts(prompt: string, media?: InlineMedia[]): GeminiPart[] {
   return parts;
 }
 
+/**
+ * Thinking config in the shape the target model accepts: Gemini 3+ takes the
+ * `thinkingLevel` enum, 2.x takes the numeric `thinkingBudget`, and sending both
+ * is an API error. Callers keep passing a budget; the translation happens here so
+ * switching models (or rolling back) is an env change, not a code change.
+ */
+function thinkingConfigFor(model: string, budget: number): Record<string, unknown> {
+  return usesThinkingLevel(model)
+    ? { thinkingLevel: thinkingLevelForBudget(budget) }
+    : { thinkingBudget: budget };
+}
+
 function buildConfig(
+  model: string,
   opts: CommonGenOptions,
   extra: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -169,7 +196,7 @@ function buildConfig(
     ...(opts.systemInstruction !== undefined && { systemInstruction: opts.systemInstruction }),
     ...(opts.temperature !== undefined && { temperature: opts.temperature }),
     ...(opts.thinkingBudget !== undefined && {
-      thinkingConfig: { thinkingBudget: opts.thinkingBudget },
+      thinkingConfig: thinkingConfigFor(model, opts.thinkingBudget),
     }),
     ...extra,
   };
@@ -330,7 +357,7 @@ export async function generateStructured<S extends z.ZodType>(
   opts: GenerateStructuredOptions<S>,
 ): Promise<z.infer<S>> {
   const parts = buildParts(opts.prompt, opts.media);
-  const config = buildConfig(opts, {
+  const config = buildConfig(opts.model, opts, {
     responseMimeType: "application/json",
     responseJsonSchema: z.toJSONSchema(opts.schema),
   });
@@ -415,7 +442,7 @@ export async function generateStructured<S extends z.ZodType>(
  */
 export async function generateText(opts: GenerateTextOptions): Promise<string> {
   const parts = buildParts(opts.prompt, opts.media);
-  const config = buildConfig(opts, {});
+  const config = buildConfig(opts.model, opts, {});
   const surface = opts.label ?? "text";
   log.debug("ai", "request", { surface, model: opts.model, bytes: mediaBytes(opts.media) });
 
