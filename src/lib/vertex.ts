@@ -1,5 +1,7 @@
 import { GoogleGenAI, MediaModality } from "@google/genai";
 import type { GenerateContentResponse } from "@google/genai";
+import { getActiveTraceId, startObservation } from "@langfuse/tracing";
+import type { LangfuseGeneration } from "@langfuse/tracing";
 import { z } from "zod";
 
 import { env } from "../config/env.js";
@@ -11,6 +13,7 @@ import {
   usesThinkingLevel,
 } from "./ai-config.js";
 import { UpstreamError } from "./errors.js";
+import { usageFromResponse, withTrace } from "./langfuse.js";
 import { log } from "./logger.js";
 
 /**
@@ -221,7 +224,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  * than burning another `timeoutMs`.
  */
 async function withRetry<T>(
-  fn: () => Promise<T>,
+  fn: (attempt: number) => Promise<T>,
   profile: RetryProfile,
   surface: string,
 ): Promise<T> {
@@ -231,7 +234,7 @@ async function withRetry<T>(
 
   for (;;) {
     try {
-      return await fn();
+      return await fn(outputRetries + transientRetries + 1);
     } catch (err) {
       const kind = classifyAiFailure(err);
       if (kind === "permanent") throw err;
@@ -254,6 +257,89 @@ async function withRetry<T>(
       await sleep(delayMs);
     }
   }
+}
+
+/** Loggable copy of the request parts — inline media becomes `{ mimeType, bytes }`, never the payload. */
+function partsForTrace(parts: GeminiPart[]): unknown[] {
+  return parts.map((p) =>
+    "inlineData" in p
+      ? {
+          inlineData: {
+            mimeType: p.inlineData.mimeType,
+            bytes: Math.floor((p.inlineData.data.length * 3) / 4),
+          },
+        }
+      : p,
+  );
+}
+
+function modelParametersFor(
+  opts: CommonGenOptions,
+  config: Record<string, unknown>,
+): Record<string, string | number> {
+  const params: Record<string, string | number> = {};
+  if (opts.temperature !== undefined) params["temperature"] = opts.temperature;
+  if (opts.thinkingBudget !== undefined) params["thinkingBudget"] = opts.thinkingBudget;
+  const mime = config["responseMimeType"];
+  if (typeof mime === "string") params["responseMimeType"] = mime;
+  return params;
+}
+
+/**
+ * Langfuse: one `generation` observation per attempt (retries are separate generations under the
+ * same trace), nested under whatever trace is active — see `underTrace`.
+ */
+function startGeneration(
+  surface: string,
+  opts: CommonGenOptions & { model: string },
+  parts: GeminiPart[],
+  config: Record<string, unknown>,
+  attempt: number,
+): LangfuseGeneration {
+  return startObservation(
+    opts.model,
+    {
+      model: opts.model,
+      input: {
+        ...(opts.systemInstruction !== undefined && { systemInstruction: opts.systemInstruction }),
+        contents: [{ role: "user", parts: partsForTrace(parts) }],
+      },
+      modelParameters: modelParametersFor(opts, config),
+      metadata: { surface, attempt, retryProfile: opts.retryProfile ?? "fast" },
+    },
+    { asType: "generation" },
+  );
+}
+
+/** Record output + usage (when the model answered) and ERROR + message (when the attempt threw). */
+function endGeneration(
+  generation: LangfuseGeneration,
+  response: GenerateContentResponse | undefined,
+  failure: { error: unknown } | undefined,
+): void {
+  generation
+    .update({
+      ...(response !== undefined && {
+        output: response.text ?? "",
+        usageDetails: usageFromResponse(response),
+      }),
+      ...(failure !== undefined && {
+        level: "ERROR" as const,
+        statusMessage:
+          failure.error instanceof Error ? failure.error.message : String(failure.error),
+      }),
+    })
+    .end();
+}
+
+/**
+ * Run `fn` under the caller's active Langfuse trace when one exists (the request/job boundary
+ * opens it with userId / sessionId / feature via `withTrace`), otherwise open a trace named after
+ * the surface label so every caller is covered.
+ */
+function underTrace<T>(surface: string, model: string, fn: () => Promise<T>): Promise<T> {
+  if (getActiveTraceId() !== undefined) return fn();
+  return withTrace({ name: surface, feature: surface, model }, fn);
 }
 
 /**
@@ -283,52 +369,68 @@ export async function generateStructured<S extends z.ZodType>(
     bytes: mediaBytes(opts.media),
   });
 
-  return withRetry(
-    async () => {
-      const startedAt = Date.now();
-      const response = await withTimeout(
-        ai.models.generateContent({
-          model: opts.model,
-          contents: [{ role: "user", parts }],
-          config,
-        }),
-        opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      );
+  return underTrace(surface, opts.model, () =>
+    withRetry(
+      async (attempt) => {
+        const generation = startGeneration(surface, opts, parts, config, attempt);
+        let response: GenerateContentResponse | undefined;
+        let failure: { error: unknown } | undefined;
+        try {
+          const startedAt = Date.now();
+          response = await withTimeout(
+            ai.models.generateContent({
+              model: opts.model,
+              contents: [{ role: "user", parts }],
+              config,
+            }),
+            opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+          );
 
-      const text = response.text;
-      if (typeof text !== "string" || text.length === 0) {
-        log.warn("ai", "empty response", { surface });
-        throw new UpstreamError("AI_EMPTY_RESPONSE", "Vertex returned no text content.");
-      }
-      opts.onRaw?.(text);
+          const text = response.text;
+          if (typeof text !== "string" || text.length === 0) {
+            log.warn("ai", "empty response", { surface });
+            throw new UpstreamError("AI_EMPTY_RESPONSE", "Vertex returned no text content.");
+          }
+          opts.onRaw?.(text);
 
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        log.warn("ai", "invalid JSON", { surface, rawLen: text.length });
-        throw new UpstreamError("AI_INVALID_JSON", "Vertex response was not valid JSON.", {
-          raw: text,
-        });
-      }
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(text);
+          } catch {
+            log.warn("ai", "invalid JSON", { surface, rawLen: text.length });
+            throw new UpstreamError("AI_INVALID_JSON", "Vertex response was not valid JSON.", {
+              raw: text,
+            });
+          }
 
-      const result = opts.schema.safeParse(parsed);
-      if (!result.success) {
-        log.warn("ai", "schema mismatch", {
-          surface,
-          rawLen: text.length,
-          issues: result.error.issues.length,
-        });
-        throw new UpstreamError("AI_SCHEMA_MISMATCH", "Vertex response did not match the schema.", {
-          raw: text,
-          issues: result.error.issues as unknown as Record<string, unknown>,
-        });
-      }
-      logMeta(surface, response, Date.now() - startedAt, text.length);
-      return result.data;
-    },
-    opts.retryProfile ?? "fast",
-    surface,
+          const result = opts.schema.safeParse(parsed);
+          if (!result.success) {
+            log.warn("ai", "schema mismatch", {
+              surface,
+              rawLen: text.length,
+              issues: result.error.issues.length,
+            });
+            throw new UpstreamError(
+              "AI_SCHEMA_MISMATCH",
+              "Vertex response did not match the schema.",
+              {
+                raw: text,
+                issues: result.error.issues as unknown as Record<string, unknown>,
+              },
+            );
+          }
+          logMeta(surface, response, Date.now() - startedAt, text.length);
+          return result.data;
+        } catch (err) {
+          failure = { error: err };
+          throw err;
+        } finally {
+          endGeneration(generation, response, failure);
+        }
+      },
+      opts.retryProfile ?? "fast",
+      surface,
+    ),
   );
 }
 
@@ -344,28 +446,40 @@ export async function generateText(opts: GenerateTextOptions): Promise<string> {
   const surface = opts.label ?? "text";
   log.debug("ai", "request", { surface, model: opts.model, bytes: mediaBytes(opts.media) });
 
-  return withRetry(
-    async () => {
-      const startedAt = Date.now();
-      const response = await withTimeout(
-        ai.models.generateContent({
-          model: opts.model,
-          contents: [{ role: "user", parts }],
-          ...(Object.keys(config).length > 0 && { config }),
-        }),
-        opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      );
+  return underTrace(surface, opts.model, () =>
+    withRetry(
+      async (attempt) => {
+        const generation = startGeneration(surface, opts, parts, config, attempt);
+        let response: GenerateContentResponse | undefined;
+        let failure: { error: unknown } | undefined;
+        try {
+          const startedAt = Date.now();
+          response = await withTimeout(
+            ai.models.generateContent({
+              model: opts.model,
+              contents: [{ role: "user", parts }],
+              ...(Object.keys(config).length > 0 && { config }),
+            }),
+            opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+          );
 
-      const text = response.text;
-      if (typeof text !== "string" || text.length === 0) {
-        log.warn("ai", "empty response", { surface });
-        throw new UpstreamError("AI_EMPTY_RESPONSE", "Vertex returned no text content.");
-      }
-      opts.onRaw?.(text);
-      logMeta(surface, response, Date.now() - startedAt, text.length);
-      return text;
-    },
-    opts.retryProfile ?? "fast",
-    surface,
+          const text = response.text;
+          if (typeof text !== "string" || text.length === 0) {
+            log.warn("ai", "empty response", { surface });
+            throw new UpstreamError("AI_EMPTY_RESPONSE", "Vertex returned no text content.");
+          }
+          opts.onRaw?.(text);
+          logMeta(surface, response, Date.now() - startedAt, text.length);
+          return text;
+        } catch (err) {
+          failure = { error: err };
+          throw err;
+        } finally {
+          endGeneration(generation, response, failure);
+        }
+      },
+      opts.retryProfile ?? "fast",
+      surface,
+    ),
   );
 }

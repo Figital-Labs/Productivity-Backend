@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 
 import { ValidationError } from "../lib/errors.js";
+import { withTrace } from "../lib/langfuse.js";
 import * as transcriptionService from "../services/transcription.service.js";
 
 /**
@@ -12,9 +13,19 @@ export async function transcribe(req: Request, res: Response): Promise<void> {
   if (!req.file) {
     throw new ValidationError("Audio file is required on field `audio`.");
   }
-  const result = await transcriptionService.transcribeAudio({
-    buffer: req.file.buffer,
-    mimeType: req.file.mimetype,
-  });
+  const file = req.file;
+  // Langfuse trace at the request boundary (the service itself has no user context).
+  const result = await withTrace(
+    {
+      name: "transcribe",
+      userId: req.user.id,
+      input: { mimeType: file.mimetype, bytes: file.size },
+    },
+    () =>
+      transcriptionService.transcribeAudio({
+        buffer: file.buffer,
+        mimeType: file.mimetype,
+      }),
+  );
   res.json(result);
 }

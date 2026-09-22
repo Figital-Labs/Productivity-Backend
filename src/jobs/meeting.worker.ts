@@ -18,6 +18,7 @@
 import type { Job, PgBoss } from "pg-boss";
 
 import { env } from "../config/env.js";
+import { withTrace } from "../lib/langfuse.js";
 import { errInfo, log } from "../lib/logger.js";
 import { storage } from "../lib/storage/index.js";
 import { classifyAiFailure } from "../lib/vertex.js";
@@ -98,17 +99,33 @@ async function processOne(job: Job<MeetingJobData>): Promise<void> {
   });
   await jobRepo.markProcessing(processingJobId);
   try {
-    const audioClips = await downloadAll(audioKeys);
-    const images = await downloadAll(imageKeys);
-    log.debug("worker", "media downloaded", {
-      ...ctx,
-      clips: audioClips.length,
-      images: images.length,
-    });
-    await meetingService.runProcessing(
-      row.targetId,
-      { id: row.userId, orgId: row.orgId },
-      { audioClips, images, customPrompt },
+    // Langfuse: one trace per job execution (sessionId = meeting id, so re-queued attempts group).
+    await withTrace(
+      {
+        name: "meeting-process",
+        userId: row.userId,
+        sessionId: row.targetId,
+        metadata: { jobId: processingJobId, attempt: String(attempt) },
+        input: {
+          audioKeys: audioKeys.length,
+          imageKeys: imageKeys.length,
+          hasCustomPrompt: customPrompt !== undefined,
+        },
+      },
+      async () => {
+        const audioClips = await downloadAll(audioKeys);
+        const images = await downloadAll(imageKeys);
+        log.debug("worker", "media downloaded", {
+          ...ctx,
+          clips: audioClips.length,
+          images: images.length,
+        });
+        await meetingService.runProcessing(
+          row.targetId,
+          { id: row.userId, orgId: row.orgId },
+          { audioClips, images, customPrompt },
+        );
+      },
     );
     await jobRepo.markSucceeded(processingJobId);
     log.info("worker", "succeeded", ctx);

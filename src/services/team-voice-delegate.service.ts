@@ -1,6 +1,7 @@
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace.js";
 import { AI_THINKING_BUDGET, AI_TIMEOUT_MS, modelFor, temperatureFor } from "../lib/ai-config.js";
 import { logRaw } from "../lib/ai-log.js";
+import { withTrace } from "../lib/langfuse.js";
 import { buildTeamVoiceDelegatePrompt } from "../lib/prompts/team-voice-delegate.js";
 import { storeCaptureMedia } from "../lib/store-media.js";
 import { buildDirectoryContext } from "../lib/team-directory.js";
@@ -50,21 +51,34 @@ export async function delegateVoice(
   const directory = await buildDirectoryContext(manager.id);
 
   // Run AI FIRST, then create the row — so a failed/empty call leaves no orphan interaction.
-  const aiResponse = await generateStructured({
-    model: modelFor("delegation"),
-    prompt: buildTeamVoiceDelegatePrompt({
-      directory,
-      selfUserId: manager.id,
-      ...promptDateAnchors(today),
-    }),
-    schema: teamVoiceDelegateResponseSchema,
-    media: [{ mimeType: audio.mimeType, buffer: audio.buffer }],
-    temperature: temperatureFor("delegation"),
-    thinkingBudget: AI_THINKING_BUDGET.delegation,
-    timeoutMs: AI_TIMEOUT_MS.media,
-    label: "team-voice",
-    onRaw: logRaw("team-voice", manager.id),
-  });
+  const aiResponse = await withTrace(
+    {
+      name: "team-voice-delegate",
+      userId: manager.id,
+      model: modelFor("delegation"),
+      input: {
+        mimeType: audio.mimeType,
+        bytes: audio.buffer.length,
+        directorySize: directory.length,
+      },
+    },
+    () =>
+      generateStructured({
+        model: modelFor("delegation"),
+        prompt: buildTeamVoiceDelegatePrompt({
+          directory,
+          selfUserId: manager.id,
+          ...promptDateAnchors(today),
+        }),
+        schema: teamVoiceDelegateResponseSchema,
+        media: [{ mimeType: audio.mimeType, buffer: audio.buffer }],
+        temperature: temperatureFor("delegation"),
+        thinkingBudget: AI_THINKING_BUDGET.delegation,
+        timeoutMs: AI_TIMEOUT_MS.media,
+        label: "team-voice",
+        onRaw: logRaw("team-voice", manager.id),
+      }),
+  );
 
   // Audit copy to S3 (best-effort, after AI so a storage hiccup never fails the result).
   const audioUrl = await storeCaptureMedia("voice", manager.orgId, manager.id, audio);
