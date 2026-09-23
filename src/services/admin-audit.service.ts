@@ -389,15 +389,37 @@ export async function listOrgInteractions(
 // ───────────────────────────────────────────────────────────────────────────
 // Single interaction — full input, AI output, and presigned media.
 // ───────────────────────────────────────────────────────────────────────────
+/**
+ * Root's audit view of ONE interaction. The point of this screen is to see what
+ * the model was actually given, so `input` is always the HUMAN side (transcript,
+ * extracted text, typed note, meeting notes) and `summary` is the model's prose
+ * output. They used to be the same field for meetings, which meant the typed
+ * notes — often the only real input on a notes/photo meeting — were invisible here.
+ *
+ * The meeting-only fields are optional because the other four surfaces have no
+ * equivalent; they are omitted rather than sent as null.
+ */
 export interface InteractionDetail {
   id: string;
   type: InteractionType;
   user: { id: string; name: string } | null;
   createdAt: string;
-  input: string; // transcript / extractedText / inputText / meeting summary
+  input: string; // transcript / extractedText / inputText / meeting notes
   actions: unknown[];
   recommendations: unknown[];
   media: { key: string; url: string | null }[];
+  /** AI-written narrative. Meetings only today. */
+  summary?: string | undefined;
+  title?: string | undefined;
+  agenda?: string | undefined;
+  /** Per-meeting prompt override, when the user supplied one. */
+  customPrompt?: string | undefined;
+  /**
+   * Resolved from `Meeting.attendeeIds` — the exact list handed to the prompt.
+   * Worth surfacing: the model can only attribute to the names it was given, so
+   * a wrong attendee list shows up as a wrong name in the summary.
+   */
+  attendees?: { id: string; name: string; designation: string | null }[] | undefined;
 }
 
 async function signKeys(keys: (string | null | undefined)[]): Promise<InteractionDetail["media"]> {
@@ -478,14 +500,27 @@ export async function getInteractionDetail(
   }
   const r = await prisma.meeting.findUnique({ where: { id } });
   if (!r) throw new NotFoundError("Meeting", id);
+  // Attendees are stored as a loose String[] (no FK), so ids can outlive the user
+  // they pointed at — resolve what still exists rather than failing the whole view.
+  const attendees = await prisma.user.findMany({
+    where: { id: { in: r.attendeeIds } },
+    select: { id: true, name: true, designation: true },
+  });
   return {
     id: r.id,
     type,
     user: await userName(r.userId),
     createdAt: r.createdAt.toISOString(),
-    input: r.summary ?? r.title,
+    // The human side: what the user typed. Most meetings carry no audio at all,
+    // so these notes are frequently the only real input the model received.
+    input: r.notes ?? "",
     actions: asArray(r.actions),
     recommendations: asArray(r.recommendations),
     media: await signKeys(r.mediaKeys),
+    title: r.title,
+    attendees,
+    ...(r.summary !== null && { summary: r.summary }),
+    ...(r.agenda !== null && { agenda: r.agenda }),
+    ...(r.customPrompt !== null && { customPrompt: r.customPrompt }),
   };
 }
