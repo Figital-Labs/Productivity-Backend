@@ -20,6 +20,45 @@ jobs:
           chmod 600 ~/.ssh/prod_key
           ssh-keyscan -H "${{ vars.PROD_HOST }}" >> ~/.ssh/known_hosts
 
+      # The host's .env is maintained by hand — the deploy has never written it.
+      # Only the four tracing variables are touched here, and only by deleting
+      # and re-appending those exact lines, so nothing else in that file is at
+      # risk. Without this step the tracing merged in #1 and #3 stays a silent
+      # no-op: src/lib/langfuse.ts starts no SDK unless both keys are present,
+      # which is why Day Planner produced no traces at all despite making ~2,500
+      # Vertex calls a month.
+      #
+      # The keys go over stdin rather than the command line: an ssh argument is
+      # visible in `ps` on the host for the life of the command.
+      - name: Install Langfuse credentials
+        env:
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+        run: |
+          if [ -z "${LANGFUSE_PUBLIC_KEY:-}" ] || [ -z "${LANGFUSE_SECRET_KEY:-}" ]; then
+            echo "::warning::LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY are not set." \
+                 "Deploying without tracing — Gemini calls will not reach Langfuse."
+            exit 0
+          fi
+          printf '%s\n%s\n' "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" \
+            | ssh -i ~/.ssh/prod_key "${{ vars.PROD_USER }}@${{ vars.PROD_HOST }}" '
+              set -euo pipefail
+              umask 077
+              read -r PK
+              read -r SK
+              cd ~/day-planner/Productivity-Backend
+              touch .env
+              sed -i "/^LANGFUSE_BASE_URL=/d;/^LANGFUSE_PUBLIC_KEY=/d;/^LANGFUSE_SECRET_KEY=/d;/^LANGFUSE_TRACING_ENVIRONMENT=/d" .env
+              {
+                echo "LANGFUSE_BASE_URL=https://langfuse.figitallabs.com"
+                echo "LANGFUSE_PUBLIC_KEY=$PK"
+                echo "LANGFUSE_SECRET_KEY=$SK"
+                echo "LANGFUSE_TRACING_ENVIRONMENT=production"
+              } >> .env
+              chmod 600 .env
+              echo "langfuse keys installed for $(echo "$PK" | cut -c1-11)…"
+            '
+
       - name: Deploy over SSH
         run: |
           ssh -i ~/.ssh/prod_key "${{ vars.PROD_USER }}@${{ vars.PROD_HOST }}" '
