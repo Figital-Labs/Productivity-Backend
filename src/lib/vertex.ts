@@ -187,6 +187,13 @@ function thinkingConfigFor(model: string, budget: number): Record<string, unknow
     : { thinkingBudget: budget };
 }
 
+// Vertex billing labels; values must be lowercase [a-z0-9_-].
+const GEMINI_LABELS = {
+  project: "day-planner",
+  service: "day-planner-backend",
+  env: env.nodeEnv === "production" ? "prod" : "dev",
+};
+
 function buildConfig(
   model: string,
   opts: CommonGenOptions,
@@ -198,6 +205,7 @@ function buildConfig(
     ...(opts.thinkingBudget !== undefined && {
       thinkingConfig: thinkingConfigFor(model, opts.thinkingBudget),
     }),
+    labels: GEMINI_LABELS,
     ...extra,
   };
 }
