@@ -1,5 +1,11 @@
 name: Deploy to production
 
+# Production runs on GCP (project figitallabs-prod, asia-south1):
+#   worker job: pg-boss worker on the VM fc-estimate-arm-day-planner-pii-masking (IAP SSH, pm2 day-planner-worker).
+#               Also runs `prisma migrate deploy` (the VM has the DB route; GitHub runners do not).
+#   api job:    image built here, pushed to Artifact Registry, rolled out to Cloud Run service day-planner-api.
+# The API env lives in Secret Manager `day-planner-api-env` and is maintained by hand; this workflow only
+# merges the four Langfuse tracing keys into it (and into the VM's .env), exactly what the old EC2 deploy did.
 on:
   push:
     branches: [master]
@@ -9,67 +15,160 @@ concurrency:
   group: deploy-prod
   cancel-in-progress: false
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/prod_key
-          chmod 600 ~/.ssh/prod_key
-          ssh-keyscan -H "${{ vars.PROD_HOST }}" >> ~/.ssh/known_hosts
+permissions:
+  id-token: write
+  contents: read
 
-      # The host's .env is maintained by hand — the deploy has never written it.
-      # Only the four tracing variables are touched here, and only by deleting
-      # and re-appending those exact lines, so nothing else in that file is at
-      # risk. Without this step the tracing merged in #1 and #3 stays a silent
-      # no-op: src/lib/langfuse.ts starts no SDK unless both keys are present,
-      # which is why Day Planner produced no traces at all despite making ~2,500
-      # Vertex calls a month.
-      #
-      # The keys go over stdin rather than the command line: an ssh argument is
-      # visible in `ps` on the host for the life of the command.
-      - name: Install Langfuse credentials
+env:
+  GCP_PROJECT: figitallabs-prod
+  WIF_PROVIDER: projects/50091251946/locations/global/workloadIdentityPools/github/providers/github-actions
+  VM: fc-estimate-arm-day-planner-pii-masking
+  ZONE: asia-south1-a
+  IMAGE: asia-south1-docker.pkg.dev/figitallabs-prod/apps/day-planner-api:${{ github.sha }}
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: gh-deploy-day-planner-worker@figitallabs-prod.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy worker on VM
+        env:
+          # Private repo and the VM holds no git credentials: the job token goes over ssh stdin (not argv)
+          # and is used for this one fetch only.
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LANGFUSE_PUBLIC_KEY:-}" ] || [ -z "${LANGFUSE_SECRET_KEY:-}" ]; then
+            echo "::warning::LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY are not set; leaving the VM's tracing keys as they are."
+          fi
+          {
+            printf 'TOKEN=%q\nSHA=%q\nPK=%q\nSK=%q\n' "$GH_TOKEN" "$SHA" "${LANGFUSE_PUBLIC_KEY:-}" "${LANGFUSE_SECRET_KEY:-}"
+            cat <<'REMOTE'
+          set -euo pipefail
+          H=/home/ubuntu/day-planner
+          cd "$H/Productivity-Backend"
+
+          git -c http.extraHeader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)" \
+            fetch --quiet origin "$SHA"
+          unset TOKEN
+          git reset --hard "$SHA"
+          echo "Deploying $(git log -1 --oneline)"
+
+          if [ -n "$PK" ] && [ -n "$SK" ]; then
+            umask 077
+            touch .env
+            sed -i "/^LANGFUSE_BASE_URL=/d;/^LANGFUSE_PUBLIC_KEY=/d;/^LANGFUSE_SECRET_KEY=/d;/^LANGFUSE_TRACING_ENVIRONMENT=/d" .env
+            {
+              echo "LANGFUSE_BASE_URL=https://langfuse.figitallabs.com"
+              echo "LANGFUSE_PUBLIC_KEY=$PK"
+              echo "LANGFUSE_SECRET_KEY=$SK"
+              echo "LANGFUSE_TRACING_ENVIRONMENT=production"
+            } >> .env
+            chmod 600 .env
+          fi
+          unset PK SK
+
+          npm ci
+          npx prisma generate
+          npx prisma migrate deploy
+          npm run build
+
+          if pm2 describe day-planner-worker >/dev/null 2>&1; then
+            pm2 restart day-planner-worker
+          else
+            echo "day-planner-worker not registered in pm2; starting it from the staged ecosystem file"
+            pm2 start "$H/worker.ecosystem.config.js"
+          fi
+          pm2 save
+
+          sleep 10
+          [ "$(pm2 jlist | node -e 'const l=JSON.parse(require("fs").readFileSync(0,"utf8"));const a=l.find(x=>x.name==="day-planner-worker");console.log(a?a.pm2_env.status:"missing")')" = online ] \
+            || { echo "day-planner-worker is not online after deploy" >&2; pm2 logs day-planner-worker --lines 30 --nostream >&2 || true; exit 1; }
+          pm2 status
+          REMOTE
+          } | gcloud compute ssh "$VM" --zone "$ZONE" --project "$GCP_PROJECT" --tunnel-through-iap --quiet \
+                --command 'sudo -u ubuntu -H bash -l -s'
+
+  api:
+    # After the worker job so migrations are applied before the new API revision takes traffic.
+    needs: worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: gh-deploy@figitallabs-prod.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Merge Langfuse keys into Secret Manager
         env:
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
         run: |
+          set -euo pipefail
           if [ -z "${LANGFUSE_PUBLIC_KEY:-}" ] || [ -z "${LANGFUSE_SECRET_KEY:-}" ]; then
-            echo "::warning::LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY are not set." \
-                 "Deploying without tracing — Gemini calls will not reach Langfuse."
+            echo "::warning::LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY are not set; leaving day-planner-api-env unchanged."
             exit 0
           fi
-          printf '%s\n%s\n' "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" \
-            | ssh -i ~/.ssh/prod_key "${{ vars.PROD_USER }}@${{ vars.PROD_HOST }}" '
-              set -euo pipefail
-              umask 077
-              read -r PK
-              read -r SK
-              cd ~/day-planner/Productivity-Backend
-              touch .env
-              sed -i "/^LANGFUSE_BASE_URL=/d;/^LANGFUSE_PUBLIC_KEY=/d;/^LANGFUSE_SECRET_KEY=/d;/^LANGFUSE_TRACING_ENVIRONMENT=/d" .env
-              {
-                echo "LANGFUSE_BASE_URL=https://langfuse.figitallabs.com"
-                echo "LANGFUSE_PUBLIC_KEY=$PK"
-                echo "LANGFUSE_SECRET_KEY=$SK"
-                echo "LANGFUSE_TRACING_ENVIRONMENT=production"
-              } >> .env
-              chmod 600 .env
-              echo "langfuse keys installed for $(echo "$PK" | cut -c1-11)…"
-            '
+          cur=$(gcloud secrets versions access latest --secret=day-planner-api-env --project="$GCP_PROJECT")
+          [ -n "$cur" ] || { echo "day-planner-api-env is empty; refusing to touch it"; exit 1; }
+          # Only these four lines are replaced; everything else in the secret (CORS_ORIGINS etc.) is left as is.
+          rest=$(printf '%s\n' "$cur" | sed -E '/^(LANGFUSE_BASE_URL|LANGFUSE_PUBLIC_KEY|LANGFUSE_SECRET_KEY|LANGFUSE_TRACING_ENVIRONMENT)=/d')
+          new=$(printf '%s\nLANGFUSE_BASE_URL=%s\nLANGFUSE_PUBLIC_KEY=%s\nLANGFUSE_SECRET_KEY=%s\nLANGFUSE_TRACING_ENVIRONMENT=%s\n' \
+            "$rest" "https://langfuse.figitallabs.com" "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" production)
+          if [ "$new" != "$cur" ]; then
+            printf '%s\n' "$new" | gcloud secrets versions add day-planner-api-env --project="$GCP_PROJECT" --data-file=- >/dev/null
+            echo "day-planner-api-env: new version added"
+          else
+            echo "day-planner-api-env: unchanged"
+          fi
 
-      - name: Deploy over SSH
+      - name: Build and push image
         run: |
-          ssh -i ~/.ssh/prod_key "${{ vars.PROD_USER }}@${{ vars.PROD_HOST }}" '
-            set -euo pipefail
-            cd ~/day-planner/Productivity-Backend
-            git fetch origin master
-            git reset --hard origin/master
-            npm ci
-            npx prisma generate
-            npx prisma migrate deploy
-            npm run build
-            pm2 restart day-planner-backend
-            pm2 save
-          '
+          # Dockerfile kept out of the repo (same as the manual Cloud Run deploy): /app/.env -> /secrets/env mount.
+          cat > Dockerfile.cloudrun <<'DOCKERFILE'
+          FROM node:22-slim AS build
+          WORKDIR /app
+          RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+          COPY package.json package-lock.json prisma.config.ts ./
+          COPY prisma ./prisma
+          ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
+          RUN npm ci
+          COPY . .
+          RUN npx prisma generate && npm run build
+
+          FROM node:22-slim
+          WORKDIR /app
+          ENV NODE_ENV=production PORT=8000
+          RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+          COPY --from=build /app/node_modules ./node_modules
+          COPY --from=build /app/dist ./dist
+          COPY --from=build /app/package.json ./package.json
+          COPY --from=build /app/prisma ./prisma
+          COPY --from=build /app/prisma.config.ts ./prisma.config.ts
+          RUN ln -s /secrets/env /app/.env
+          USER node
+          EXPOSE 8000
+          CMD ["node", "dist/index.js"]
+          DOCKERFILE
+          gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
+          docker build -f Dockerfile.cloudrun -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Deploy to Cloud Run
+        # Only swaps the image; secret mount, VPC egress, scaling, ingress and runtime SA stay as configured on the service.
+        run: gcloud run deploy day-planner-api --image="$IMAGE" --region=asia-south1 --project="$GCP_PROJECT" --quiet
