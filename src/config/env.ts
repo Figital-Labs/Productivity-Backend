@@ -75,15 +75,16 @@ const EnvSchema = z.object({
     ),
   JWT_SECRET: z.string().min(32),
   JWT_TTL: z.string().min(1).default("30d"),
-  // --- Object storage. `STORAGE_DRIVER=s3` (prod, default) requires the AWS_* creds and
-  // fails fast at boot if any is missing. `STORAGE_DRIVER=disk` (local dev) writes media to
-  // a local folder so a dev without AWS creds can still run the full pipeline. ---
-  STORAGE_DRIVER: z.enum(["s3", "disk"]).default("s3"),
-  AWS_REGION: z.string().min(1).optional(),
+  // --- Object storage. `STORAGE_DRIVER=gcs` (prod, default) requires AWS_BUCKET_NAME (the GCS bucket;
+  // name kept from the S3 era) and authenticates with Application Default Credentials — fails fast
+  // at boot if the bucket is missing. `s3` is accepted as a legacy alias of `gcs` so an old env
+  // keeps booting. `STORAGE_DRIVER=disk` (local dev) writes media to a local folder. ---
+  STORAGE_DRIVER: z
+    .enum(["gcs", "s3", "disk"])
+    .default("gcs")
+    .transform((d) => (d === "s3" ? "gcs" : d)),
   AWS_BUCKET_NAME: z.string().min(1).optional(),
-  AWS_ACCESS_KEY_ID: z.string().min(1).optional(),
-  AWS_SECRET_ACCESS_KEY: z.string().min(1).optional(),
-  // OPTIONAL top-level S3 folder. Empty (default) for a bucket DEDICATED to this app → keys are
+  // OPTIONAL top-level bucket folder. Empty (default) for a bucket DEDICATED to this app → keys are
   // surface-first: `<surface>/<org>/<owner>/<uuid>`. Set a value only to share a bucket with
   // other data. Either way the surface segment (meetings/voice/image) is what lifecycle rules target.
   MEDIA_KEY_PREFIX: z.string().default(""),
@@ -125,32 +126,22 @@ if (!parsed.success) {
   process.exit(1);
 }
 
-// Resolve S3 config under the s3 driver — all four AWS_* vars required (a clear boot failure,
-// not a vague error on the first upload). The disk driver needs none of them. Destructuring +
-// the `process.exit` (never) guard narrows the values to `string`, so the object is null-free
-// without a non-null assertion.
-interface S3Config {
+// Resolve GCS config under the gcs driver — a clear boot failure, not a vague error on the first
+// upload. The disk driver needs none of it.
+interface GcsConfig {
   bucket: string;
-  region: string;
-  accessKeyId: string;
-  secretAccessKey: string;
 }
-let s3Config: S3Config | null = null;
-if (parsed.data.STORAGE_DRIVER === "s3") {
-  const { AWS_BUCKET_NAME, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY } = parsed.data;
-  if (!AWS_BUCKET_NAME || !AWS_REGION || !AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
+let gcsConfig: GcsConfig | null = null;
+if (parsed.data.STORAGE_DRIVER === "gcs") {
+  const { AWS_BUCKET_NAME } = parsed.data;
+  if (!AWS_BUCKET_NAME) {
     console.error(
-      "STORAGE_DRIVER=s3 but one or more AWS_* vars are missing. " +
-        "Set them, or use STORAGE_DRIVER=disk for local dev.",
+      "STORAGE_DRIVER=gcs but AWS_BUCKET_NAME is missing. " +
+        "Set it, or use STORAGE_DRIVER=disk for local dev.",
     );
     process.exit(1);
   }
-  s3Config = {
-    bucket: AWS_BUCKET_NAME,
-    region: AWS_REGION,
-    accessKeyId: AWS_ACCESS_KEY_ID,
-    secretAccessKey: AWS_SECRET_ACCESS_KEY,
-  };
+  gcsConfig = { bucket: AWS_BUCKET_NAME };
 }
 
 export const env = {
@@ -185,8 +176,8 @@ export const env = {
   // Always present (used to build keys regardless of driver).
   mediaKeyPrefix: parsed.data.MEDIA_KEY_PREFIX,
   diskStorageDir: parsed.data.DISK_STORAGE_DIR,
-  // Non-null only under the s3 driver (resolved + validated above).
-  s3: s3Config,
+  // Non-null only under the gcs driver (resolved + validated above).
+  gcs: gcsConfig,
   meetingWorkerConcurrency: parsed.data.MEETING_WORKER_CONCURRENCY,
   captureWorkerConcurrency: parsed.data.CAPTURE_WORKER_CONCURRENCY,
   presignUploadExpirySeconds: parsed.data.PRESIGN_UPLOAD_EXPIRY_SECONDS,

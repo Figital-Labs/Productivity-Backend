@@ -12,8 +12,8 @@ The backend runs as **one process**: the HTTP server plus the pg-boss meeting wo
 | `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`                    | Vertex AI.                                                                                                                                                                                                                                                                                                |
 | `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_TRACING_ENVIRONMENT` | Langfuse tracing of Gemini calls (optional — no-op when the keys are absent). Set `LANGFUSE_TRACING_ENVIRONMENT=production` on prod.                                                                                                                                                                      |
 | `JWT_SECRET`                                                                                      | ≥ 32 chars.                                                                                                                                                                                                                                                                                               |
-| `STORAGE_DRIVER`                                                                                  | `s3` (default, prod) or `disk` (local dev, no AWS).                                                                                                                                                                                                                                                       |
-| `AWS_REGION`, `AWS_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`                     | Required when `STORAGE_DRIVER=s3` (boot fails fast if any is missing).                                                                                                                                                                                                                                    |
+| `STORAGE_DRIVER`                                                                                  | `gcs` (default, prod; `s3` is a legacy alias) or `disk` (local dev, no cloud).                                                                                                                                                                                                                                                     |
+| `AWS_BUCKET_NAME` | GCS bucket name (name kept from the S3 era); required when `STORAGE_DRIVER=gcs`. Auth via ADC; the runtime SA needs `roles/storage.objectAdmin` on the bucket and `roles/iam.serviceAccountTokenCreator` on itself (V4 signing). |                                                                                                                                                                                                                                    |
 | `MEDIA_KEY_PREFIX`                                                                                | Optional. **Empty** (default) for a dedicated bucket → keys are surface-first: `<surface>/<org>/<owner>/<uuid>`. Set a value only when sharing a bucket.                                                                                                                                                  |
 | `CORS_ORIGINS`                                                                                    | Comma-separated frontend origins (or `*`).                                                                                                                                                                                                                                                                |
 | `MEETING_WORKER_CONCURRENCY` / `CAPTURE_WORKER_CONCURRENCY`                                       | Per-poll batch sizes (default `2` / `3`). Meetings hold ~90 MB in RAM each — keep theirs low and size the worker box for `MEETING_WORKER_CONCURRENCY × ~120 MB`.                                                                                                                                          |
@@ -32,19 +32,19 @@ catch-up migration `20260619120000_add_processing_job_and_meeting_media_keys` cr
 - **>1 replica:** run `prisma migrate deploy` as a one-off **release task** and start the app
   containers with just `node dist/index.js`, so replicas don't race on migration.
 
-## S3 bucket — CORS (enables direct browser→S3 upload)
+## GCS bucket — CORS (enables direct browser→GCS upload)
 
 Direct upload is a progressive enhancement: until CORS is set, clips upload through the backend
-(byte fallback) and everything still works. To turn on direct-to-S3, set bucket CORS:
+(byte fallback) and everything still works. To turn on direct-to-GCS, set bucket CORS
+(`gcloud storage buckets update gs://<bucket> --cors-file=cors.json`):
 
 ```json
 [
   {
-    "AllowedMethods": ["POST"],
-    "AllowedOrigins": ["https://your-frontend-origin"],
-    "AllowedHeaders": ["*"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3000
+    "method": ["POST"],
+    "origin": ["https://your-frontend-origin"],
+    "responseHeader": ["Content-Type"],
+    "maxAgeSeconds": 3000
   }
 ]
 ```

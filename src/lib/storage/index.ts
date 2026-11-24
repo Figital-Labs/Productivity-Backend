@@ -1,13 +1,13 @@
 /**
  * Object-storage seam (ADR-0023). All media (audio/images) flows through this
  * `BlobStorage` interface so the backend never hard-codes a cloud vendor. Two
- * implementations: `S3Storage` (prod) and `DiskStorage` (local dev, no AWS creds) —
- * selected by `STORAGE_DRIVER`. A future GCS/R2 swap is one more file (Strategy + Adapter).
+ * implementations: `GcsStorage` (prod) and `DiskStorage` (local dev, no cloud creds) —
+ * selected by `STORAGE_DRIVER`. A future R2 swap is one more file (Strategy + Adapter).
  *
  * `storage` is a process-wide singleton (same discipline as `prisma` and the Vertex
  * client): one client reused across every request and the in-process worker.
  *
- * Direct-to-S3 upload + signed read are first-class here so the web process never has to
+ * Direct-to-GCS upload + signed read are first-class here so the web process never has to
  * shovel audio bytes: the browser presigns → uploads to storage → sends the key; the worker
  * `download`s the key to inline to Gemini (which can't read `s3://`). `createPresignedUpload`
  * returns `null` when the driver can't presign (disk) — callers then fall back to a byte
@@ -16,7 +16,7 @@
 import { env } from "../../config/env.js";
 
 import { DiskStorage } from "./disk.js";
-import { S3Storage } from "./s3.js";
+import { GcsStorage } from "./gcs.js";
 
 export interface BlobMeta {
   contentType: string;
@@ -55,4 +55,4 @@ export interface BlobStorage {
 export const MAX_MEDIA_BYTES = 10 * 1024 * 1024;
 
 export const storage: BlobStorage =
-  env.storageDriver === "s3" ? new S3Storage() : new DiskStorage();
+  env.storageDriver === "gcs" ? new GcsStorage() : new DiskStorage();
