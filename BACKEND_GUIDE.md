@@ -769,11 +769,10 @@ These are intentional deferrals for the POC. Frontend should not expect any of t
 
 - **Node 22+**, **npm 10+**
 - **Docker** running locally (for Postgres) OR a hosted Postgres
-- **Google Cloud project** with Vertex AI enabled + a service account JSON key
+- **Google Cloud project** with Vertex AI enabled + Application Default Credentials (`gcloud auth application-default login`)
 - **`.env`** file in the project root with at least:
   ```
   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/tasklist"
-  GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
   GOOGLE_CLOUD_PROJECT=your-gcp-project-id
   GOOGLE_CLOUD_LOCATION=us-central1
   JWT_SECRET=replace-with-at-least-32-random-characters

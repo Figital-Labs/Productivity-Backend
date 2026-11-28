@@ -64,6 +64,18 @@ jobs:
           git reset --hard "$SHA"
           echo "Deploying $(git log -1 --oneline)"
 
+          # Vertex and GCS use the VM's attached service account (ADC). Drop any key left in .env;
+          # the JSON value may span lines, so skip to the line that closes its single quote.
+          if [ -f .env ]; then
+            awk '
+              skip { if ($0 ~ /\047[ \t]*$/) skip = 0; next }
+              /^GOOGLE_APPLICATION_CREDENTIALS=/ { next }
+              /^GOOGLE_SERVICE_ACCOUNT_JSON=/ { if ($0 ~ /=\047/ && $0 !~ /=\047.*\047[ \t]*$/) skip = 1; next }
+              { print }' .env > .env.keyless
+            cat .env.keyless > .env
+            rm -f .env.keyless
+          fi
+
           if [ -n "$PK" ] && [ -n "$SK" ]; then
             umask 077
             touch .env
