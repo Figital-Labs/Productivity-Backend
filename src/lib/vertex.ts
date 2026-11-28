@@ -18,14 +18,13 @@ import { log } from "./logger.js";
 
 /**
  * Single GoogleGenAI client for the lifetime of the process. Constructed with
- * Vertex AI credentials parsed at boot in `src/config/env.ts`. Reuse this
+ * Vertex AI project/location from `src/config/env.ts`; auth is ADC (no key file). Reuse this
  * instance across every Vertex call — the SDK manages its own request pool.
  */
 const ai = new GoogleGenAI({
   vertexai: true,
   project: env.gcp.project,
   location: env.gcp.location,
-  googleAuthOptions: { credentials: env.gcp.credentials },
 });
 
 /**

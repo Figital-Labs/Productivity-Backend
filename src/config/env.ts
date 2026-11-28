@@ -6,20 +6,6 @@ import { z } from "zod";
 // left the app pointed at a dead localhost DB while `.env` had the right Neon URL).
 loadEnv({ override: true });
 
-const ServiceAccountSchema = z.object({
-  type: z.literal("service_account"),
-  project_id: z.string(),
-  private_key_id: z.string(),
-  private_key: z.string(),
-  client_email: z.string(),
-  client_id: z.string(),
-  auth_uri: z.string(),
-  token_uri: z.string(),
-  auth_provider_x509_cert_url: z.string(),
-  client_x509_cert_url: z.string(),
-  universe_domain: z.string(),
-});
-
 const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   // pg-boss needs a session-mode (direct/unpooled) connection: its LISTEN/NOTIFY +
@@ -27,21 +13,8 @@ const EnvSchema = z.object({
   // Falls back to DATABASE_URL for local/non-pooled Postgres; the queue guards against
   // a `-pooler` URL at boot (see jobs/queue.ts).
   DIRECT_DATABASE_URL: z.string().min(1).optional(),
-  GOOGLE_SERVICE_ACCOUNT_JSON: z
-    .string()
-    .min(1)
-    .transform((raw, ctx) => {
-      try {
-        return JSON.parse(raw) as unknown;
-      } catch {
-        ctx.addIssue({
-          code: "custom",
-          message: "GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON",
-        });
-        return z.NEVER;
-      }
-    })
-    .pipe(ServiceAccountSchema),
+  // Vertex auth is ADC (the attached service account). A leftover GOOGLE_SERVICE_ACCOUNT_JSON in
+  // the env is ignored, so removing it from a deployed env needs no coordination with this release.
   GOOGLE_CLOUD_PROJECT: z.string().min(1),
   GOOGLE_CLOUD_LOCATION: z.string().min(1),
   // --- Gemini model selection. `gemini-2.5-flash` retires on Vertex AI (Oct 2026), so the
@@ -155,7 +128,6 @@ export const env = {
   jwtSecret: parsed.data.JWT_SECRET,
   jwtTtl: parsed.data.JWT_TTL,
   gcp: {
-    credentials: parsed.data.GOOGLE_SERVICE_ACCOUNT_JSON,
     project: parsed.data.GOOGLE_CLOUD_PROJECT,
     location: parsed.data.GOOGLE_CLOUD_LOCATION,
   },

@@ -41,8 +41,7 @@ Verify with `curl http://localhost:3000/livez` → `{"status":"ok"}`.
 - **Docker** (for the local Postgres container; you can also use a hosted Postgres)
 - **A Google Cloud project** with:
   - **Vertex AI API enabled**
-  - **A service account** with role `roles/aiplatform.user`
-  - **A JSON key** for that service account (downloaded as a `.json` file from the GCP console)
+  - **Application Default Credentials** with `roles/aiplatform.user` (locally `gcloud auth application-default login`; on Cloud Run / a VM the attached service account). No JSON key.
 - **No global Prisma install needed** — we use the local one via `npx`.
 
 ---
@@ -70,21 +69,9 @@ Symptom of stale client: typecheck fails with `Module has no exported member 'Ta
 
 Copy `.env.example` to `.env` and fill in your actual values. The repo's existing `.env` (if present locally) contains real Vertex credentials and **must never be committed**. The pre-commit hook does NOT block this — it's your responsibility.
 
-### 3. Service account credentials go INLINE in the env var, not as a file path
+### 3. Google auth is ADC, not a key
 
-`GOOGLE_SERVICE_ACCOUNT_JSON` is the literal JSON string, single-quoted. NOT a path to a JSON file.
-
-```bash
-# ✓ Correct — single-quoted JSON
-GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...","client_email":"..."}'
-
-# ✗ Wrong — this is a file path, will fail
-GOOGLE_SERVICE_ACCOUNT_JSON=./secrets/sa.json
-```
-
-Why inline? Better for PaaS portability (Render, Railway, Fly.io, Cloud Run all read env vars; none of them have a "mount a JSON file" pattern). See `.agents/decisions/0002-vertex-credentials.md` for the full reasoning.
-
-**Single-quoting matters** — it stops dotenv from expanding `$` and processing escape sequences. The newlines inside `private_key` are literal `\n` characters that need to survive into the env var as-is.
+There is no `GOOGLE_SERVICE_ACCOUNT_JSON` any more. Locally run `gcloud auth application-default login` (the account needs `roles/aiplatform.user` on `GOOGLE_CLOUD_PROJECT`). Deployed, the attached service account is used automatically. Service-account JSON keys must not be created or committed.
 
 ### 4. Postgres 18 changed its volume mount convention
 
@@ -332,17 +319,17 @@ docker exec -it task-list-postgres psql -U postgres -d tasklist
 
 ## Troubleshooting
 
-| Symptom                                     | Likely cause                                    | Fix                                                                                   |
-| ------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `Module has no exported member 'Task'`      | Stale Prisma client                             | `npx prisma generate`                                                                 |
-| `Module has no exported member 'TaskModel'` | Schema doesn't have that model yet              | Check `prisma/schema.prisma`                                                          |
-| `Cannot find module './foo.js'`             | Missing `.js` extension or wrong filename       | NodeNext ESM rule — see Gotcha #7                                                     |
-| `prisma migrate dev` hangs                  | Postgres not reachable                          | Check Docker container is up and on port 5432                                         |
-| `Invalid environment variables` on startup  | `.env` missing or malformed                     | Compare against `.env.example`; check single-quoting on `GOOGLE_SERVICE_ACCOUNT_JSON` |
-| Vertex AI returns 403                       | Service account missing `roles/aiplatform.user` | Grant role in GCP IAM                                                                 |
-| Vertex AI returns 404 model not found       | Wrong region for the model                      | `GOOGLE_CLOUD_LOCATION=us-central1` works for `gemini-2.5-flash`                      |
-| `/readyz` returns 503                       | DB unreachable                                  | Check Postgres container; `docker ps`                                                 |
-| Pre-commit hook fails                       | Lint or format issue on staged files            | `npm run lint:fix && npm run format`, then re-stage                                   |
+| Symptom                                     | Likely cause                                    | Fix                                                              |
+| ------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------- |
+| `Module has no exported member 'Task'`      | Stale Prisma client                             | `npx prisma generate`                                            |
+| `Module has no exported member 'TaskModel'` | Schema doesn't have that model yet              | Check `prisma/schema.prisma`                                     |
+| `Cannot find module './foo.js'`             | Missing `.js` extension or wrong filename       | NodeNext ESM rule — see Gotcha #7                                |
+| `prisma migrate dev` hangs                  | Postgres not reachable                          | Check Docker container is up and on port 5432                    |
+| `Invalid environment variables` on startup  | `.env` missing or malformed                     | Compare against `.env.example`; check the required vars          |
+| Vertex AI returns 403                       | Service account missing `roles/aiplatform.user` | Grant role in GCP IAM                                            |
+| Vertex AI returns 404 model not found       | Wrong region for the model                      | `GOOGLE_CLOUD_LOCATION=us-central1` works for `gemini-2.5-flash` |
+| `/readyz` returns 503                       | DB unreachable                                  | Check Postgres container; `docker ps`                            |
+| Pre-commit hook fails                       | Lint or format issue on staged files            | `npm run lint:fix && npm run format`, then re-stage              |
 
 ---
 
